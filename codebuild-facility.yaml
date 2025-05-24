@@ -1,28 +1,19 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'CloudFormation template for creating S3 bucket and CodeBuild project'
+Description: |
+  CloudFormation template for CodeBuild project for GitHub Actions runner instead of the GitHub Actions default. 
+  Follow https://docs.aws.amazon.com/codebuild/latest/userguide/action-runner.html#sample-github-action-runners-config to update GitHub Actions workflows to complete setup.
 
 Parameters:
-  BucketName:
+  GitHubOwner:
     Type: String
-    Description: Name of the S3 bucket to create
-    Default: code-build-source-bucket
+    Description: GitHub repository owner. If you have forked this project, then the owner is likely your GitHub Profile Name.
+    Default: "aws-samples"
+  GitHubRepository:
+    Type: String
+    Description: GitHub repository name
+    Default: "sample-aws-security-incident-response-integrations"
 
 Resources:
-  SourceBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Ref BucketName
-      VersioningConfiguration:
-        Status: Enabled
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-         - ServerSideEncryptionByDefault:
-             SSEAlgorithm: AES256
   CodeBuildLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -61,17 +52,21 @@ Resources:
                   - !Sub ${CodeBuildLogGroup.Arn}:*
               - Effect: Allow
                 Action:
-                  - s3:ListBucket
-                  - s3:GetObject
-                  - s3:GetObjectVersion
-                Resource:
-                  - !GetAtt SourceBucket.Arn
-                  - !Sub ${SourceBucket.Arn}/*
+                  - ssm:GetParameters
+                Resource: '*'
+
+  GitHubRunnerToken:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /github/runner/${GitHubOwner}/${GitHubRepository}/token
+      Type: SecureString
+      Value: !Ref GitHubToken
+      Description: GitHub token for runner registration
 
   CodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: pytest-runner
+      Name: github-actions-runner
       ServiceRole: !GetAtt CodeBuildServiceRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
@@ -80,22 +75,29 @@ Resources:
         ComputeType: BUILD_GENERAL1_MEDIUM
         Image: aws/codebuild/amazonlinux-x86_64-standard:5.0
         PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: GITHUB_OWNER
+            Value: !Ref GitHubOwner
+          - Name: GITHUB_REPO
+            Value: !Ref GitHubRepository
+          - Name: GITHUB_TOKEN_PARAMETER
+            Value: !Sub /github/runner/${GitHubOwner}/${GitHubRepository}/token
       Source:
-        Type: S3
-        Location: !Sub ${BucketName}/source.zip
-        BuildSpec: buildspec.yml
+        Type: GITHUB
+        Location: !Sub https://github.com/${GitHubOwner}/${GitHubRepository}.git
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - echo "This is ignored in favor of the GitHub Actions Workflows"
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED
           GroupName: !Sub /aws/codebuild/${AWS::StackName}
+      TimeoutInMinutes: 480
 
 Outputs:
-  BucketName:
-    Description: Name of the created S3 bucket
-    Value: !Ref SourceBucket
   CodeBuildProjectName:
     Description: Name of the CodeBuild project
     Value: !Ref CodeBuildProject
-  LogGroupName:
-    Description: Name of the created CloudWatch Log Group
-    Value: !Sub /aws/codebuild/${AWS::StackName}
