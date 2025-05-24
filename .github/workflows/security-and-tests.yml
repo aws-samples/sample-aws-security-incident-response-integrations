@@ -1,0 +1,101 @@
+name: Security and Tests
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install bandit semgrep gitleaks
+
+      - name: Run Bandit
+        run: bandit -r . -x ./tests
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: p/python
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Syft & Grype
+        uses: anchore/sbom-action@v0
+        with:
+          syft-version: latest
+          grype-version: latest
+
+      - name: Run Syft (SBOM Generator)
+        run: syft . -o json > sbom.json
+
+      - name: Run Grype (Vulnerability Scanner)
+        run: grype sbom:./sbom.json
+
+  cdk-nag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run CDK Nag
+        run: |
+          npx cdk synth
+          # CDK Nag is integrated into the CDK app, so it will run during synthesis
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        run: pytest tests/ -v
