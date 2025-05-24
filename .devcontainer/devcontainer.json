@@ -1,0 +1,44 @@
+{
+  "name": "AWS Security Incident Response",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "mounts": [
+          "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+          "source=${localEnv:HOME}${localEnv:USERPROFILE}/.aws,target=/home/vscode/.aws,type=bind",
+          "source=${localEnv:HOME}${localEnv:USERPROFILE}/.ssh,target=/home/vscode/.ssh,type=bind"
+  
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "DavidAnson.vscode-markdownlint",
+        "yzhang.markdown-all-in-one",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "amazonwebservices.aws-toolkit-vscode",
+        "amazonwebservices.amazon-q-vscode"
+      ],
+      "settings": {
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.formatting.provider": "black",
+        "python.defaultInterpreterPath": "/.venv/bin/python",
+        "python.pythonPath": "/.venv/bin/python",
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "editor.rulers": [120],
+          "markdownlint.config": {
+            "MD013": {
+              "line_length": 120,
+              "tables": false,
+              "code_blocks": false
+            },
+            "MD025": false
+          }
+      }
+    }
+  },
+  "postCreateCommand": "echo 'source /.venv/bin/activate' >> ~/.bashrc",
+  "postStartCommand": "sudo /.venv/bin/pip install -r requirements-dev.txt",
+  "remoteUser": "vscode"
+}
