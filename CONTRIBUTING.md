@@ -1,7 +1,7 @@
 # Contributing Guidelines
 
-Thank you for your interest in contributing to our project. Whether it's a bug report, new feature, correction, or additional
-documentation, we greatly value feedback and contributions from our community.
+Thank you for your interest in contributing to our project. Whether it's a bug report, new feature, correction, or
+additional documentation, we greatly value feedback and contributions from our community.
 
 Please read through this document before submitting any issues or pull requests to ensure we have all the necessary
 information to effectively respond to your bug report or contribution.
@@ -29,7 +29,8 @@ Contributions via pull requests are much appreciated. Before sending us a pull r
 To send us a pull request, please:
 
 1. Fork the repository.
-2. Modify the source; please focus on the specific change you are contributing. If you also reformat all the code, it will be hard for us to focus on your change.
+2. Modify the source; please focus on the specific change you are contributing. If you also reformat all the code, it
+will be hard for us to focus on your change.
 3. Ensure local tests pass.
 4. Commit to your fork using clear commit messages.
 5. Send us a pull request, answering any default questions in the pull request interface.
@@ -51,13 +52,6 @@ For more information see the [Code of Conduct FAQ](https://aws.github.io/code-of
 ## Security issue notifications
 
 If you discover a potential security issue in this project we ask that you notify AWS/Amazon Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). Please do **not** create a public github issue.
-
-## Review Rubric 
-
-We welcome contributions from the community and partners. In order to ensure the high bar of [AWS Well-Architected](https://aws.amazon.com/architecture/well-architected/)
-is maintained, we maintain a list of critical architectual decisions that must be reviewed.
-
-In general 
 
 ## Licensing
 
