@@ -19,11 +19,15 @@ jobs:
           python-version: '3.9'
           cache: 'pip'
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
       - name: Install dependencies
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
           python -m pip install --upgrade pip
-          uv --system pip install -r requirements-dev.txt
+          uv pip install -r requirements-dev.txt
 
       - name: Run Bandit
         run: bandit -r . -x ./tests --skip B113,B108
@@ -64,7 +68,7 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           python -m pip install --upgrade pip
-          uv --system pip install -r requirements.txt
+          uv pip install -r requirements.txt
 
       - name: Run CDK Nag
         run: |
