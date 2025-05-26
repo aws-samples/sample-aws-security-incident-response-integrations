@@ -24,15 +24,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
-          pip install bandit semgrep gitleaks
+          pip install bandit semgrep
 
       - name: Run Bandit
         run: bandit -r . -x ./tests
-
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: p/python
 
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2

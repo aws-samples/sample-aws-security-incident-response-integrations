@@ -39,6 +39,6 @@
     }
   },
   "postCreateCommand": "echo 'source /.venv/bin/activate' >> ~/.bashrc",
-  "postStartCommand": "sudo /.venv/bin/pip install -r requirements-dev.txt",
+  "postStartCommand": "/.venv/bin/pip install --no-cache-dir -r requirements-dev.txt",
   "remoteUser": "vscode"
 }
