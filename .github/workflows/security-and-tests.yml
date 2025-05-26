@@ -28,10 +28,17 @@ jobs:
       - name: Run Bandit
         run: bandit -r . -x ./tests --skip B113,B108
 
-      - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install git-secrets
+        run: |
+          git clone https://github.com/awslabs/git-secrets.git
+          cd git-secrets
+          sudo make install
+          cd ..
+          
+      - name: Run git-secrets
+        run: |
+          git secrets --register-aws
+          git secrets --scan
 
       - name: Install Syft & Grype
         uses: anchore/sbom-action@v0
