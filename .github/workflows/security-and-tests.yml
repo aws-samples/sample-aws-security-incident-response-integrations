@@ -21,24 +21,15 @@ jobs:
 
       - name: Install dependencies
         run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          uv pip install -r requirements-dev.txt
 
       - name: Run Bandit
         run: bandit -r . -x ./tests --skip B113,B108
-
-      - name: Install git-secrets
-        run: |
-          git clone https://github.com/awslabs/git-secrets.git
-          cd git-secrets
-          sudo make install
-          cd ..
           
-      - name: Run git-secrets
-        run: |
-          git secrets --register-aws
-          git secrets --scan
+      - name: Run detect-secrets
+        run: detect-secrets scan --baseline .secrets.baseline
 
       - name: Install Syft & Grype
         uses: anchore/sbom-action@v0
@@ -71,9 +62,9 @@ jobs:
 
       - name: Install dependencies
         run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          uv pip install -r requirements.txt
 
       - name: Run CDK Nag
         run: |

@@ -30,7 +30,6 @@ cdk_nag.AwsSolutionsChecks.VERBOSE = True
 cdk_nag.NagSuppressions.add_stack_suppressions(
     app.node.find_child("AwsSecurityIncidentResponseSampleIntegrationsStack"),
     [
-        # {"id": "AwsSolutions-IAM4", "reason": "Using AWS managed policies is acceptable for this sample"},
         {
             "id": "AwsSolutions-IAM5",
             "reason": "Wildcard resources are required for certain actions in this sample integration",

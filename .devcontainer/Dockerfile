@@ -1,10 +1,3 @@
-# Stage 1: Build gitleaks
-FROM golang:1.23-alpine AS gitleaks-builder
-RUN apk add --no-cache git
-ARG GOPROXY=direct
-RUN go install github.com/zricethezav/gitleaks/v8@latest
-
-# Stage 2: Main Image
 FROM public.ecr.aws/docker/library/node:lts-bookworm
 
 # Use Bash instead sh
@@ -16,7 +9,9 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
                           gnupg2 software-properties-common less vim jq sudo \
                           xvfb python3-pip python3-dev python3-venv \
     && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \ 
     && python3 -m venv /.venv
+
 
 # Install binary security tools
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
@@ -29,9 +24,6 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o "aws
     && unzip awscliv2.zip \
     && bash ./aws/install \
     && rm -rf ./aws
-
-# Copy gitleaks from builder stage
-COPY --from=gitleaks-builder /go/bin/gitleaks /usr/local/bin/
 
 ARG USERNAME=vscode
 ARG USER_UID=9999

@@ -12,3 +12,4 @@ moto
 bandit
 semgrep
 syft
+detect-secrets
