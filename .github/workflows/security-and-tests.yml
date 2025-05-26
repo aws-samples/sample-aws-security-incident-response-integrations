@@ -45,10 +45,17 @@ jobs:
           grype-version: latest
 
       - name: Run Syft (SBOM Generator)
-        run: syft . -o json > sbom.json
+        uses: anchore/sbom-action@v0
+        with:
+          format: spdx-json
+          output-file: "${{ github.event.repository.name }}-sbom.spdx.json"
 
-      - name: Run Grype (Vulnerability Scanner)
-        run: grype sbom:./sbom.json
+      - name: Run Grype (Scan SBOM)
+        uses: anchore/scan-action@v6
+        with:
+          sbom: "${{ github.event.repository.name }}-sbom.spdx.json"
+
+      
 
   cdk-nag:
     runs-on: ubuntu-latest
