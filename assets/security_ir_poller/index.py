@@ -2,11 +2,8 @@ import datetime
 import json
 import boto3
 import os
-import re
 import logging
 import traceback
-import sys
-import subprocess
 
 # Configure logging
 logger = logging.getLogger()
