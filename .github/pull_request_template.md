@@ -14,6 +14,10 @@
 
 `Brief description of why these changes need to be made.`
 
+## Related Issue (if applicable)
+
+`Link to any related issues`
+
 ## Contributor Task List
 
 - [ ] I have reviewed the [Contributing Guideline](../CONTRIBUTING.md) and [Code of Conduct](../CODE_OF_CONDUCT.md)
@@ -50,3 +54,5 @@ For details on this review visit [Pull Request Review Rubric](../PR_REVIEW_RUBRI
 ### How much do you expect this integration to cost
 
 `Provide a brief set estimate or attact an estimate from https://calculator.aws/`
+
+**By submitting this pull request, I confirm that my contribution is made under the terms of the MIT No Attribution license**
