@@ -26,9 +26,9 @@ body:
       label: Pulled Latest Changes
       description: Did you pull the latest changes from the integration target repository?
       options:
-        - label: Yes
+        - label: "Yes"
           required: true
-        - label: No
+        - label: "No"
           required: false
   - type: textarea
     id: expected
