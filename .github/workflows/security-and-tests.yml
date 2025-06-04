@@ -82,7 +82,8 @@ jobs:
 
       - name: Run CDK Nag
         run: |
-          npx cdk synth
+          npx cdk synth --app "python app_jira.py"
+          npx cdk synth --app "python app_service_now.py"
           # CDK Nag is integrated into the CDK app, so it will run during synthesis
 
   tests:

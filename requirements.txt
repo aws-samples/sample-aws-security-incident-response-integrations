@@ -11,3 +11,4 @@ botocore
 -r assets/jira_client/requirements.txt
 -r assets/jira_notifications_handler/requirements.txt
 -r assets/security_ir_client/requirements.txt
+-r assets/service_now_client/requirements.txt

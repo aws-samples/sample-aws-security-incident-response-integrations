@@ -6,8 +6,8 @@ import pytest
 from aws_cdk.assertions import Template
 from cdk_nag import AwsSolutionsChecks
 
-from aws_security_incident_response_sample_integrations.aws_security_incident_response_sample_integrations_stack import (
-    AwsSecurityIncidentResponseSampleIntegrationsStack,
+from aws_security_incident_response_sample_integrations.aws_security_incident_response_sample_integrations_common_stack import (
+    AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
 )
 
 
@@ -126,7 +126,7 @@ def app():
 
 @pytest.fixture(autouse=True)
 def stack(app):
-    return AwsSecurityIncidentResponseSampleIntegrationsStack(
+    return AwsSecurityIncidentResponseSampleIntegrationsCommonStack(
         app, "security-test-stack"
     )
 
