@@ -371,55 +371,59 @@ def store_incidents_in_dynamodb(incidents: List[Dict], table_name: str, event_bu
     try:
         for incident in incidents:
             case_id = incident['caseId']
-            print(f"Processing incident id: {case_id}")
+            case_status = incident['caseStatus']
+            
+            if case_status != "Closed":
+                # skip closed incidents
+                print(f"Processing incident id: {case_id}")
 
-            # Check if incident exists in DynamoDB
-            existing_incident = dynamodb_client.get_item(
-                TableName=table_name,
-                Key={
-                    'PK': {'S': f"Case#{case_id}"},
-                    'SK': {'S': 'latest'}
-                }
-            ).get('Item', {})
+                # Check if incident exists in DynamoDB
+                existing_incident = dynamodb_client.get_item(
+                    TableName=table_name,
+                    Key={
+                        'PK': {'S': f"Case#{case_id}"},
+                        'SK': {'S': 'latest'}
+                    }
+                ).get('Item', {})
 
-            # Get full incident details
-            incident_details = get_incident_details(case_id)
+                # Get full incident details
+                incident_details = get_incident_details(case_id)
 
-                    # Convert to domain models
-            logger.debug(f"Converting case {case_id} to domain models")
-            case = create_case_from_api_response(incident_details)
+                        # Convert to domain models
+                logger.debug(f"Converting case {case_id} to domain models")
+                case = create_case_from_api_response(incident_details)
 
 
-            if existing_incident:
-                # Update existing incident if details have changed
-                existing_details = json.loads(existing_incident.get('incidentDetails', {}).get('S', '{}'))
-                if existing_details != incident_details:
-                    dynamodb_client.update_item(
+                if existing_incident:
+                    # Update existing incident if details have changed
+                    existing_details = json.loads(existing_incident.get('incidentDetails', {}).get('S', '{}'))
+                    if existing_details != incident_details:
+                        dynamodb_client.update_item(
+                            TableName=table_name,
+                            Key={
+                                'PK': {'S': f"Case#{case_id}"},
+                                'SK': {'S': 'latest'}
+                            },
+                            UpdateExpression='SET incidentDetails = :incidentDetails',
+                            ExpressionAttributeValues={
+                                ':incidentDetails': {'S': json.dumps(incident_details, default=json_datetime_encoder)}
+                            }
+                        )
+
+                        logger.debug(f"Publishing CaseUpdatedEvent for: {case_id}")
+                        event_publisher.publish_event(CaseUpdatedEvent(case))
+                else:
+                    # Create new incident
+                    dynamodb_client.put_item(
                         TableName=table_name,
-                        Key={
+                        Item={
                             'PK': {'S': f"Case#{case_id}"},
-                            'SK': {'S': 'latest'}
-                        },
-                        UpdateExpression='SET incidentDetails = :incidentDetails',
-                        ExpressionAttributeValues={
-                            ':incidentDetails': {'S': json.dumps(incident_details, default=json_datetime_encoder)}
+                            'SK': {'S': 'latest'},
+                            'incidentDetails': {'S': json.dumps(incident_details, default=json_datetime_encoder)}
                         }
                     )
-
-                    logger.debug(f"Publishing CaseUpdatedEvent for: {case_id}")
-                    event_publisher.publish_event(CaseUpdatedEvent(case))
-            else:
-                # Create new incident
-                dynamodb_client.put_item(
-                    TableName=table_name,
-                    Item={
-                        'PK': {'S': f"Case#{case_id}"},
-                        'SK': {'S': 'latest'},
-                        'incidentDetails': {'S': json.dumps(incident_details, default=json_datetime_encoder)}
-                    }
-                )
-                logger.info(f"Publishing CaseCreatedEvent for: {case_id}")
-                event_publisher.publish_event(CaseCreatedEvent(case))
+                    logger.info(f"Publishing CaseCreatedEvent for: {case_id}")
+                    event_publisher.publish_event(CaseCreatedEvent(case))
 
         return True
     except Exception as e:
@@ -477,3 +481,4 @@ def handler(event: Dict, context: Any) -> Dict:
             'count': len(incidents)
         }
     }
+

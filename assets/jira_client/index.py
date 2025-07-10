@@ -19,10 +19,10 @@ from botocore.exceptions import ClientError
 logger = logging.getLogger()
 
 # Get log level from environment variable
-log_level = os.environ.get('LOG_LEVEL', 'error').lower()
-if log_level == 'debug':
+log_level = os.environ.get("LOG_LEVEL", "error").lower()
+if log_level == "debug":
     logger.setLevel(logging.DEBUG)
-elif log_level == 'info':
+elif log_level == "info":
     logger.setLevel(logging.INFO)
 else:
     # Default to ERROR level
@@ -32,6 +32,10 @@ else:
 security_ir_client = boto3.client("security-ir")
 event_client = boto3.client("events")
 dynamodb = boto3.resource("dynamodb")
+
+# tag for comments sourced from Security IR
+UPDATE_TAG_TO_ADD = "[AWS Security Incident Response Update]"
+UPDATE_TAG_TO_SKIP = "[JIRA Update]"
 
 try:
     # This import works for lambda function and imports the lambda layer at runtime
@@ -46,6 +50,7 @@ except ImportError:
     from ..mappers.python.jira_sir_mapper import Case, create_case_from_api_response
     from ..wrappers.python.jira_wrapper import JiraClient
 
+
 class DatabaseService:
     """Class to handle database operations"""
 
@@ -57,10 +62,10 @@ class DatabaseService:
     def get_case(self, case_id: str) -> Optional[Dict[str, Any]]:
         """
         Get a case from the database
-        
+
         Args:
             case_id: The IR case ID
-            
+
         Returns:
             Case data or None if retrieval fails
         """
@@ -71,7 +76,9 @@ class DatabaseService:
             return response
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
-            logger.error(f"Error retrieving details from the DynamoDB table: {error_code}")
+            logger.error(
+                f"Error retrieving details from the DynamoDB table: {error_code}"
+            )
             return None
         except KeyError:
             logger.error(f"Jira issue for Case#{case_id} not found in database")
@@ -80,11 +87,11 @@ class DatabaseService:
     def update_mapping(self, case_id: str, jira_issue_id: str) -> bool:
         """
         Update the mapping between an IR case and a Jira issue
-        
+
         Args:
             case_id: The IR case ID
             jira_issue_id: The Jira issue ID
-            
+
         Returns:
             True if successful, False otherwise
         """
@@ -102,22 +109,24 @@ class DatabaseService:
             logger.error(f"Error updating DynamoDB table: {error_code}")
             return False
 
-    def update_issue_details(self, case_id: str, jira_issue_id: str, issue_details: Any) -> bool:
+    def update_issue_details(
+        self, case_id: str, jira_issue_id: str, issue_details: Any
+    ) -> bool:
         """
         Update Jira issue details in the database
-        
+
         Args:
             case_id: The IR case ID
             jira_issue_id: The Jira issue ID
             issue_details: Jira issue details
-            
+
         Returns:
             True if successful, False otherwise
         """
         try:
             # Extract serializable details from the Jira issue object
             serializable_details = extract_jira_issue_details(issue_details)
-            
+
             # Update the database
             self.table.update_item(
                 Key={"PK": f"Case#{case_id}", "SK": "latest"},
@@ -125,7 +134,7 @@ class DatabaseService:
                 ExpressionAttributeValues={":j": json.dumps(serializable_details)},
                 ReturnValues="UPDATED_NEW",
             )
-            
+
             logger.info(f"Updated Jira issue details in DynamoDB for case {case_id}")
             return True
         except Exception as e:
@@ -139,20 +148,22 @@ class AttachmentService:
     def __init__(self, jira_client: JiraClient):
         """
         Initialize the attachment service
-        
+
         Args:
             jira_client: JiraClient instance
         """
         self.jira_client = jira_client
 
-    def check_if_exists(self, jira_attachments: List[Any], ir_attachment_name: str) -> bool:
+    def check_if_exists(
+        self, jira_attachments: List[Any], ir_attachment_name: str
+    ) -> bool:
         """
         Check if an attachment exists in a Jira issue
-        
+
         Args:
             jira_attachments: List of Jira attachments
             ir_attachment_name: IR attachment name
-            
+
         Returns:
             True if the attachment exists, False otherwise
         """
@@ -161,10 +172,16 @@ class AttachmentService:
                 return True
         return False
 
-    def sync_attachments(self, jira_issue_id: str, ir_case_id: str, ir_attachments: List[Dict[str, Any]], jira_attachments: List[Any]) -> None:
+    def sync_attachments(
+        self,
+        jira_issue_id: str,
+        ir_case_id: str,
+        ir_attachments: List[Dict[str, Any]],
+        jira_attachments: List[Any],
+    ) -> None:
         """
         Sync attachments between IR case and Jira issue
-        
+
         Args:
             jira_issue_id: The Jira issue ID
             ir_case_id: The IR case ID
@@ -172,17 +189,29 @@ class AttachmentService:
             jira_attachments: List of Jira attachments
         """
         for ir_attachment in ir_attachments:
+            logger.info("Attachment: %s", ir_attachment)
             ir_attachment_id = ir_attachment["attachmentId"]
             ir_attachment_name = ir_attachment["fileName"]
 
             # Check if attachment already exists in Jira
             if not self.check_if_exists(jira_attachments, ir_attachment_name):
-                self._add_attachment(jira_issue_id, ir_case_id, ir_attachment_id, ir_attachment_name)
+                try:
+                    self._add_attachment(
+                        jira_issue_id, ir_case_id, ir_attachment_id, ir_attachment_name
+                    )
+                except Exception as e:
+                    logger.error(f"Error adding attachment to security IR case: {e}")
 
-    def _add_attachment(self, jira_issue_id: str, ir_case_id: str, ir_attachment_id: str, ir_attachment_name: str) -> None:
+    def _add_attachment(
+        self,
+        jira_issue_id: str,
+        ir_case_id: str,
+        ir_attachment_id: str,
+        ir_attachment_name: str,
+    ) -> None:
         """
         Add an attachment to a Jira issue
-        
+
         Args:
             jira_issue_id: The Jira issue ID
             ir_case_id: The IR case ID
@@ -192,11 +221,15 @@ class AttachmentService:
         download_path = f"/tmp/{ir_attachment_name}"
         try:
             # Get presigned URL
-            ir_attachment_presigned_url = security_ir_client.get_case_attachment_download_url(
-                caseId=ir_case_id, attachmentId=ir_attachment_id
+            ir_attachment_presigned_url = (
+                security_ir_client.get_case_attachment_download_url(
+                    caseId=ir_case_id, attachmentId=ir_attachment_id
+                )
             )
 
-            ir_attachment_presigned_url_str = ir_attachment_presigned_url["attachmentPresignedUrl"]
+            ir_attachment_presigned_url_str = ir_attachment_presigned_url[
+                "attachmentPresignedUrl"
+            ]
 
             # Download object to /tmp using the presigned URL
             response = requests.get(ir_attachment_presigned_url_str)
@@ -207,7 +240,9 @@ class AttachmentService:
             with open(download_path, "rb") as f:
                 self.jira_client.add_attachment(jira_issue_id, f)
 
-            logger.info(f"Added attachment {ir_attachment_name} to Jira issue {jira_issue_id}")
+            logger.info(
+                f"Added attachment {ir_attachment_name} to Jira issue {jira_issue_id}"
+            )
 
             # Delete file from /tmp directory
             os.remove(download_path)
@@ -225,29 +260,44 @@ class CommentService:
     def __init__(self, jira_client: JiraClient):
         """
         Initialize the comment service
-        
+
         Args:
             jira_client: JiraClient instance
         """
         self.jira_client = jira_client
 
-    def sync_comments(self, jira_issue_id: str, ir_comments: List[Dict[str, Any]], jira_comments: List[Any]) -> None:
+    def sync_comments(
+        self,
+        jira_issue_id: str,
+        ir_comments: List[Dict[str, Any]],
+        jira_comments: List[Any],
+    ) -> None:
         """
         Sync comments between IR case and Jira issue
-        
+
         Args:
             jira_issue_id: The Jira issue ID
             ir_comments: List of IR comments
             jira_comments: List of Jira comments
         """
-        ir_comment_bodies = [comment["body"] for comment in ir_comments]
+        sir_comment_bodies = [comment["body"] for comment in ir_comments]
         jira_comment_bodies = [comment.body for comment in jira_comments]
-        
-        for ir_comment in ir_comment_bodies:
-            if "[JIRA UPDATE]" not in str(ir_comment) and str(ir_comment) not in jira_comment_bodies:
-                logger.info(f"Adding comment to Jira issue {jira_issue_id}")
-                self.jira_client.add_comment(jira_issue_id, ir_comment)
 
+        # iterate Security IR comments
+        for sir_comment in sir_comment_bodies:
+            add_comment = True
+
+            if UPDATE_TAG_TO_SKIP in sir_comment:
+                add_comment = False
+            
+            # iterate Jira comments
+            for jira_comment in jira_comment_bodies:
+                if str(jira_comment).strip() == str(sir_comment).strip():
+                    add_comment = False
+
+            if add_comment is True:
+                logger.info("Adding comment '%s' to Jira issue %s", sir_comment, jira_issue_id)
+                self.jira_client.add_comment(jira_issue_id, sir_comment)
 
 class IncidentService:
     """Class to handle incident operations"""
@@ -259,64 +309,73 @@ class IncidentService:
         self.attachment_service = AttachmentService(self.jira_client)
         self.comment_service = CommentService(self.jira_client)
 
-    def extract_case_details(self, ir_case: Dict[str, Any]) -> Tuple[Dict[str, Any], str, str, str]:
+    def extract_case_details(
+        self, ir_case: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], str, str, str]:
         """
         Extract case details from an IR case
-        
+
         Args:
             ir_case: IR case data
-            
+
         Returns:
             Tuple of (ir_case_detail, ir_event_type, ir_case_id, sir_case_status)
         """
         ir_case_detail = ir_case["detail"]
         ir_event_type = ir_case_detail["eventType"]
         ir_case_arn = ir_case_detail["caseArn"]
-        
+
         try:
             ir_case_id = re.search(r"/(\d+)$", ir_case_arn).group(1)
         except (AttributeError, IndexError):
             logger.error(f"Failed to extract case ID from ARN: {ir_case_arn}")
             raise ValueError(f"Invalid case ARN format: {ir_case_arn}")
-            
+
         sir_case_status = ir_case_detail.get("caseStatus", "")
-        
+
         return ir_case_detail, ir_event_type, ir_case_id, sir_case_status
 
-    def prepare_jira_fields(self, ir_case_detail: Dict[str, Any], ir_case_id: str) -> Dict[str, Any]:
+    def prepare_jira_fields(
+        self, ir_case_detail: Dict[str, Any], ir_case_id: str
+    ) -> Dict[str, Any]:
         """
         Prepare Jira fields from IR case details
-        
+
         Args:
             ir_case_detail: IR case details
             ir_case_id: IR case ID
-            
+
         Returns:
             Dictionary of Jira fields
         """
         # Map fields from SIR to JIRA
         jira_fields = map_fields_to_jira(ir_case_detail)
-        
+
         # Ensure base fields are set
         jira_fields["summary"] = (
-            f"{ir_case_detail.get('title', 'SIR Case')} - AWS Security Incident Response Case#{ir_case_id}"
+            f"{ir_case_detail.get('title', 'Security IR Case')} - AWS Security Incident Response Case#{ir_case_id}"
         )
-        
+
         # Add project and issue type if not present in mapped fields
         jira_fields["project"] = {"key": "EP"}  # Set your project key
         jira_fields["issuetype"] = {"name": "Task"}
-        
+
         return jira_fields
 
-    def handle_case_creation(self, ir_case_detail: Dict[str, Any], ir_case_id: str, jira_fields: Dict[str, Any]) -> Optional[str]:
+    def handle_case_creation(
+        self,
+        ir_case_detail: Dict[str, Any],
+        ir_case_id: str,
+        jira_fields: Dict[str, Any],
+    ) -> Optional[str]:
         """
         Handle the creation of a new IR case
-        
+
         Args:
             ir_case_detail: IR case details
             ir_case_id: IR case ID
             jira_fields: Jira fields
-            
+
         Returns:
             Jira issue ID or None if creation fails
         """
@@ -324,14 +383,14 @@ class IncidentService:
         jira_issue = self.jira_client.create_issue(jira_fields)
         if not jira_issue:
             return None
-            
+
         jira_issue_id = jira_issue.key
         self.db_service.update_mapping(ir_case_id, jira_issue_id)
 
         # Handle watchers if present
         if "watchers" in ir_case_detail and ir_case_detail["watchers"]:
             self.jira_client.add_watchers(jira_issue_id, ir_case_detail["watchers"])
-            
+
         # Get issue details and update database
         jira_issue = self.jira_client.get_issue(jira_issue_id)
         if jira_issue:
@@ -339,18 +398,26 @@ class IncidentService:
 
         logger.info(f"Created Jira issue {jira_issue_id} for new IR case {ir_case_id}")
         return jira_issue_id
+    
 
-    def handle_case_update(self, ir_case_detail: Dict[str, Any], ir_case_id: str, jira_fields: Dict[str, Any], jira_status: Optional[str], status_comment: Optional[str]) -> Optional[str]:
+    def handle_case_update(
+        self,
+        ir_case_detail: Dict[str, Any],
+        ir_case_id: str,
+        jira_fields: Dict[str, Any],
+        jira_status: Optional[str],
+        status_comment: Optional[str],
+    ) -> Optional[str]:
         """
         Handle the update of an existing IR case
-        
+
         Args:
             ir_case_detail: IR case details
             ir_case_id: IR case ID
             jira_fields: Jira fields
             jira_status: Target Jira status
             status_comment: Status comment
-            
+
         Returns:
             Jira issue ID or None if update fails
         """
@@ -359,40 +426,53 @@ class IncidentService:
         if not case_from_ddb or "Item" not in case_from_ddb:
             logger.error(f"No case found in database for IR case {ir_case_id}")
             return None
-            
+
         # Get Jira issue ID
         jira_issue_id = case_from_ddb["Item"].get("jiraIssueId")
-        
+
         # Create new issue if none exists
         if jira_issue_id is None:
-            logger.info(f"No Jira issue found for IR case {ir_case_id} in database, creating Jira issue...")
+            logger.info(
+                f"No Jira issue found for IR case {ir_case_id} in database, creating Jira issue..."
+            )
             return self.handle_case_creation(ir_case_detail, ir_case_id, jira_fields)
-        
+
         # Update existing issue
         self.jira_client.update_issue(jira_issue_id, jira_fields)
-        
+
         # Update status if needed
         if jira_status:
             self.jira_client.update_status(jira_issue_id, jira_status, status_comment)
-        
+
         # Get Jira issue details
         jira_issue = self.jira_client.get_issue(jira_issue_id)
         if not jira_issue:
             return jira_issue_id
-            
+
         # Process incident details
-        self.process_incident_details(jira_issue, jira_issue_id, case_from_ddb, ir_case_id, ir_case_detail)
-        
+        self.process_incident_details(
+            jira_issue, jira_issue_id, case_from_ddb, ir_case_id, ir_case_detail
+        )
+
         # Update issue details in database
         self.db_service.update_issue_details(ir_case_id, jira_issue_id, jira_issue)
-        
-        logger.info(f"Updated Jira issue {jira_issue_id} for existing IR case {ir_case_id}")
+
+        logger.info(
+            f"Updated Jira issue {jira_issue_id} for existing IR case {ir_case_id}"
+        )
         return jira_issue_id
 
-    def process_incident_details(self, jira_issue: Any, jira_issue_id: str, case_from_ddb: Dict[str, Any], ir_case_id: str, ir_case_detail: Dict[str, Any]) -> None:
+    def process_incident_details(
+        self,
+        jira_issue: Any,
+        jira_issue_id: str,
+        case_from_ddb: Dict[str, Any],
+        ir_case_id: str,
+        ir_case_detail: Dict[str, Any],
+    ) -> None:
         """
         Process incident details for comments, attachments, and watchers
-        
+
         Args:
             jira_issue: Jira issue object
             jira_issue_id: Jira issue ID
@@ -404,63 +484,73 @@ class IncidentService:
             # Get incident details
             incident_details = case_from_ddb["Item"]["incidentDetails"]
             incident_details_json = json.loads(incident_details)
-            
+
             # Process comments
             ir_comments = incident_details_json.get("caseComments", [])
             if ir_comments:
                 jira_comments = jira_issue.fields.comment.comments
-                self.comment_service.sync_comments(jira_issue_id, ir_comments, jira_comments)
-            
+                self.comment_service.sync_comments(
+                    jira_issue_id, ir_comments, jira_comments
+                )
+
             # Process attachments
             ir_attachments = incident_details_json.get("caseAttachments", [])
             if ir_attachments:
                 jira_attachments = jira_issue.fields.attachment
-                self.attachment_service.sync_attachments(jira_issue_id, ir_case_id, ir_attachments, jira_attachments)
-            
+                self.attachment_service.sync_attachments(
+                    jira_issue_id, ir_case_id, ir_attachments, jira_attachments
+                )
+
             # Sync watchers
             sir_watchers = ir_case_detail.get("watchers", [])
             self.jira_client.sync_watchers(jira_issue_id, sir_watchers)
-            
+
         except Exception as e:
-            logger.error(f"Error processing incident details: {str(e)}")
+            logger.error(f"Error processing incident details: {e}")
 
     def create_or_update_issue(self, ir_case: Dict[str, Any]) -> Optional[str]:
         """
         Create or update a Jira issue based on an IR case
-        
+
         Args:
             ir_case: IR case data
-            
+
         Returns:
             Jira issue ID or None if operation fails
         """
         try:
             # Extract case details
-            ir_case_detail, ir_event_type, ir_case_id, sir_case_status = self.extract_case_details(ir_case)
-            
+            ir_case_detail, ir_event_type, ir_case_id, sir_case_status = (
+                self.extract_case_details(ir_case)
+            )
+
             # Check if Jira client is available
             if not self.jira_client.client:
                 logger.error("Failed to create Jira client")
                 return None
-            
+
             # Prepare Jira fields
             jira_fields = self.prepare_jira_fields(ir_case_detail, ir_case_id)
-            
+
             # Get status mapping
             jira_status = None
             status_comment = None
             if sir_case_status:
                 jira_status, status_comment = map_case_status(sir_case_status)
-            
+
             # Handle based on event type
             if ir_event_type == "CaseCreated":
-                return self.handle_case_creation(ir_case_detail, ir_case_id, jira_fields)
+                return self.handle_case_creation(
+                    ir_case_detail, ir_case_id, jira_fields
+                )
             elif ir_event_type == "CaseUpdated":
-                return self.handle_case_update(ir_case_detail, ir_case_id, jira_fields, jira_status, status_comment)
+                return self.handle_case_update(
+                    ir_case_detail, ir_case_id, jira_fields, jira_status, status_comment
+                )
             else:
                 logger.warning(f"Unhandled event type: {ir_event_type}")
                 return None
-                
+
         except Exception as e:
             logger.error(f"Error in create_or_update_issue: {str(e)}")
             return None
@@ -469,10 +559,10 @@ class IncidentService:
 def extract_jira_issue_details(jira_issue: Any) -> Dict[str, Any]:
     """
     Extract relevant details from a Jira issue object into a serializable dictionary
-    
+
     Args:
         jira_issue: Jira issue object
-        
+
     Returns:
         Dictionary with serializable Jira issue details
     """
@@ -483,46 +573,77 @@ def extract_jira_issue_details(jira_issue: Any) -> Dict[str, Any]:
             "key": jira_issue.key,
             "summary": jira_issue.fields.summary,
             "status": jira_issue.fields.status.name,
-            "updated": str(jira_issue.fields.updated) if hasattr(jira_issue.fields, 'updated') else None,
-            "created": str(jira_issue.fields.created) if hasattr(jira_issue.fields, 'created') else None,
+            "updated": str(jira_issue.fields.updated)
+            if hasattr(jira_issue.fields, "updated")
+            else None,
+            "created": str(jira_issue.fields.created)
+            if hasattr(jira_issue.fields, "created")
+            else None,
             "description": jira_issue.fields.description,
-            "priority": jira_issue.fields.priority.name if hasattr(jira_issue.fields, 'priority') and jira_issue.fields.priority else None,
-            "assignee": jira_issue.fields.assignee.displayName if hasattr(jira_issue.fields, 'assignee') and jira_issue.fields.assignee else None,
-            "reporter": jira_issue.fields.reporter.displayName if hasattr(jira_issue.fields, 'reporter') and jira_issue.fields.reporter else None,
+            "priority": jira_issue.fields.priority.name
+            if hasattr(jira_issue.fields, "priority") and jira_issue.fields.priority
+            else None,
+            "assignee": jira_issue.fields.assignee.displayName
+            if hasattr(jira_issue.fields, "assignee") and jira_issue.fields.assignee
+            else None,
+            "reporter": jira_issue.fields.reporter.displayName
+            if hasattr(jira_issue.fields, "reporter") and jira_issue.fields.reporter
+            else None,
             "comments": [
-                {"id": comment.id, "body": comment.body, "author": comment.author.displayName}
+                {
+                    "id": comment.id,
+                    "body": comment.body,
+                    "author": comment.author.displayName,
+                }
                 for comment in jira_issue.fields.comment.comments
-            ] if hasattr(jira_issue.fields, 'comment') and jira_issue.fields.comment else [],
+            ]
+            if hasattr(jira_issue.fields, "comment") and jira_issue.fields.comment
+            else [],
             "attachments": [
                 {"id": attachment.id, "filename": attachment.filename}
                 for attachment in jira_issue.fields.attachment
-            ] if hasattr(jira_issue.fields, 'attachment') and jira_issue.fields.attachment else [],
+            ]
+            if hasattr(jira_issue.fields, "attachment") and jira_issue.fields.attachment
+            else [],
             "issuelinks": [
-                {"id": issue_link.id, "type": issue_link.type.name, "inwardIssue": issue_link.inwardIssue, "outwardIssue": issue_link.outwardIssue}
+                {
+                    "id": issue_link.id,
+                    "type": issue_link.type.name,
+                    "inwardIssue": issue_link.inwardIssue,
+                    "outwardIssue": issue_link.outwardIssue,
+                }
                 for issue_link in jira_issue.fields.issuelinks
-            ] if hasattr(jira_issue.fields, 'issuelinks') and jira_issue.fields.issuelinks else [],
-            "issueType": jira_issue.fields.issuetype.name if hasattr(jira_issue.fields, 'issuetype') and jira_issue.fields.issuetype else None,
-            "project": jira_issue.fields.project.name if hasattr(jira_issue.fields, 'project') and jira_issue.fields.project else None,
-            "resolution": jira_issue.fields.resolution.name if hasattr(jira_issue.fields, 'resolution') and jira_issue.fields.resolution else None,
+            ]
+            if hasattr(jira_issue.fields, "issuelinks") and jira_issue.fields.issuelinks
+            else [],
+            "issueType": jira_issue.fields.issuetype.name
+            if hasattr(jira_issue.fields, "issuetype") and jira_issue.fields.issuetype
+            else None,
+            "project": jira_issue.fields.project.name
+            if hasattr(jira_issue.fields, "project") and jira_issue.fields.project
+            else None,
+            "resolution": jira_issue.fields.resolution.name
+            if hasattr(jira_issue.fields, "resolution") and jira_issue.fields.resolution
+            else None,
         }
         return issue_dict
     except Exception as e:
         logger.error(f"Error extracting Jira issue details: {str(e)}")
         # Return minimal details if extraction fails
         return {
-            "id": jira_issue.id if hasattr(jira_issue, 'id') else None,
-            "key": jira_issue.key if hasattr(jira_issue, 'key') else None,
-            "error": str(e)
+            "id": jira_issue.id if hasattr(jira_issue, "id") else None,
+            "key": jira_issue.key if hasattr(jira_issue, "key") else None,
+            "error": str(e),
         }
 
 
 def json_datetime_encoder(obj: Any) -> str:
     """
     JSON encoder for datetime objects
-    
+
     Args:
         obj: Object to encode
-        
+
     Returns:
         String representation of datetime or raises TypeError
     """
@@ -534,17 +655,17 @@ def json_datetime_encoder(obj: Any) -> str:
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Lambda handler to process security incidents
-    
+
     Args:
         event: Lambda event object
         context: Lambda context object
-        
+
     Returns:
         Dictionary containing response status and details
     """
     try:
         # Only process events from Security Incident Response
-        EVENT_SOURCE = os.environ.get('EVENT_SOURCE', 'security-ir')
+        EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "security-ir")
         if event.get("source") == EVENT_SOURCE:
             incident_service = IncidentService()
             incident_service.create_or_update_issue(event)
@@ -554,8 +675,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
     except Exception as e:
         logger.error(f"Error in handler: {str(e)}")
-        
+
     return {
         "statusCode": 200,
         "body": json.dumps("Jira Client Lambda function execution complete"),
     }
+
