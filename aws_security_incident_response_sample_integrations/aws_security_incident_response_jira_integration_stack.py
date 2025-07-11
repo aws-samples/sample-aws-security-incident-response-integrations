@@ -346,94 +346,6 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
             True
         )
         
-        """
-        cdk for assets/security_ir_client
-        """
-        # Create a custom role for the Security IR Client Lambda function
-        security_ir_client_role = aws_iam.Role(
-            self,
-            "SecurityIncidentResponseClientRole",
-            assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
-            description="Custom role for Security Incident Response Client Lambda function"
-        )
-        
-        # Add custom policy for CloudWatch Logs permissions
-        security_ir_client_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents"
-                ],
-                resources=[
-                    f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
-                ]
-            )
-        )
-        
-        security_ir_client = py_lambda.PythonFunction(
-            self,
-            "SecurityIncidentResponseClient",
-            entry=path.join(path.dirname(__file__), "..", "assets/security_ir_client"),
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(15),
-            layers=[domain_layer, mappers_layer, wrappers_layer],
-            environment={
-                "EVENT_SOURCE": JIRA_EVENT_SOURCE,
-                "INCIDENTS_TABLE_NAME": table.table_name
-            },
-            role=security_ir_client_role
-        )
-        
-        # create Event Bridge rule for Security Incident Response Client Lambda function
-        security_ir_client_rule = aws_events.Rule(
-            self,
-            "security-ir-client-rule",
-            description="Rule to send all events to Security Incident Response Client lambda function",
-            event_pattern=aws_events.EventPattern(source=[JIRA_EVENT_SOURCE]),
-            event_bus=event_bus,
-        )
-        security_ir_client_rule.add_target(aws_events_targets.LambdaFunction(security_ir_client))
-        
-        # Add permissions for Security IR API
-        security_ir_client.add_to_role_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "dynamodb:PutItem", 
-                    "dynamodb:GetItem", 
-                    "dynamodb:UpdateItem",
-                    "security-ir:UpdateCase",
-                    "security-ir:CreateCaseComment",
-                    "security-ir:UpdateCaseComment",
-                    "security-ir:UpdateCaseStatus",
-                    "security-ir:ListComments",
-                    "security-ir:GetCase",
-                    "security-ir:CreateCase",
-                    "security-ir:CloseCase",
-                    "security-ir:GetCaseAttachmentUploadUrl"
-                ],
-                resources=["*"],
-            )
-        )
-        
-        # Grant specific DynamoDB permissions instead of full access
-        table.grant_read_write_data(security_ir_client)
-        
-        # Add suppressions for IAM5 findings related to wildcard resources
-        NagSuppressions.add_resource_suppressions(
-            security_ir_client,
-            [
-                {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for DynamoDB actions",
-                    "applies_to": ["Resource::*"]
-                }
-            ],
-            True
-        )
-        
         # Add stack-level suppression
         NagSuppressions.add_stack_suppressions(
             self, [
@@ -469,13 +381,6 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
             "JiraClientLambdaArn",
             value=jira_client.function_arn,
             description="Jira Client Lambda Function ARN",
-        )
-        
-        CfnOutput(
-            self,
-            "SecurityIRClientLambdaArn",
-            value=security_ir_client.function_arn,
-            description="Security Incident Response Client Lambda Function ARN",
         )
         
         # Output Jira notifications handler log group info

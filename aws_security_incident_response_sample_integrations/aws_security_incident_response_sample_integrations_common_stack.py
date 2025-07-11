@@ -1,5 +1,6 @@
 from os import path
 from aws_cdk import (
+    CfnOutput,
     CfnParameter,
     Duration,
     RemovalPolicy,
@@ -17,12 +18,15 @@ from aws_cdk import (
 from .event_bus_logger_construct import EventBusLoggerConstruct
 from cdk_nag import NagSuppressions
 from constructs import Construct
-from .constants import SECURITY_IR_EVENT_SOURCE
+from .constants import SECURITY_IR_EVENT_SOURCE, JIRA_EVENT_SOURCE
 
 class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         
+        """
+        cdk for log_level_parameter
+        """
         # Create log level parameter
         self.log_level_param = CfnParameter(
             self,
@@ -33,6 +37,9 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             default="error"
         )
         
+        """
+        cdk for dynamoDb
+        """
         # Create DynamoDB table
         self.table = dynamodb.Table(
             self,
@@ -46,6 +53,9 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             point_in_time_recovery=True,
         )
         
+        """
+        cdk for event_bus
+        """
         # Create a custom event bus for security incident events
         self.event_bus = events.EventBus(
             self,
@@ -62,6 +72,9 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             log_retention=aws_logs.RetentionDays.ONE_WEEK
         )
         
+        """
+        cdk for lambda_layers
+        """
         # Create Lambda layers
         self.domain_layer = aws_lambda.LayerVersion(
             self,
@@ -93,6 +106,9 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             description="Layer containing field mappers for security incident response",
         )
         
+        """
+        cdk for assets/security_ir_poller
+        """
         # Create security incident response poller
         poller_role = aws_iam.Role(
             self,
@@ -167,6 +183,102 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         )
 
         self.table.grant_read_write_data(self.poller)
+        
+        """
+        cdk for assets/security_ir_client
+        """
+        # Create a custom role for the Security IR Client Lambda function
+        security_ir_client_role = aws_iam.Role(
+            self,
+            "SecurityIncidentResponseClientRole",
+            assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
+            description="Custom role for Security Incident Response Client Lambda function"
+        )
+        
+        # Add custom policy for CloudWatch Logs permissions
+        security_ir_client_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                effect=aws_iam.Effect.ALLOW,
+                actions=[
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                ],
+                resources=[
+                    f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
+                ]
+            )
+        )
+        
+        security_ir_client = py_lambda.PythonFunction(
+            self,
+            "SecurityIncidentResponseClient",
+            entry=path.join(path.dirname(__file__), "..", "assets/security_ir_client"),
+            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            timeout=Duration.minutes(15),
+            layers=[self.domain_layer, self.mappers_layer, self.wrappers_layer],
+            environment={
+                "JIRA_EVENT_SOURCE": JIRA_EVENT_SOURCE,
+                # Add ServiceNow event source
+                "INCIDENTS_TABLE_NAME": self.table.table_name
+            },
+            role=security_ir_client_role
+        )
+        
+        # create Event Bridge rule for Security Incident Response Client Lambda function
+        security_ir_client_rule = aws_events.Rule(
+            self,
+            "security-ir-client-rule",
+            description="Rule to send all events to Security Incident Response Client lambda function",
+            event_pattern=aws_events.EventPattern(source=[JIRA_EVENT_SOURCE]),
+            event_bus=self.event_bus,
+        )
+        security_ir_client_rule.add_target(aws_events_targets.LambdaFunction(security_ir_client))
+        
+        # Add permissions for Security IR API
+        security_ir_client.add_to_role_policy(
+            aws_iam.PolicyStatement(
+                effect=aws_iam.Effect.ALLOW,
+                actions=[
+                    "dynamodb:PutItem", 
+                    "dynamodb:GetItem", 
+                    "dynamodb:UpdateItem",
+                    "security-ir:UpdateCase",
+                    "security-ir:CreateCaseComment",
+                    "security-ir:UpdateCaseComment",
+                    "security-ir:UpdateCaseStatus",
+                    "security-ir:ListComments",
+                    "security-ir:GetCase",
+                    "security-ir:CreateCase",
+                    "security-ir:CloseCase",
+                    "security-ir:GetCaseAttachmentUploadUrl"
+                ],
+                resources=["*"],
+            )
+        )
+        
+        # Grant specific DynamoDB permissions instead of full access
+        self.table.grant_read_write_data(security_ir_client)
+        
+        CfnOutput(
+            self,
+            "SecurityIRClientLambdaArn",
+            value=security_ir_client.function_arn,
+            description="Security Incident Response Client Lambda Function ARN",
+        )
+        
+        # Add suppressions for IAM5 findings related to wildcard resources
+        NagSuppressions.add_resource_suppressions(
+            security_ir_client,
+            [
+                {
+                    "id": "AwsSolutions-IAM5",
+                    "reason": "Wildcard resources are required for DynamoDB actions",
+                    "applies_to": ["Resource::*"]
+                }
+            ],
+            True
+        )
         
         # Add suppressions for IAM5 findings related to wildcard resources
         NagSuppressions.add_resource_suppressions(

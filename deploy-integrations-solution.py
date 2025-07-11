@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import subprocess  # nosec B404
 import sys
 import os
 import shutil
@@ -18,8 +19,9 @@ def deploy_jira(args):
     # This is safer as it doesn't involve shell interpretation or path searching
     node_path = get_node_path()
     cmd = [
-        node_path, "--experimental-wasm-reftypes",
-        "node_modules/aws-cdk/bin/cdk.js", "deploy",
+        # node_path, "--experimental-wasm-reftypes",
+        # "node_modules/aws-cdk/bin/cdk.js", "deploy",
+        "npx", "cdk", "deploy",
         # TODO: use the renamed app_jira.py in the following command once the Service Now integration implementation is complete
         # TODO: see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210524326651427?focus=true
         "--app", "python app.py",
@@ -30,7 +32,10 @@ def deploy_jira(args):
         "--parameters", f"AwsSecurityIncidentResponseJiraIntegrationStack:jiraUrl={args.url}",
         "--parameters", f"AwsSecurityIncidentResponseJiraIntegrationStack:jiraToken={args.token}"
     ]
-    os.execv(node_path, cmd)  # nosec B606
+    # os.execv(node_path, cmd)  # nosec B606
+    # Explicitly setting shell=False - This ensures no shell interpretation occurs, preventing command injection vulnerabilities
+    # Adding # nosec B404, nosec B603 comment - This tells Bandit that we've reviewed this usage and it's safe
+    result = subprocess.run(cmd, shell=False, capture_output=True, text=True)  # nosec B404 B603
     # Bandit security scanner is flagging a warning about starting a process without a shell (B606), but this is actually a safer approach for our use case.
     # The warning is a false positive because:
     # 1. We're intentionally avoiding shell execution to prevent command injection vulnerabilities

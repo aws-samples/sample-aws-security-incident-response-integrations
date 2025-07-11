@@ -47,7 +47,7 @@ try:
     from jira_wrapper import JiraClient
 except ImportError:
     # This import works for local development and imports locally from the file system
-    from ..mappers.python.jira_sir_mapper import Case, create_case_from_api_response
+    from ..mappers.python.jira_sir_mapper import Case, create_case_from_api_response, map_fields_to_jira, map_case_status
     from ..wrappers.python.jira_wrapper import JiraClient
 
 
@@ -326,6 +326,7 @@ class IncidentService:
         ir_case_arn = ir_case_detail["caseArn"]
 
         try:
+            # TODO: update the following to retrieve GUID from ARN when the service starts using GUIDs
             ir_case_id = re.search(r"/(\d+)$", ir_case_arn).group(1)
         except (AttributeError, IndexError):
             logger.error(f"Failed to extract case ID from ARN: {ir_case_arn}")
