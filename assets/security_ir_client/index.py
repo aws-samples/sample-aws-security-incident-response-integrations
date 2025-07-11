@@ -31,7 +31,11 @@ try:
     from security_ir_wrapper import SecurityIRClient
 except ImportError:
     # This import works for local development and imports locally from the file system
-    from ..mappers.python.jira_sir_mapper import Case, create_case_from_api_response
+    from ..mappers.python.jira_sir_mapper import (
+        Case,
+        create_case_from_api_response,
+        map_fields_to_sir,
+    )
     from ..wrappers.python.security_ir_wrapper import SecurityIRClient
 
 # Get log level from environment variable
@@ -62,12 +66,9 @@ def process_jira_event(jira_issue: dict) -> None:
         None
     """
     # map Jira issue to Security Incident Response case
-    jira_issue_detail = jira_issue["detail"]
-    jira_event_type = jira_issue_detail["eventType"]
-    jira_issue_key = jira_issue_detail["key"]
-    jira_issue_title = jira_issue_detail["summary"]
-    jira_issue_description = jira_issue_detail["description"]
-    jira_issue_status = jira_issue_detail["status"]
+    jira_event_type = jira_issue["eventType"]
+    jira_issue_key = jira_issue["key"]
+    jira_issue_status = jira_issue["status"]
 
     # map Jira issue status to Security IR case status
     ir_case_status = None
@@ -79,56 +80,47 @@ def process_jira_event(jira_issue: dict) -> None:
         ir_case_status = "Closed"
 
     # map fields from issue to case
-    security_ir_fields = map_fields_to_sir(jira_issue_detail)
+    security_ir_fields = map_fields_to_sir(jira_issue)
+    security_ir_fields["caseStatus"] = ir_case_status
+    security_ir_fields["key"] = jira_issue_key
 
     database_service = DatabaseService()
     incident_service = IncidentService()
 
+    # create incident in Security IR via API
+    security_ir_case_id = "0"
     if jira_event_type == "IssueCreated":
-        security_ir_case_id = incident_service.create_security_ir_case(
-            jira_issue_details=jira_issue_detail
+        security_ir_case_id = incident_service.create_incident_in_sir(
+            security_ir_incident=security_ir_fields
         )
+        security_ir_fields["caseId"] = security_ir_case_id
 
         # add attachments
-        if jira_issue_detail["attachments"]:
-            for attachment in jira_issue_detail["attachments"]:
+        if jira_issue["attachments"]:
+            for attachment in jira_issue["attachments"]:
                 attachment_filename = attachment["filename"]
-                logger.info(
-                    f"Adding attachment {attachment_filename} to Security IR case {security_ir_case_id}"
-                )
-                _ = incident_service.add_attachment_to_security_ir_case(
+                _ = incident_service.add_incident_attachment_in_sir(
                     security_ir_case_id=security_ir_case_id,
                     attachment_filename=attachment_filename,
                 )
 
     elif jira_event_type == "IssueUpdated":
-        # add comment
-        ir_case_comment = "The equivalent issue in Jira for this Security Incident case has been updated. Please verify below details."
-        ir_case_comment += f"\nJira Issue Id: {jira_issue_key}"
-        ir_case_comment += f"\nTitle: {jira_issue_title}"
-        ir_case_comment += f"\nDescription: {jira_issue_description}"
-        ir_case_comment += f"\nStatus: {jira_issue_status}"
-
         # get case ID from ddb
-        security_ir_case_id = database_service.get_security_ir_case_id_from_database(
+        security_ir_case_id = database_service.get_incident_id_from_dynamodb(
             jira_issue_id=jira_issue_key
         )
 
-        # add case ID to case object
-        security_ir_fields["caseId"] = security_ir_case_id
-        # add status to case object
-        security_ir_fields["status"] = ir_case_status
-
         if security_ir_case_id:
-            _ = incident_service.update_security_ir_case(
+            security_ir_fields["caseId"] = security_ir_case_id
+            _ = incident_service.update_incident_details_in_sir(
                 security_ir_case=security_ir_fields
             )
 
             # get comments for matching sir case
-            sir_comments = incident_service.get_security_ir_case_comments(
+            sir_comments = incident_service.get_incident_comments_from_sir(
                 security_ir_case_id=security_ir_case_id
             )
-            jira_comments = jira_issue_detail["comments"]
+            jira_comments = jira_issue["comments"]
             sir_comment_bodies = [comment["body"] for comment in sir_comments["items"]]
             jira_comment_bodies = [comment["body"] for comment in jira_comments]
 
@@ -137,45 +129,55 @@ def process_jira_event(jira_issue: dict) -> None:
 
                 if UPDATE_TAG_TO_SKIP in jira_comment:
                     add_comment = False
-                
+
                 for sir_comment in sir_comment_bodies:
                     if str(jira_comment).strip() == str(sir_comment).strip():
                         add_comment = False
-                    
+
                 if add_comment is True:
-                    logger.info("Adding comment '%s' to Security IR case %s", jira_comment, security_ir_case_id)
-                    _ = incident_service.add_comment_to_security_ir_case(
+                    logger.info(
+                        "Adding comment '%s' to Security IR case %s",
+                        jira_comment,
+                        security_ir_case_id,
+                    )
+                    _ = incident_service.add_incident_comment_in_sir(
                         security_ir_case_id=security_ir_case_id,
                         ir_case_comment=jira_comment,
                     )
 
-            # add missing attachments to case
-            security_ir_case = incident_service.get_security_ir_case(
-                security_ir_case_id
-            )
-            security_ir_case_attachments = security_ir_case["caseAttachments"]
-            security_ir_filenames = [
-                security_ir_attachment["fileName"]
-                for security_ir_attachment in security_ir_case_attachments
-            ]
+            # TODO: add missing attachments as files to case
+            # security_ir_case = incident_service.get_incident_from_sir(
+            #     security_ir_case_id
+            # )
+            # security_ir_case_attachments = security_ir_case["caseAttachments"]
+            # security_ir_filenames = [
+            #     security_ir_attachment["fileName"]
+            #     for security_ir_attachment in security_ir_case_attachments
+            # ]
 
-            #  Jira
-            jira_issue_attachments = jira_issue_detail["attachments"]
+            #  add incoming attachments as comments for now
+            jira_issue_attachments = jira_issue["attachments"]
             jira_attachment_filenames = [
                 jira_attachment["filename"]
                 for jira_attachment in jira_issue_attachments
             ]
 
+            # determine whether this is a new attachment before adding
             for jira_attachment_name in jira_attachment_filenames:
-                if jira_attachment_name not in security_ir_filenames:
-                    logger.info(
-                        f"Adding attachment to Security IR case {security_ir_case_id}"
-                    )
+                add_attachment_comment = True
+                for sir_comment in sir_comment_bodies:
+                    if jira_attachment_name in sir_comment:
+                        add_attachment_comment = False
 
+                # only add a comment for new attachments
+                if add_attachment_comment is True:
                     # add attachment to Security IR case
-                    _ = incident_service.add_attachment_to_security_ir_case(
+                    _ = incident_service.add_incident_attachment_in_sir(
                         security_ir_case_id=security_ir_case_id,
                         attachment_filename=jira_attachment_name,
+                    )
+                    logger.info(
+                        f"Added attachment to Security IR case {security_ir_case_id}"
                     )
 
         else:  # create case because doesn't exist in database
@@ -183,50 +185,32 @@ def process_jira_event(jira_issue: dict) -> None:
                 f"Security IR case not found for {jira_issue_key} not found in database. Creating ..."
             )
 
-            _ = incident_service.create_security_ir_case(
-                jira_issue_details=jira_issue_detail
+            # create incident in Security Incident Response
+            security_ir_case_id = incident_service.create_incident_in_sir(
+                security_ir_incident=security_ir_fields
             )
 
+    # get latest security_ir now that all fields have been updated
+    #  and store it in the database
+    security_ir_incident = incident_service.get_incident_from_sir(
+        security_ir_case_id
+    )
+    if security_ir_incident:
+        security_ir_incident["caseId"] = security_ir_case_id
+        database_service.store_incident_in_dynamodb(security_ir_incident)
 
 class DatabaseService:
     """Class to handle database operations"""
 
-    dynamodb = boto3.resource("dynamodb")
-    ddb_table = dynamodb.Table(os.environ["INCIDENTS_TABLE_NAME"])
+    __dynamodb = boto3.resource("dynamodb")
+    __table_name = os.environ["INCIDENTS_TABLE_NAME"]
+    __ddb_table = __dynamodb.Table(__table_name)
+    __dynamodb_client = boto3.client("dynamodb")
 
     def __init__(self):
         """Initialize the database manager"""
 
-    def add_item(self, jira_issue_details: dict, security_ir_case: dict) -> None:
-        """
-        Add a new Jira issue to the DynamoDB table
-
-        Args:
-            jira_issue_details: Dictionary containing Jira issue details
-
-        Returns:
-            None
-        """
-        try:
-            security_ir_case_id = security_ir_case["caseId"]
-            ddb_pk = f"Case#{security_ir_case_id}"
-
-            self.ddb_table.put_item(
-                Item={
-                    "PK": ddb_pk,
-                    "SK": "latest",
-                    "incidentDetails": security_ir_case,
-                    "jiraIssueDetails": json.dumps(
-                        jira_issue_details, default=json_datetime_encoder
-                    ),
-                    "jiraIssueId": jira_issue_details["key"],
-                }
-            )
-
-        except Exception as e:
-            logger.error(f"Error adding item to the DynamoDB table: {e}")
-
-    def get_security_ir_case_id_from_database(self, jira_issue_id: str) -> str:
+    def get_incident_id_from_dynamodb(self, jira_issue_id: str) -> str:
         """
         Fetch Case Id associated with Issue Id in Jira
 
@@ -237,7 +221,7 @@ class DatabaseService:
             Security Incident Response Case Id
         """
         try:
-            response = self.ddb_table.scan(
+            response = self.__ddb_table.scan(
                 FilterExpression=Attr("jiraIssueId").eq(jira_issue_id), Limit=1000
             )
             if response["Items"] == []:
@@ -265,14 +249,102 @@ class DatabaseService:
             return None
 
 
+    def store_incident_in_dynamodb(self, incident: dict) -> bool:
+        """
+        Store or update incidents in DynamoDB
+
+        Args:
+            incidents: List of incidents to store
+            table_name: Name of the DynamoDB table
+
+        Returns:
+            Boolean indicating success or failure
+        """
+        if not incident or not self.__table_name:
+            logger.warning("No incidents or table name provided")
+            return False
+
+        try:
+            case_id = incident["caseId"]
+            case_status = incident["caseStatus"]
+
+            if case_status != "Closed":
+                # skip closed incidents
+                print(f"Processing incident id: {case_id}")
+
+                # Check if incident exists in DynamoDB
+                existing_incident = self.__dynamodb_client.get_item(
+                    TableName=self.__table_name,
+                    Key={"PK": {"S": f"Case#{case_id}"}, "SK": {"S": "latest"}},
+                ).get("Item", {})
+
+                if existing_incident:
+                    # Update existing incident if details have changed
+                    existing_details = json.loads(
+                        existing_incident.get("incidentDetails", {}).get("S", "{}")
+                    )
+                    if existing_details != incident:
+                        self.__dynamodb_client.update_item(
+                            TableName=self.__table_name,
+                            Key={"PK": {"S": f"Case#{case_id}"}, "SK": {"S": "latest"}},
+                            UpdateExpression="SET incidentDetails = :incidentDetails",
+                            ExpressionAttributeValues={
+                                ":incidentDetails": {
+                                    "S": json.dumps(
+                                        incident, default=self.json_datetime_encoder
+                                    )
+                                }
+                            },
+                        )
+                        logger.info("Incident %s updated in database", case_id)
+
+                else:
+                    # Create new incident
+                    self.__dynamodb_client.put_item(
+                        TableName=self.__table_name,
+                        Item={
+                            "PK": {"S": f"Case#{case_id}"},
+                            "SK": {"S": "latest"},
+                            "incidentDetails": {
+                                "S": json.dumps(
+                                    incident, default=self.json_datetime_encoder
+                                )
+                            },
+                        },
+                    )
+                    logger.info("Incident %s added to database", case_id)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Error storing incident in DynamoDB: {str(e)}")
+            return False
+
+    def json_datetime_encoder(self, obj: Any) -> str:
+        """
+        JSON encoder for datetime objects
+
+        Args:
+            obj: Object to encode
+
+        Returns:
+            String representation of datetime or raises TypeError
+        """
+        if isinstance(obj, (datetime.date, datetime.datetime)):
+            return obj.isoformat()
+        raise TypeError(f"Type {type(obj)} not serializable")
+
+
 class IncidentService:
     """Class to handle security IR incident operations"""
+
+    __database_service = DatabaseService()
 
     def __init__(self):
         """Initialize the incident manager"""
         self.ir_client = SecurityIRClient()
 
-    def update_security_ir_case(self, security_ir_case: dict) -> bool:
+    def update_incident_details_in_sir(self, security_ir_case: dict) -> bool:
         """
         Updates Security IR case using API
 
@@ -282,7 +354,6 @@ class IncidentService:
         Returns:
             result of update attempt
         """
-        logger.info(f"Security IR case: {security_ir_case}")
         security_ir_case_id = security_ir_case["caseId"]
         # TODO: Add watcher support
         # watchers
@@ -307,7 +378,7 @@ class IncidentService:
             _ = security_ir_client.update_case(**request_kwargs)
 
             # update case status
-            _ = self.update_security_ir_case_status(security_ir_case)
+            _ = self.update_incident_status_in_sir(security_ir_case)
 
         except Exception as e:
             logger.error(
@@ -317,7 +388,7 @@ class IncidentService:
 
         return True
 
-    def update_security_ir_case_status(self, security_ir_case: dict) -> bool:
+    def update_incident_status_in_sir(self, security_ir_case: dict) -> bool:
         """
         Updates Security IR case status using API
 
@@ -328,7 +399,8 @@ class IncidentService:
             result of update status attempt
         """
         security_ir_case_id = security_ir_case["caseId"]
-        security_ir_case_status = security_ir_case["status"]
+        security_ir_case_status = security_ir_case["caseStatus"]
+
         if security_ir_case_status == "Closed":
             try:
                 request_kwargs = {"caseId": security_ir_case_id}
@@ -363,7 +435,7 @@ class IncidentService:
 
         return True
 
-    def get_security_ir_case_comments(
+    def get_incident_comments_from_sir(
         self, security_ir_case_id: str
     ) -> List[Dict[str, Any]]:
         """
@@ -382,7 +454,7 @@ class IncidentService:
 
         return sir_comments
 
-    def add_comment_to_security_ir_case(
+    def add_incident_comment_in_sir(
         self, security_ir_case_id: str, ir_case_comment: str
     ) -> bool:
         """
@@ -407,7 +479,7 @@ class IncidentService:
 
         return True
 
-    def create_security_ir_case(self, jira_issue_details: dict) -> str:
+    def create_incident_in_sir(self, security_ir_incident: dict) -> str:
         """
         Create a new case in Security IR based on Jira issue
 
@@ -423,8 +495,6 @@ class IncidentService:
 
         # 1. create case in Security IR
         try:
-            security_ir_fields = map_fields_to_sir(jira_issue_details)
-
             # get account ID for default
             sts_client = boto3.client("sts")
             response = sts_client.get_caller_identity()
@@ -444,16 +514,16 @@ class IncidentService:
                 {"ipAddress": "1.2.3.4", "userAgent": "To be added"}
             ]
 
-            security_ir_description = security_ir_fields.get(
+            security_ir_description = security_ir_incident.get(
                 "description", "Description not provided"
             )
             security_ir_description += "\n\nThis Security Incident Response case was created as a result of a Jira issue being created."
             security_ir_description += (
-                f"\n\nRelated Jira issue: {jira_issue_details['key']}"
+                f"\n\nRelated Jira issue: {security_ir_incident['key']}"
             )
 
             request_kwargs = {
-                "title": security_ir_fields.get("title", "Unknown"),
+                "title": security_ir_incident.get("title", "Unknown"),
                 "description": security_ir_description,
                 "engagementType": "Security Incident",
                 "resolverType": "Self",
@@ -471,26 +541,10 @@ class IncidentService:
             # get newly-created case
             security_ir_case = security_ir_client.create_case(**request_kwargs)
             security_ir_case_id = security_ir_case["caseId"]
-            logger.info(
-                f"Security Incident Response case created successfully: {security_ir_case_id}"
-            )
-
-            # add any attachments that may have been included in the Jira issue creation
-            jira_issue_attachments = jira_issue_details["attachments"]
-            if jira_issue_attachments:
-                for jira_attachment in jira_issue_attachments:
-                    attachment_filename = jira_attachment["filename"]
-                    self.add_attachment_to_security_ir_case(
-                        security_ir_case_id=security_ir_case_id,
-                        attachment_filename=attachment_filename,
-                    )
-                    logger.info(
-                        f"Added attachment {attachment_filename} to Security IR case {security_ir_case_id}"
-                    )
 
             # # add to database
-            database_service = DatabaseService()
-            database_service.add_item(jira_issue_details, security_ir_case)
+            security_ir_incident = self.get_incident_from_sir(security_ir_case_id)
+            security_ir_incident["caseId"] = security_ir_case_id
 
         except Exception as e:
             logger.error(f"Error creating Security IR case: {str(e)}")
@@ -498,7 +552,7 @@ class IncidentService:
 
         return security_ir_case_id
 
-    def get_security_ir_case(self, security_ir_case_id: str) -> dict:
+    def get_incident_from_sir(self, security_ir_case_id: str) -> dict:
         """
         Gets Security IR case based on case ID
 
@@ -519,7 +573,7 @@ class IncidentService:
             )
             return None
 
-    def add_attachment_to_security_ir_case(
+    def add_incident_attachment_in_sir(
         self, security_ir_case_id: str, attachment_filename: str
     ) -> bool:
         """
@@ -538,7 +592,7 @@ class IncidentService:
 
         try:
             # TODO: add support to copy binary file attachment from Jira to Security IR
-            _ = self.add_comment_to_security_ir_case(security_ir_case_id, comment)
+            _ = self.add_incident_comment_in_sir(security_ir_case_id, comment)
         except Exception as e:
             logger.info(
                 f"Error adding attachment to Security IR case {security_ir_case_id}: {str(e)}"
@@ -546,21 +600,6 @@ class IncidentService:
             return False
 
         return True
-
-
-def json_datetime_encoder(obj: Any) -> str:
-    """
-    JSON encoder for datetime objects
-
-    Args:
-        obj: Object to encode
-
-    Returns:
-        String representation of datetime or raises TypeError
-    """
-    if isinstance(obj, (datetime.date, datetime.datetime)):
-        return obj.isoformat()
-    raise TypeError(f"Type {type(obj)} not serializable")
 
 
 def handler(event, context) -> dict:
@@ -592,4 +631,3 @@ def handler(event, context) -> dict:
             "Security Incident Response Client Lambda function processing completed"
         ),
     }
-
