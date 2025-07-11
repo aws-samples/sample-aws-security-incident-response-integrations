@@ -1,265 +1,201 @@
 """
-Service Now Field Mapper for AWS Security Incident Response Integration
-
-This module provides mapping functionality between AWS Security Incident Response
-and Service Now fields, statuses, watchers, and closure codes.
+ServiceNow API wrapper for AWS Security Incident Response integration.
+This module provides a wrapper around the ServiceNow API for use in the Security Incident Response integration.
 """
+
+import os
 import logging
-from typing import Dict, List, Tuple, Any, Optional
+import boto3
+from typing import Dict, Optional, Any
+from pysnc import ServiceNowClient as SnowClient
+from flask import session
+
+# Import mappers with fallbacks for different environments
+try:
+    # This import works for lambda function and imports the lambda layer at runtime
+    from service_now_sir_mapper import map_fields_to_service_now, map_case_status
+except ImportError:
+    # This import works for local development and imports locally from the file system
+    from mappers.python.service_now_sir_mapper import map_fields_to_service_now, map_case_status
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-# Configuration-based field mappings
-STATUS_MAPPING = {
-    'Detection and Analysis': 'In Progress',
-    'Containment, Eradication and Recovery': 'In Progress',
-    'Post-Incident Activity': 'In Review',
-    'Closed': 'Resolved'
-}
+# Initialize AWS clients
+ssm_client = boto3.client("ssm")
 
-# Default status if no mapping exists
-DEFAULT_SERVICE_NOW_STATUS = 'New'
+class ServiceNowClient:
+    """Class to handle ServiceNow API interactions"""
 
-# Custom field mappings (Service Now field name to AWS Security Incident Response field)
-FIELD_MAPPING = {
-    'short_description': 'title',
-    'description': 'description',
-    # Add additional field mappings based on Service Now instance configuration
-    # Example: 'u_severity': 'severity',
-}
-
-# Mandatory fields required by ServiceNow data policy
-# Based on the error, Resolution code is mandatory even for new incidents
-MANDATORY_FIELDS = {
-    'close_code': '',  # Empty resolution code for new incidents - will be populated when closed
-    'caller_id': 'admin',  # Default caller - adjust based on your ServiceNow setup
-    'category': 'inquiry',  # Default category
-    'impact': '3',  # Default impact (1=High, 2=Medium, 3=Low)
-    'urgency': '3',  # Default urgency (1=High, 2=Medium, 3=Low)
-    'priority': '3',  # Default priority (calculated from impact/urgency)
-}
-
-# Resolution fields for closed incidents
-RESOLUTION_FIELDS = {
-    'close_code': 'Solved (Work Around)',  # Standard ServiceNow resolution code field
-    'close_notes': 'Incident resolved through AWS Security Incident Response integration',  # Standard ServiceNow close notes field
-}
-
-# Closure code mapping
-CLOSURE_CODE_FIELD = 'u_closure_code'  # Adjust based on actual Service Now configuration
-DEFAULT_CLOSURE_CODE = 'Other'
-
-# Closure code values mapping
-CLOSURE_CODE_MAPPING = {
-    'false_positive': 'False Positive',
-    'resolved': 'Resolved',
-    'duplicate': 'Duplicate',
-    'benign': 'Benign',
-    'expected_activity': 'Expected Activity',
-    # Add other mappings as needed
-}
-
-
-def map_case_status(sir_case_status: str) -> Tuple[str, Optional[str]]:
-    """
-    Maps AWS Security Incident Response case status to Service Now workflow status
-    
-    Args:
-        sir_case_status: Status from AWS Security Incident Response case
+    def __init__(self, instance_id, username, password_param_name):
+        """
+        Initialize the ServiceNow client
         
-    Returns:
-        Tuple containing:
-        - Service Now status
-        - Comment to add if the mapping is not direct (None if direct mapping)
-    """
-    service_now_status = STATUS_MAPPING.get(sir_case_status, DEFAULT_SERVICE_NOW_STATUS)
-    
-    # If the mapping is not direct (i.e., multiple AWS Security Incident Response statuses map to the same Service Now status),
-    # provide a comment for additional context
-    if sir_case_status in STATUS_MAPPING and list(STATUS_MAPPING.values()).count(service_now_status) > 1:
-        comment = f"AWS Security Incident Response case status updated to '{sir_case_status}' (mapped to Service Now status '{service_now_status}')"
-        return service_now_status, comment
-    
-    return service_now_status, None
+        Args:
+            instance_id: ServiceNow instance ID
+            username: ServiceNow username
+            password: ServiceNow password
+        """
+        self.instance_id = instance_id
+        self.username = username
+        self.password_param_name = password_param_name
+        self.client = self._create_client()
 
-
-def map_fields_to_service_now(sir_case: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Maps AWS Security Incident Response case fields to Service Now fields
-    
-    Args:
-        sir_case: Dictionary containing AWS Security Incident Response case data
+    def _create_client(self) -> Optional[SnowClient]:
+        """
+        Create a ServiceNow client instance
         
-    Returns:
-        Dictionary with mapped fields for Service Now
-    """
-    service_now_fields = {}
-    unmapped_fields = {}
-    
-    # Add mandatory fields required by ServiceNow data policy
-    service_now_fields.update(MANDATORY_FIELDS)
-    
-    # Map fields according to configuration
-    for service_now_field, sir_field in FIELD_MAPPING.items():
-        if sir_field in sir_case:
-            service_now_fields[service_now_field] = sir_case[sir_field]
-    
-    # Collect unmapped fields to include in description
-    for key, value in sir_case.items():
-        if key not in FIELD_MAPPING.values():
-            # Skip complex objects, empty lists, and None values
-            if value and not (isinstance(value, list) and len(value) == 0):
-                if isinstance(value, (str, int, float, bool)) or (isinstance(value, list) and all(isinstance(x, (str, int, float, bool)) for x in value)):
-                    unmapped_fields[key] = value
-    
-    # Handle special case for description - append unmapped fields
-    if 'description' in service_now_fields and unmapped_fields:
-        service_now_fields['description'] += "\n\n--- Additional AWS Security Incident Response Information ---\n"
-        
-        # Format specific fields with proper capitalization and formatting
-        field_display_names = {
-            'caseArn': 'Case ARN',
-            'incidentStartDate': 'Incident Start Date',
-            'impactedAccounts': 'Impacted Accounts',
-            'impactedRegions': 'Impacted regions',
-            'createdDate': 'Created Date',
-            'lastUpdated': 'Last Updated',
-            # Add other field mappings as needed
-        }
-        
-        # Process fields in a specific order if they exist
-        priority_fields = ['caseArn', 'incidentStartDate', 'impactedAccounts',
-                          'impactedRegions', 'createdDate', 'lastUpdated']
-        
-        # First add priority fields in order
-        for field in priority_fields:
-            if field in unmapped_fields:
-                display_name = field_display_names.get(field, field.capitalize())
-                service_now_fields['description'] += f"\n{display_name}: {unmapped_fields[field]}"
-                # Remove from unmapped_fields to avoid duplication
-                del unmapped_fields[field]
-        
-        # Then add any remaining unmapped fields
-        for key, value in unmapped_fields.items():
-            display_name = field_display_names.get(key, key.capitalize())
-            service_now_fields['description'] += f"\n{display_name}: {value}"
-    
-    # Handle closure code if present
-    if 'closureCode' in sir_case and sir_case.get('caseStatus') == 'Closed':
-        closure_code = map_closure_code(sir_case['closureCode'])
-        service_now_fields[CLOSURE_CODE_FIELD] = closure_code
-    
-    # Add resolution fields only when incident is being closed/resolved
-    case_status = sir_case.get('caseStatus', '')
-    mapped_state = service_now_fields.get('state', '')
-    
-    # Check if this is a closed/resolved incident
-    if (case_status in ['Closed', 'Resolved'] or
-        mapped_state in ['Resolved', 'Closed', '6', '7']):  # 6=Resolved, 7=Closed in ServiceNow
-        service_now_fields.update(RESOLUTION_FIELDS)
-    
-    return service_now_fields
+        Returns:
+            PySNCClient or None if creation fails
+        """
+        try:
+            # Use provided parameters or fetch from SSM
+            instance = self.instance_id
+            username = self.username
+            password = self.__get_password()
 
+            if not instance:
+                logger.error("No ServiceNow instance id provided")
+                return None
+            elif not username:
+                logger.error("No ServiceNow username provided")
+                return None
+            
+            return SnowClient(instance, (username, password))
 
-def map_fields_to_sir(service_now_incident: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Maps Service Now fields to AWS Security Incident Response case fields
-    
-    Args:
-        service_now_incident: Dictionary containing Service Now incident data
+        except Exception as e:
+            logger.error(f"Error creating ServiceNow client: {str(e)}")
+            return None
+
+    def __get_password(self) -> Optional[str]:
+        """
+        Fetch the ServiceNow password from SSM Parameter Store
         
-    Returns:
-        Dictionary with mapped fields for AWS Security Incident Response
-    """
-    sir_fields = {}
-    
-    # Reverse mapping
-    reverse_mapping = {sir_field: service_now_field for service_now_field, sir_field in FIELD_MAPPING.items()}
-    
-    for sir_field, service_now_field in reverse_mapping.items():
-        if service_now_field in service_now_incident:
-            sir_fields[sir_field] = service_now_incident[service_now_field]
-    
-    # Extract closure code if available
-    if CLOSURE_CODE_FIELD in service_now_incident:
-        service_now_closure = service_now_incident[CLOSURE_CODE_FIELD]
-        sir_closure = reverse_map_closure_code(service_now_closure)
-        if sir_closure:
-            sir_fields['closureCode'] = sir_closure
-    
-    return sir_fields
-
-
-def map_watchers(sir_watchers: List[Any], service_now_watchers: List[str]) -> Tuple[List[Any], List[str]]:
-    """
-    Maps watchers between AWS Security Incident Response and Service Now
-    
-    Args:
-        sir_watchers: List of watcher objects from AWS Security Incident Response (can be strings or dicts with email field)
-        service_now_watchers: List of watcher emails from Service Now
+        Returns:
+            Password or None if retrieval fails
+        """
+        try:
+            if not self.password_param_name:
+                logger.error("No ServiceNow password param name provided")
+                return None
+            
+            password_param_name = self.password_param_name
+            response = ssm_client.get_parameter(
+                Name=password_param_name, WithDecryption=True
+            )
+            return response["Parameter"]["Value"]
+        except Exception as e:
+            logger.error(f"Error retrieving ServiceNow password from SSM: {str(e)}")
+            return None
         
-    Returns:
-        Tuple containing:
-        - List of watchers to add to Service Now
-        - List of watchers to add to AWS Security Incident Response
-    """
-    # Extract emails from AWS Security Incident Response watchers for comparison
-    sir_watcher_emails = []
-    for watcher in sir_watchers:
-        if isinstance(watcher, dict) and "email" in watcher:
-            sir_watcher_emails.append(watcher["email"].lower())
-        elif isinstance(watcher, str):
-            sir_watcher_emails.append(watcher.lower())
-        else:
-            # Skip watchers that don't have a usable identifier
-            logger.warning(f"Skipping watcher with invalid format: {watcher}")
-    
-    # Convert Service Now watcher emails to lowercase
-    service_now_watchers_lower = [w.lower() for w in service_now_watchers if isinstance(w, str)]
-    
-    # Find watchers in AWS Security Incident Response that are not in Service Now
-    watchers_to_add_to_service_now = []
-    for i, watcher in enumerate(sir_watchers):
-        watcher_email = watcher["email"].lower() if isinstance(watcher, dict) and "email" in watcher else (
-            watcher.lower() if isinstance(watcher, str) else None
-        )
-        if watcher_email and watcher_email not in service_now_watchers_lower:
-            watchers_to_add_to_service_now.append(watcher)
-    
-    # Find watchers in Service Now that are not in AWS Security Incident Response
-    watchers_to_add_to_sir = []
-    for i, watcher_email in enumerate(service_now_watchers_lower):
-        if watcher_email not in sir_watcher_emails:
-            watchers_to_add_to_sir.append(service_now_watchers[i])
-    
-    return watchers_to_add_to_service_now, watchers_to_add_to_sir
-
-
-def map_closure_code(sir_closure_code: str) -> str:
-    """
-    Maps AWS Security Incident Response closure code to Service Now field value
-    
-    Args:
-        sir_closure_code: Closure code from AWS Security Incident Response
+    def __get_glide_record(self, record_type):
+        """
+        Prepare a Glide Record using ServiceNowClient for querying
         
-    Returns:
-        Service Now field value for closure code
-    """
-    return CLOSURE_CODE_MAPPING.get(sir_closure_code.lower(), DEFAULT_CLOSURE_CODE)
+        Returns:
+            GlideRecord or None if retrieval fails
+        """
+        try:
+            glide_record = self.client.GlideRecord(record_type)
+            return glide_record
+        except Exception as e:
+            logger.error(f"Error preparing GlideRecord: {str(e)}")
+            return None
 
-
-def reverse_map_closure_code(service_now_closure_code: str) -> Optional[str]:
-    """
-    Maps Service Now closure code back to AWS Security Incident Response closure code
-    
-    Args:
-        service_now_closure_code: Closure code from Service Now
+    def __prepare_service_now_incident(self, glide_record: Any, fields: Dict[str, Any]):
+        """
+        Prepare ServiceNow Glide Record for incident creation
         
-    Returns:
-        AWS Security Incident Response closure code
-    """
-    # Create reverse mapping
-    reverse_mapping = {v: k for k, v in CLOSURE_CODE_MAPPING.items()}
-    return reverse_mapping.get(service_now_closure_code)
+        Args:
+            glide_record: ServiceNow Glide Record
+            fields: ServiceNow mapped fields
+            
+        Returns:
+            Glide record for Incident creation with added fields
+        """
+        glide_record.short_description = fields["short_description"]
+        glide_record.description = fields["description"]
+        glide_record.state = fields["state"]
+        glide_record.impact = fields["impact"]
+        glide_record.priority = fields["priority"]
+        glide_record.incident_state = fields["incident_state"]
+        glide_record.urgency = fields["urgency"]
+        glide_record.severity = fields["severity"]
+        glide_record.comments_and_work_notes = fields["comments_and_work_notes"]
+        glide_record.category = fields["category"]
+        glide_record.subcategory = fields["subcategory"]
+        
+        return glide_record
+
+    def get_incident(self, incident_number: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a ServiceNow incident by incident_number
+        
+        Args:
+            incident_number: The ServiceNow incident_number
+            
+        Returns:
+            Incident or None if retrieval fails
+        """
+        try:
+            glide_record = self.__get_glide_record('incident')
+            glide_record.add_query('number', incident_number)
+            glide_record.query()
+            if glide_record.next():
+                logger.info(f"Incident details for {incident_number} from ServiceNow: {glide_record}")
+                return glide_record
+            
+        except Exception as e:
+            logger.error(f"Error getting incident details for {incident_number} from ServiceNow: {str(e)}")
+            return None
+    
+    def create_incident(self, fields: Dict[str, Any]) -> Optional[Any]:
+        """
+        Create a new ServiceNow incident
+        
+        Args:
+            fields: Dictionary of incident fields
+            
+        Returns:
+            Created ServiceNow incident or None if creation fails
+        """
+        try:
+            glide_record = self.__get_glide_record('incident')
+            glide_record.initialize()
+            glide_record = self.__prepare_service_now_incident(glide_record, fields)
+            incident_sys_id = glide_record.insert() # Insert the record and get the sys_id
+            logger.info(f"Incident created with sys_id: {incident_sys_id}")
+            incident_number = glide_record.number
+            logger.info(f"Newly created Incident Number: {incident_number}")
+            return incident_number
+        except Exception as e:
+            logger.error(f"Incident creation failed with error: {e}")
+            return None
+        
+    def update_incident(self, incident_number, fields: Dict[str, Any]) -> Optional[Any]:
+        """
+        Update an existing ServiceNow incident
+        
+        Args:
+            incident_number: Incident number in ServiceNow to be updated
+            fields: Dictionary of incident fields
+            
+        Returns:
+            Updated ServiceNow incident or None if update fails
+        """
+        try:
+            glide_record = self.__get_glide_record('incident')
+            glide_record.add_query('number', incident_number)
+            glide_record.query()
+            if glide_record.next():
+                glide_record = self.__prepare_service_now_incident(glide_record, fields)
+                glide_record.update()
+                logger.info(f"Incident {incident_number} updated successfully")
+                return glide_record
+            else:
+                logger.error(f"Incident {incident_number} not found")
+                return None
+        except Exception as e:
+            logger.error(f"Incident update failed with error: {e}")
+            return None
