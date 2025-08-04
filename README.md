@@ -83,6 +83,10 @@ in the command-line using the following steps:
 
 **See [ServiceNow documentation](documentation/SERVICE_NOW/SERVICE_NOW.md) for detailed instructions on how to deploy ServiceNow integration.**
 
+#### Extending to Additional Integration Targets
+
+**See [Extending Integrations with Generative AI](documentation/EXTENDING_INTEGRATIONS.md) for detailed instructions on how to use AI assistance to add support for additional incident management platforms beyond Jira and ServiceNow.**
+
 ## Overview
 
 AWS Security Incident Response helps customers respond when it matters the most. This project aims to address the gap between the service's public APIs/SDKs and direct connections to common applications like Slack, JIRA, and ServiceNow. It enables customers to execute API actions directly from their preferred applications while preserving AWS Security Incident Response core capabilities.
