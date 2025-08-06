@@ -33,23 +33,23 @@ def deploy_jira(args):
 
 def deploy_servicenow(args):
     try:
-        print("Service Now integration is under development/maintenance...Please wait for its release")
-        # cmd = [
-        #     "npx", "cdk", "deploy",
-        #     "--app", "python3 app_service_now.py",
-        #     "AwsSecurityIncidentResponseSampleIntegrationsCommonStack",
-        #     "AwsSecurityIncidentResponseServiceNowIntegrationStack",
-        #     "--parameters", f"AwsSecurityIncidentResponseSampleIntegrationsCommonStack:logLevel={args.log_level}",
-        #     "--parameters", f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowInstanceId={args.instance_id}",
-        #     "--parameters", f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowUser={args.username}",
-        #     "--parameters", f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowPassword={args.password}"
-        # ]
-        # print("\n🔄 Deploying ServiceNow integration...\n")
-        # # Using subprocess with a list of arguments is safe from shell injection
-        # result = subprocess.run(cmd, check=True)  # nosec B603
-        # if result.returncode == 0:
-        #     print("\n✅ ServiceNow integration deployed successfully!")
-        # return result.returncode
+        # print("Service Now integration is under development/maintenance...Please wait for its release")
+        cmd = [
+            "npx", "cdk", "deploy",
+            "--app", "python3 app_service_now.py",
+            "AwsSecurityIncidentResponseSampleIntegrationsCommonStack",
+            "AwsSecurityIncidentResponseServiceNowIntegrationStack",
+            "--parameters", f"AwsSecurityIncidentResponseSampleIntegrationsCommonStack:logLevel={args.log_level}",
+            "--parameters", f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowInstanceId={args.instance_id}",
+            "--parameters", f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowUser={args.username}",
+            "--parameters", f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowPassword={args.password}"
+        ]
+        print("\n🔄 Deploying ServiceNow integration...\n")
+        # Using subprocess with a list of arguments is safe from shell injection
+        result = subprocess.run(cmd, check=True)  # nosec B603
+        if result.returncode == 0:
+            print("\n✅ ServiceNow integration deployed successfully!")
+        return result.returncode
     except subprocess.CalledProcessError as e:
         print(f"\n❌ Error deploying ServiceNow integration: {e}")
         return e.returncode

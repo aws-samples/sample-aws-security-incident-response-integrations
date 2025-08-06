@@ -88,6 +88,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             string_value=service_now_password_param.value_as_string,
             description="Service Now password",
         )
+        service_now_password_ssm_param.apply_removal_policy(RemovalPolicy.DESTROY)
 
         service_now_user_ssm = aws_ssm.StringParameter(
             self,
@@ -96,6 +97,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             string_value=service_now_user_param.value_as_string,
             description="Service Now user",
         )
+        service_now_user_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
 
         service_now_instance_id_ssm = aws_ssm.StringParameter(
             self,
@@ -104,6 +106,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             string_value=service_now_instance_id_param.value_as_string,
             description="Service Now instance id",
         )
+        service_now_instance_id_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
 
         """
         cdk for assets/service_now_client

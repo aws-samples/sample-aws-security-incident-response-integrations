@@ -494,10 +494,10 @@ class ServiceNowService:
             ]
             
             incident_dict = {
-                "sys_id": service_now_incident.sys_id,
-                "number": service_now_incident.number,
-                "short_description": service_now_incident.short_description,
-                "description": service_now_incident.description,
+                "sys_id": service_now_incident.sys_id.get_display_value(),
+                "number": service_now_incident.number.get_display_value(),
+                "short_description": service_now_incident.short_description.get_display_value(),
+                "description": service_now_incident.description.get_display_value(),
                 "sys_updated_on": service_now_incident.sys_updated_on.get_display_value(),
                 "sys_created_on": service_now_incident.sys_created_on.get_display_value(),
                 "sys_created_by": service_now_incident.sys_created_by.get_display_value(),

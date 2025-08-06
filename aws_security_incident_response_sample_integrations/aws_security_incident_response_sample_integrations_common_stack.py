@@ -18,7 +18,7 @@ from aws_cdk import (
 from .event_bus_logger_construct import EventBusLoggerConstruct
 from cdk_nag import NagSuppressions
 from constructs import Construct
-from .constants import SECURITY_IR_EVENT_SOURCE, JIRA_EVENT_SOURCE
+from .constants import SECURITY_IR_EVENT_SOURCE, JIRA_EVENT_SOURCE, SERVICE_NOW_EVENT_SOURCE
 
 class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
@@ -219,7 +219,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             layers=[self.domain_layer, self.mappers_layer, self.wrappers_layer],
             environment={
                 "JIRA_EVENT_SOURCE": JIRA_EVENT_SOURCE,
-                # Add ServiceNow event source
+                "SERVICE_NOW_EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
                 "INCIDENTS_TABLE_NAME": self.table.table_name,
                 "LOG_LEVEL": self.log_level_param.value_as_string
             },
@@ -231,7 +231,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             self,
             "security-ir-client-rule",
             description="Rule to send all events to Security Incident Response Client lambda function",
-            event_pattern=aws_events.EventPattern(source=[JIRA_EVENT_SOURCE]),
+            event_pattern=aws_events.EventPattern(source=[JIRA_EVENT_SOURCE, SERVICE_NOW_EVENT_SOURCE]),
             event_bus=self.event_bus,
         )
         security_ir_client_rule.add_target(aws_events_targets.LambdaFunction(security_ir_client))

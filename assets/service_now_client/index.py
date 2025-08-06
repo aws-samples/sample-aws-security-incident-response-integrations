@@ -191,8 +191,12 @@ class ServiceNowService:
                     f"Failed to get incident {service_now_incident_id} from ServiceNow"
                 )
                 return None
+            
+            service_now_incident_attachments = (
+                self.service_now_client.get_incident_attachments(service_now_incident)
+            )
 
-            return self.extract_incident_details(service_now_incident)
+            return self.extract_incident_details(service_now_incident, service_now_incident_attachments)
         except Exception as e:
             logger.error(f"Error getting incident details from ServiceNow: {str(e)}")
             return None
@@ -250,7 +254,7 @@ class ServiceNowService:
             logger.error(f"Error updating incident details from ServiceNow: {str(e)}")
             return None
 
-    def extract_incident_details(self, service_now_incident: Any) -> Dict[str, Any]:
+    def extract_incident_details(self, service_now_incident: Any, service_now_incident_attachments: Any) -> Dict[str, Any]:
         """
         Extract relevant details from a ServiceNow incident object into a serializable dictionary
 
@@ -261,6 +265,14 @@ class ServiceNowService:
             Dictionary with serializable ServiceNow incident details
         """
         try:
+            attachments_list = [
+                {
+                    "filename": attachment.file_name,
+                    "content_type": attachment.content_type,
+                }
+                for attachment in service_now_incident_attachments
+            ]
+            
             incident_dict = {
                 "sys_id": service_now_incident.sys_id,
                 "number": service_now_incident.number,
@@ -291,6 +303,7 @@ class ServiceNowService:
                 "sys_tags": service_now_incident.sys_tags.get_display_value(),
                 "category": service_now_incident.subcategory.get_display_value(),
                 "subcategory": service_now_incident.subcategory.get_display_value(),
+                "attachments": attachments_list,
             }
             return incident_dict
         except Exception as e:

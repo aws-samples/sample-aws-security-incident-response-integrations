@@ -356,6 +356,7 @@ class ServiceNowApiService:
             logger.error(
                 f"Error while creating Outbound REST Message in Service Now to publish Incident related events to AWS Security Incident Response: {str(e)}"
             )
+            return None
 
     def _create_incident_business_rule(
         self,
@@ -435,39 +436,55 @@ def handler(event, context):
     """
     Custom resource handler to create ServiceNow resources
     """
-    # Get environment variables
-    service_now_resource_prefix = os.environ.get("SERVICE_NOW_RESOURCE_PREFIX")
-    webhook_url = os.environ.get("WEBHOOK_URL", "")
-    api_auth_secret_arn = os.environ.get("API_AUTH_SECRET")
+    request_type = event.get("RequestType")
+    
+    # Handle DELETE events - just return success
+    if request_type == "DELETE":
+        logger.info("DELETE request received - returning success")
+        return {"Status": "SUCCESS", "PhysicalResourceId": "service-now-api-setup"}
+    
+    # Handle CREATE and UPDATE events
+    try:
+        # Get environment variables
+        service_now_resource_prefix = os.environ.get("SERVICE_NOW_RESOURCE_PREFIX")
+        webhook_url = os.environ.get("WEBHOOK_URL", "")
+        api_auth_secret_arn = os.environ.get("API_AUTH_SECRET")
 
-    # Get credentials from SSM
-    parameter_service = ParameterService()
-    instance_id = parameter_service.get_parameter(
-        os.environ.get("SERVICE_NOW_INSTANCE_ID")
-    )
-    username = parameter_service.get_parameter(os.environ.get("SERVICE_NOW_USER"))
-    password_param_name = os.environ.get("SERVICE_NOW_PASSWORD_PARAM")
-
-    service_now_api_service = ServiceNowApiService(
-        instance_id, username, password_param_name
-    )
-    (
-        service_now_api_outbound_rest_message_name,
-        service_now_api_outbound_rest_message_request_function_name,
-    ) = service_now_api_service._create_outbound_rest_message(
-        webhook_url, service_now_resource_prefix, api_auth_secret_arn
-    )
-
-    if service_now_api_outbound_rest_message_name is None:
-        logger.error(
-            "Failed to create Outbound REST Message resources in ServiceNow to provide automated publishing of Incident related events to AWS Security Incident Response. Exiting."
+        # Get credentials from SSM
+        parameter_service = ParameterService()
+        instance_id = parameter_service.get_parameter(
+            os.environ.get("SERVICE_NOW_INSTANCE_ID")
         )
+        username = parameter_service.get_parameter(os.environ.get("SERVICE_NOW_USER"))
+        password_param_name = os.environ.get("SERVICE_NOW_PASSWORD_PARAM")
+
+        service_now_api_service = ServiceNowApiService(
+            instance_id, username, password_param_name
+        )
+        
+        outbound_rest_message_result = service_now_api_service._create_outbound_rest_message(
+            webhook_url, service_now_resource_prefix, api_auth_secret_arn
+        )
+
+        if outbound_rest_message_result is None:
+            logger.error(
+                "Failed to create Outbound REST Message resources in ServiceNow to provide automated publishing of Incident related events to AWS Security Incident Response. Exiting."
+            )
+            return {"Status": "FAILED", "PhysicalResourceId": "service-now-api-setup"}
+        
+        (
+            service_now_api_outbound_rest_message_name,
+            service_now_api_outbound_rest_message_request_function_name,
+        ) = outbound_rest_message_result
+
+        service_now_api_service._create_incident_business_rule(
+            service_now_api_outbound_rest_message_name,
+            service_now_api_outbound_rest_message_request_function_name,
+            service_now_resource_prefix,
+        )
+
+        return {"Status": "SUCCESS", "PhysicalResourceId": "service-now-api-setup"}
+    
+    except Exception as e:
+        logger.error(f"Error in custom resource handler: {str(e)}")
         return {"Status": "FAILED", "PhysicalResourceId": "service-now-api-setup"}
-
-    service_now_api_service._create_incident_business_rule(
-        service_now_api_outbound_rest_message_name,
-        service_now_api_outbound_rest_message_request_function_name,
-        service_now_resource_prefix,
-    )
-
-    return {"Status": "SUCCESS", "PhysicalResourceId": "service-now-api-setup"}
