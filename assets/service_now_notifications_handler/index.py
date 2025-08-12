@@ -15,6 +15,7 @@ from typing import Dict, Any, Optional, List, Union
 import boto3
 from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
+from aws_lambda_powertools import Logger
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 try:
@@ -25,20 +26,11 @@ except ImportError:
     from ..wrappers.python.service_now_wrapper import ServiceNowClient
 
 # Constants
-EVENT_SOURCE = os.environ.get('EVENT_SOURCE', 'service-now')
+EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "service-now")
 
-# Configure logging
-logger = logging.getLogger()
-
-# Get log level from environment variable
-log_level = os.environ.get('LOG_LEVEL', 'error').lower()
-if log_level == 'debug':
-    logger.setLevel(logging.DEBUG)
-elif log_level == 'info':
-    logger.setLevel(logging.INFO)
-else:
-    # Default to ERROR level
-    logger.setLevel(logging.ERROR)
+# Configure logging with AWS Lambda Powertools
+log_level = os.environ.get("LOG_LEVEL", "error").lower()
+logger = Logger(service="service-now-notifications-handler", level=log_level)
 
 # Initialize AWS clients
 events_client = boto3.client("events")
@@ -69,7 +61,7 @@ class BaseEvent:
 class IncidentCreatedEvent(BaseEvent):
     """Domain event for incident creation"""
 
-    event_type = 'IncidentCreated'
+    event_type = "IncidentCreated"
 
     def __init__(self, incident: Dict[str, Any]):
         """
@@ -88,31 +80,45 @@ class IncidentCreatedEvent(BaseEvent):
             Dictionary representation of the event
         """
         return {
-            'eventType': self.event_type,
-            'eventSource': self.event_source,
-            'id': self.incident.get('id', ''),
-            'key': self.incident.get('key', ''),
-            'summary': self.incident.get('summary', ''),
-            'status': self.incident.get('status', ''),
-            'updated': self.incident.get('updated', ''),
-            'created': self.incident.get('created', ''),
-            'description': self.incident.get('description', ''),
-            'priority': self.incident.get('priority', ''),
-            'assignee': self.incident.get('assignee', ''),
-            'reporter': self.incident.get('reporter', ''),
-            'comments': self.incident.get('comments', []),
-            'attachments': self.incident.get('attachments', []),
-            'incidentType': self.incident.get('incidenttype', ''),
-            'project': self.incident.get('project', ''),
-            'resolution': self.incident.get('resolution', ''),
-            'securityLevel': self.incident.get('securityLevel', '')
+            "eventType": self.event_type,
+            "eventSource": self.event_source,
+            "sys_id": self.incident.get("sys_id", ""),
+            "number": self.incident.get("number", ""),
+            "short_description": self.incident.get("short_description", ""),
+            "description": self.incident.get("description", ""),
+            "sys_updated_on": self.incident.get("sys_updated_on", ""),
+            "sys_created_on": self.incident.get("sys_created_on", ""),
+            "sys_created_by": self.incident.get("sys_created_by", ""),
+            "resolved_by": self.incident.get("resolved_by", ""),
+            "resolved_at": self.incident.get("resolved_at", ""),
+            "opened_at": self.incident.get("opened_at", ""),
+            "closed_at": self.incident.get("closed_at", ""),
+            "state": self.incident.get("state", ""),
+            "impact": self.incident.get("impact", ""),
+            "active": self.incident.get("active", ""),
+            "priority": self.incident.get("priority", ""),
+            "caller_id": self.incident.get("caller_id", ""),
+            "incident_state": self.incident.get("incident_state", ""),
+            "urgency": self.incident.get("urgency", ""),
+            "severity": self.incident.get("severity", ""),
+            "comments_and_work_notes": self.incident.get("comments_and_work_notes", ""),
+            "close_code": self.incident.get("close_code", ""),
+            "close_notes": self.incident.get("close_notes", ""),
+            "closed_by": self.incident.get("closed_by", ""),
+            "reopened_by": self.incident.get("reopened_by", ""),
+            "assigned_to": self.incident.get("assigned_to", ""),
+            "due_date": self.incident.get("due_date", ""),
+            "sys_tags": self.incident.get("sys_tags", ""),
+            "category": self.incident.get("category", ""),
+            "subcategory": self.incident.get("subcategory", ""),
+            "attachments": self.incident.get("attachments", []),
         }
 
 
 class IncidentUpdatedEvent(BaseEvent):
     """Domain event for incident update"""
 
-    event_type = 'IncidentUpdated'
+    event_type = "IncidentUpdated"
 
     def __init__(self, incident: Dict[str, Any]):
         """
@@ -131,31 +137,45 @@ class IncidentUpdatedEvent(BaseEvent):
             Dictionary representation of the event
         """
         return {
-            'eventType': self.event_type,
-            'eventSource': self.event_source,
-            'id': self.incident.get('id', ''),
-            'key': self.incident.get('key', ''),
-            'summary': self.incident.get('summary', ''),
-            'status': self.incident.get('status', ''),
-            'updated': self.incident.get('updated', ''),
-            'created': self.incident.get('created', ''),
-            'description': self.incident.get('description', ''),
-            'priority': self.incident.get('priority', ''),
-            'assignee': self.incident.get('assignee', ''),
-            'reporter': self.incident.get('reporter', ''),
-            'comments': self.incident.get('comments', []),
-            'attachments': self.incident.get('attachments', []),
-            'incidentLinks': self.incident.get('incidentlinks', []),
-            'incidentType': self.incident.get('incidenttype', ''),
-            'project': self.incident.get('project', ''),
-            'resolution': self.incident.get('resolution', ''),
+            "eventType": self.event_type,
+            "eventSource": self.event_source,
+            "sys_id": self.incident.get("sys_id", ""),
+            "number": self.incident.get("number", ""),
+            "short_description": self.incident.get("short_description", ""),
+            "description": self.incident.get("description", ""),
+            "sys_updated_on": self.incident.get("sys_updated_on", ""),
+            "sys_created_on": self.incident.get("sys_created_on", ""),
+            "sys_created_by": self.incident.get("sys_created_by", ""),
+            "resolved_by": self.incident.get("resolved_by", ""),
+            "resolved_at": self.incident.get("resolved_at", ""),
+            "opened_at": self.incident.get("opened_at", ""),
+            "closed_at": self.incident.get("closed_at", ""),
+            "state": self.incident.get("state", ""),
+            "impact": self.incident.get("impact", ""),
+            "active": self.incident.get("active", ""),
+            "priority": self.incident.get("priority", ""),
+            "caller_id": self.incident.get("caller_id", ""),
+            "incident_state": self.incident.get("incident_state", ""),
+            "urgency": self.incident.get("urgency", ""),
+            "severity": self.incident.get("severity", ""),
+            "comments_and_work_notes": self.incident.get("comments_and_work_notes", ""),
+            "close_code": self.incident.get("close_code", ""),
+            "close_notes": self.incident.get("close_notes", ""),
+            "closed_by": self.incident.get("closed_by", ""),
+            "reopened_by": self.incident.get("reopened_by", ""),
+            "assigned_to": self.incident.get("assigned_to", ""),
+            "due_date": self.incident.get("due_date", ""),
+            "sys_tags": self.incident.get("sys_tags", ""),
+            "category": self.incident.get("category", ""),
+            "subcategory": self.incident.get("subcategory", ""),
+            "attachments": self.incident.get("attachments", []),
         }
 
 
 class IncidentDeletedEvent(BaseEvent):
     """Domain event for incident deletion"""
 
-    event_type = 'IncidentDeleted'
+    event_type = "IncidentDeleted"
 
     def __init__(self, incident_id: str):
         """
@@ -174,9 +194,9 @@ class IncidentDeletedEvent(BaseEvent):
             Dictionary representation of the event
         """
         return {
-            'eventType': self.event_type,
-            'eventSource': self.event_source,
-            'incidentId': self.incident_id
+            "eventType": self.event_type,
+            "eventSource": self.event_source,
+            "incidentId": self.incident_id,
         }
 
 
@@ -197,18 +217,37 @@ class ParameterService:
         Returns:
             Parameter value or None if retrieval fails
         """
-        try:
-            response = self.ssm_client.get_parameter(
-                Name=parameter_name,
-                WithDecryption=True
-            )
-            return response['Parameter']['Value']
-        except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-            logger.error(
-                f"Error retrieving parameter {parameter_name}: {error_code}")
+        if not parameter_name:
+            logger.error("Parameter name is empty or None")
             return None
 
+        try:
+            logger.info(f"Retrieving parameter: {parameter_name}")
+            response = self.ssm_client.get_parameter(
+                Name=parameter_name, WithDecryption=True
+            )
+            return response["Parameter"]["Value"]
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            error_message = e.response["Error"]["Message"]
+            if error_code == "AccessDeniedException":
+                logger.error(
+                    f"Access denied when retrieving parameter {parameter_name}. Check IAM permissions for this Lambda function."
+                )
+            elif error_code == "ParameterNotFound":
+                logger.error(
+                    f"Parameter {parameter_name} not found. Verify the parameter exists in SSM Parameter Store."
+                )
+            else:
+                logger.error(
+                    f"Error retrieving parameter {parameter_name}: {error_code} - {error_message}"
+                )
+            return None
+        except Exception as e:
+            logger.error(
+                f"Unexpected error retrieving parameter {parameter_name}: {str(e)}"
+            )
+            return None
 
 class EventPublisherService:
     """Service for publishing events to EventBridge"""
@@ -221,7 +260,8 @@ class EventPublisherService:
             event_bus_name: Name of the EventBridge event bus
         """
         logger.debug(
-            f"Initializing EventPublisherService with event bus: {event_bus_name}")
+            f"Initializing EventPublisherService with event bus: {event_bus_name}"
+        )
         self.events_client = events_client
         self.event_bus_name = event_bus_name
 
@@ -245,10 +285,10 @@ class EventPublisherService:
             response = self.events_client.put_events(
                 Entries=[
                     {
-                        'Source': EVENT_SOURCE,
-                        'DetailType': event.event_type,
-                        'Detail': event_json,
-                        'EventBusName': self.event_bus_name
+                        "Source": EVENT_SOURCE,
+                        "DetailType": event.event_type,
+                        "Detail": event_json,
+                        "EventBusName": self.event_bus_name,
                     }
                 ]
             )
@@ -268,7 +308,9 @@ class DatabaseService:
         """Initialize the database service"""
         self.table = dynamodb.Table(table_name)
 
-    def __scan_for_incident_id(self, service_now_incident_id: str) -> List[Dict[str, Any]]:
+    def __scan_for_incident_id(
+        self, service_now_incident_id: str
+    ) -> List[Dict[str, Any]]:
         """
         Scan DynamoDB table for ServiceNow incident ID
 
@@ -279,29 +321,34 @@ class DatabaseService:
             List of matching items
         """
         try:
+            # TODO: Use GSIs and replace the following scan queries to use the service-now index instead (see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210189285892844?focus=true)
             response = self.table.scan(
-                FilterExpression=Attr('serviceNowIncidentId').eq(
-                    service_now_incident_id)
+                FilterExpression=Attr("serviceNowIncidentId").eq(
+                    service_now_incident_id
+                )
             )
-            items = response['Items']
+            items = response["Items"]
 
             # Handle pagination if there are more items
-            while 'LastEvaluatedKey' in response:
+            while "LastEvaluatedKey" in response:
                 response = self.table.scan(
-                    FilterExpression=Attr('serviceNowIncidentId').eq(
-                        service_now_incident_id),
-                    ExclusiveStartKey=response['LastEvaluatedKey']
+                    FilterExpression=Attr("serviceNowIncidentId").eq(
+                        service_now_incident_id
+                    ),
+                    ExclusiveStartKey=response["LastEvaluatedKey"],
                 )
-                items.extend(response['Items'])
+                items.extend(response["Items"])
             return items
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
             logger.error(
-                f"Error retrieving details from the DynamoDB table: {error_code}")
+                f"Error retrieving details from the DynamoDB table: {error_code}"
+            )
             return []
         except KeyError:
             logger.error(
-                f"ServiceNow incident for {service_now_incident_id} not found in database")
+                f"ServiceNow incident for {service_now_incident_id} not found in database"
+            )
             return []
 
     def _get_incident_details(self, service_now_incident_id: str) -> Optional[str]:
@@ -318,19 +365,22 @@ class DatabaseService:
             items = self.__scan_for_incident_id(service_now_incident_id)
             if not items:
                 logger.info(
-                    f"Incident details for {service_now_incident_id} not found in database.")
+                    f"Incident details for {service_now_incident_id} not found in database."
+                )
                 return None
 
             service_now_incident_details = items[0]["serviceNowIncidentDetails"]
             logger.info(
-                f"Incident details for {service_now_incident_id} found in database.")
+                f"Incident details for {service_now_incident_id} found in database."
+            )
             return service_now_incident_details
         except Exception as e:
-            logger.error(
-                f"Error retrieving details from the DynamoDB table: {e}")
+            logger.error(f"Error retrieving details from the DynamoDB table: {e}")
             return None
 
-    def _add_incident_details(self, service_now_incident_id: str, service_now_incident_details: Dict[str, Any]) -> bool:
+    def _add_incident_details(
+        self, service_now_incident_id: str, service_now_incident_details: Dict[str, Any]
+    ) -> bool:
         """
         Create a new entry with ServiceNow incident details
 
@@ -350,25 +400,30 @@ class DatabaseService:
 
             # Create a new entry with the ServiceNow incident ID and details
             logger.info(
-                f"Creating a new entry with CaseId {case_id} for ServiceNow incident {service_now_incident_id} in DynamoDb table")
+                f"Creating a new entry with CaseId {case_id} for ServiceNow incident {service_now_incident_id} in DynamoDb table"
+            )
             self.table.put_item(
                 Item={
-                    'PK': case_id,
-                    'SK': 'latest',
-                    'serviceNowIncidentId': service_now_incident_id,
-                    'serviceNowIncidentDetails': service_now_details_json,
+                    "PK": case_id,
+                    "SK": "latest",
+                    "serviceNowIncidentId": service_now_incident_id,
+                    "serviceNowIncidentDetails": service_now_details_json,
                 }
             )
 
             logger.info(
-                f"Successfully added details to DynamoDb table for ServiceNow incident {service_now_incident_id}")
+                f"Successfully added details to DynamoDb table for ServiceNow incident {service_now_incident_id}"
+            )
             return True
         except Exception as e:
             logger.error(
-                f"Error adding details to DynamoDb table for ServiceNow incident {service_now_incident_id}: {str(e)}")
+                f"Error adding details to DynamoDb table for ServiceNow incident {service_now_incident_id}: {str(e)}"
+            )
             return False
 
-    def _update_incident_details(self, service_now_incident_id: str, service_now_incident_details: Dict[str, Any]) -> bool:
+    def _update_incident_details(
+        self, service_now_incident_id: str, service_now_incident_details: Dict[str, Any]
+    ) -> bool:
         """
         Update an existing entry with ServiceNow incident details
 
@@ -388,7 +443,8 @@ class DatabaseService:
 
             # Update the existing entry with the ServiceNow incident ID and details
             logger.info(
-                f"Updating entry with CaseId {case_id} for ServiceNow incident {service_now_incident_id} in DynamoDb table")
+                f"Updating entry with CaseId {case_id} for ServiceNow incident {service_now_incident_id} in DynamoDb table"
+            )
             self.table.update_item(
                 Key={"PK": f"{case_id}", "SK": "latest"},
                 UpdateExpression="set serviceNowIncidentDetails = :s",
@@ -397,11 +453,13 @@ class DatabaseService:
             )
 
             logger.info(
-                f"Successfully updated details in DynamoDb table for ServiceNow incident {service_now_incident_id}")
+                f"Successfully updated details in DynamoDb table for ServiceNow incident {service_now_incident_id}"
+            )
             return True
         except Exception as e:
             logger.error(
-                f"Error updating details in DynamoDb table for ServiceNow incident {service_now_incident_id}: {str(e)}")
+                f"Error updating details in DynamoDb table for ServiceNow incident {service_now_incident_id}: {str(e)}"
+            )
             return False
 
 
@@ -411,9 +469,12 @@ class ServiceNowService:
     def __init__(self, instance_id, username, password_param_name):
         """Initialize the ServiceNow service"""
         self.service_now_client = ServiceNowClient(
-            instance_id, username, password_param_name)
+            instance_id, username, password_param_name
+        )
 
-    def __extract_incident_details(self, service_now_incident: Any) -> Dict[str, Any]:
+    def __extract_incident_details(
+        self, service_now_incident: Any, service_now_incident_attachments: Any
+    ) -> Dict[str, Any]:
         """
         Extract relevant details from a ServiceNow incident object into a serializable dictionary
 
@@ -424,6 +485,14 @@ class ServiceNowService:
             Dictionary with serializable ServiceNow incident details
         """
         try:
+            attachments_list = [
+                {
+                    "filename": attachment.file_name,
+                    "content_type": attachment.content_type,
+                }
+                for attachment in service_now_incident_attachments
+            ]
+            
             incident_dict = {
                 "sys_id": service_now_incident.sys_id,
                 "number": service_now_incident.number,
@@ -454,19 +523,29 @@ class ServiceNowService:
                 "sys_tags": service_now_incident.sys_tags.get_display_value(),
                 "category": service_now_incident.subcategory.get_display_value(),
                 "subcategory": service_now_incident.subcategory.get_display_value(),
+                "attachments": attachments_list,
             }
             return incident_dict
         except Exception as e:
-            logger.error(
-                f"Error extracting ServiceNow incident details: {str(e)}")
+            logger.error(f"Error extracting ServiceNow incident details: {str(e)}")
             # Return minimal details if extraction fails
             return {
-                "id": service_now_incident.id if hasattr(service_now_incident, 'id') else None,
-                "key": service_now_incident.key if hasattr(service_now_incident, 'key') else None,
-                "error": str(e)
+                "id": (
+                    service_now_incident.id
+                    if hasattr(service_now_incident, "id")
+                    else None
+                ),
+                "key": (
+                    service_now_incident.key
+                    if hasattr(service_now_incident, "key")
+                    else None
+                ),
+                "error": str(e),
             }
 
-    def _get_incident_details(self, service_now_incident_id: str) -> Optional[Dict[str, Any]]:
+    def _get_incident_details(
+        self, service_now_incident_id: str
+    ) -> Optional[Dict[str, Any]]:
         """
         Get incident details from ServiceNow
 
@@ -478,27 +557,36 @@ class ServiceNowService:
         """
         try:
             service_now_incident = self.service_now_client.get_incident(
-                service_now_incident_id)
+                service_now_incident_id
+            )
+            service_now_incident_attachments = (
+                self.service_now_client.get_incident_attachments(service_now_incident)
+            )
             if not service_now_incident:
                 logger.error(
-                    f"Failed to get incident {service_now_incident_id} from ServiceNow")
+                    f"Failed to get incident {service_now_incident_id} from ServiceNow"
+                )
                 return None
 
-            return self.__extract_incident_details(service_now_incident)
+            return self.__extract_incident_details(
+                service_now_incident, service_now_incident_attachments
+            )
         except Exception as e:
-            logger.error(
-                f"Error getting incident details from ServiceNow: {str(e)}")
+            logger.error(f"Error getting incident details from ServiceNow: {str(e)}")
             return None
 
 
 class ServiceNowMessageProcessorService:
     """Class to handle ServiceNow message processing"""
 
-    def __init__(self, instance_id, username, password_param_name, table_name, event_bus_name):
+    def __init__(
+        self, instance_id, username, password_param_name, table_name, event_bus_name
+    ):
         """Initialize the message processor"""
         self.db_service = DatabaseService(table_name)
         self.service_now_service = ServiceNowService(
-            instance_id, username, password_param_name)
+            instance_id, username, password_param_name
+        )
         self.event_publisher_service = EventPublisherService(event_bus_name)
 
     def _extract_event_body(self, event):
@@ -513,14 +601,36 @@ class ServiceNowMessageProcessorService:
         """
         try:
             # Extract the request body from API Gateway event
-            body = event.get('body', '{}')
-            if event.get('isBase64Encoded', False):
+            body = event.get("body", "{}")
+
+            # Handle base64 encoded body
+            if event.get("isBase64Encoded", False):
                 import base64
-                body = base64.b64decode(body).decode('utf-8')
+
+                body = base64.b64decode(body).decode("utf-8")
+                logger.info("Decoded base64 body")
+
+            # If body is already a dict, return it as is
+            if isinstance(body, dict):
+                return json.dumps(body)
+
+            # If body is a string but not JSON, try to parse it as form data
+            if isinstance(body, str) and not body.strip().startswith("{"):
+                if "=" in body:
+                    # Simple form data parsing
+                    form_data = {}
+                    for pair in body.split("&"):
+                        if "=" in pair:
+                            key, value = pair.split("=", 1)
+                            form_data[key] = value
+                    logger.debug(f"Parsed form data: {form_data}")
+                    return json.dumps(form_data)
+
             return body
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse message: {str(e)}")
-            return {}
+        except Exception as e:
+            logger.error(f"Failed to extract event body: {str(e)}")
+            logger.error(traceback.format_exc())
+            return "{}"
 
     def _parse_message(self, message: str) -> Dict[str, Any]:
         """
@@ -533,9 +643,43 @@ class ServiceNowMessageProcessorService:
             Dictionary containing parsed message or empty dict if parsing fails
         """
         try:
-            return json.loads(message)
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse message: {str(e)}")
+            # If message is already a dict, return it
+            if isinstance(message, dict):
+                return message
+
+            # Try to parse as JSON
+            if isinstance(message, str):
+                # Handle empty or whitespace-only strings
+                if not message.strip():
+                    logger.warning("Empty message received")
+                    return {}
+
+                # Try to parse as JSON
+                try:
+                    return json.loads(message)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse as JSON: {str(e)}")
+
+                    # If not JSON, try to parse as URL-encoded form data
+                    if "=" in message:
+                        form_data = {}
+                        for pair in message.split("&"):
+                            if "=" in pair:
+                                key, value = pair.split("=", 1)
+                                form_data[key] = value
+                        logger.info(f"Parsed as form data: {form_data}")
+                        return form_data
+
+                    # If it's a single value, try to use it as incident_number
+                    if message.strip().isalnum():
+                        logger.info(f"Using message as incident_number: {message}")
+                        return {"incident_number": message.strip()}
+
+            logger.error(f"Unable to parse message: {message}")
+            return {}
+        except Exception as e:
+            logger.error(f"Error parsing message: {str(e)}")
+            logger.error(traceback.format_exc())
             return {}
 
     def _process_webhook_payload(self, payload: Dict[str, Any]) -> bool:
@@ -548,16 +692,66 @@ class ServiceNowMessageProcessorService:
         Returns:
             True if processing was successful, False otherwise
         """
-        # Extract incident_number and event_type from the payload
-        incident_number = payload.get('incident_number')
-        event_type = payload.get('event_type')
+        # Log the full payload for debugging
+        logger.info(f"Processing webhook payload: {json.dumps(payload)}")
+
+        # Try different field names that might contain the incident number
+        incident_number = None
+        possible_fields = [
+            "incident_number",
+            "number",
+            "sys_id",
+            "id",
+            "incident_id",
+            "incidentNumber",
+        ]
+
+        for field in possible_fields:
+            if field in payload and payload[field]:
+                incident_number = payload[field]
+                logger.info(
+                    f"Found incident number in field '{field}': {incident_number}"
+                )
+                break
+
+        # If we still don't have an incident number, check if there's a nested structure
+        if (
+            not incident_number
+            and "incident" in payload
+            and isinstance(payload["incident"], dict)
+        ):
+            incident = payload["incident"]
+            for field in possible_fields:
+                if field in incident and incident[field]:
+                    incident_number = incident[field]
+                    logger.info(
+                        f"Found incident number in nested field 'incident.{field}': {incident_number}"
+                    )
+                    break
+
+        # If we still don't have an incident number, check if there's a result field
+        if (
+            not incident_number
+            and "result" in payload
+            and isinstance(payload["result"], dict)
+        ):
+            result = payload["result"]
+            for field in possible_fields:
+                if field in result and result[field]:
+                    incident_number = result[field]
+                    logger.info(
+                        f"Found incident number in nested field 'result.{field}': {incident_number}"
+                    )
+                    break
 
         if not incident_number:
-            logger.error("No incident_number found in payload")
+            logger.error("No incident number found in payload")
             return False
 
+        event_type = payload.get("event_type", "unknown")
         logger.info(
-            f"Processing incident: {incident_number} with event_type: {event_type}")
+            f"Processing incident: {incident_number} with event_type: {event_type}"
+        )
 
         # Get incident details and process based on event type
         return self.__process_incident(incident_number)
@@ -574,24 +768,34 @@ class ServiceNowMessageProcessorService:
         """
         # Get ServiceNow incident details
         service_now_incident_details = self.service_now_service._get_incident_details(
-            incident_number)
+            incident_number
+        )
         if not service_now_incident_details:
             logger.error(
-                f"Failed to get incident details for {incident_number} from ServiceNow")
+                f"Failed to get incident details for {incident_number} from ServiceNow"
+            )
             return False
 
         # Get existing incident details from database
         service_now_incident_details_ddb = self.db_service._get_incident_details(
-            incident_number)
+            incident_number
+        )
 
         # Process based on whether the incident exists in the database
         if not service_now_incident_details_ddb:
-            return self.__handle_new_incident(incident_number, service_now_incident_details)
+            return self.__handle_new_incident(
+                incident_number, service_now_incident_details
+            )
         else:
-            return self.__handle_existing_incident(incident_number, service_now_incident_details,
-                                                 service_now_incident_details_ddb)
+            return self.__handle_existing_incident(
+                incident_number,
+                service_now_incident_details,
+                service_now_incident_details_ddb,
+            )
 
-    def __handle_new_incident(self, incident_number: str, incident_details: Dict[str, Any]) -> bool:
+    def __handle_new_incident(
+        self, incident_number: str, incident_details: Dict[str, Any]
+    ) -> bool:
         """
         Handle a new incident that doesn't exist in the database
 
@@ -604,19 +808,23 @@ class ServiceNowMessageProcessorService:
         """
         try:
             logger.info(
-                f"Publishing IncidentCreatedEvent for ServiceNow incident {incident_number}")
+                f"Publishing IncidentCreatedEvent for ServiceNow incident {incident_number}"
+            )
             self.event_publisher_service._publish_event(
-                IncidentCreatedEvent(incident_details))
-            self.db_service._add_incident_details(
-                incident_number, incident_details)
+                IncidentCreatedEvent(incident_details)
+            )
+            self.db_service._add_incident_details(incident_number, incident_details)
             return True
         except Exception as e:
-            logger.error(
-                f"Error handling new incident {incident_number}: {str(e)}")
+            logger.error(f"Error handling new incident {incident_number}: {str(e)}")
             return False
 
-    def __handle_existing_incident(self, incident_number: str, incident_details: Dict[str, Any],
-                                 existing_details: str) -> bool:
+    def __handle_existing_incident(
+        self,
+        incident_number: str,
+        incident_details: Dict[str, Any],
+        existing_details: str,
+    ) -> bool:
         """
         Handle an existing incident that's already in the database
 
@@ -633,89 +841,22 @@ class ServiceNowMessageProcessorService:
             incident_details_json = json.dumps(incident_details)
             if json.loads(incident_details_json) != json.loads(existing_details):
                 logger.info(
-                    f"Publishing IncidentUpdatedEvent for ServiceNow incident {incident_number}")
+                    f"Publishing IncidentUpdatedEvent for ServiceNow incident {incident_number}"
+                )
                 self.event_publisher_service._publish_event(
-                    IncidentUpdatedEvent(incident_details))
+                    IncidentUpdatedEvent(incident_details)
+                )
                 self.db_service._update_incident_details(
-                    incident_number, incident_details)
+                    incident_number, incident_details
+                )
             else:
-                logger.info(
-                    f"No changes detected for incident {incident_number}")
+                logger.info(f"No changes detected for incident {incident_number}")
             return True
         except Exception as e:
             logger.error(
-                f"Error handling existing incident {incident_number}: {str(e)}")
+                f"Error handling existing incident {incident_number}: {str(e)}"
+            )
             return False
-
-    # def process_automation_data(self, automation_data: Dict[str, Any], event_bus_name: str = 'default') -> bool:
-    #     """
-    #     Process the automation data
-
-    #     Args:
-    #         automation_data: The automation data to process
-    #         event_bus_name: Name of the EventBridge event bus
-
-    #     Returns:
-    #         True if processing was successful, False otherwise
-    #     """
-    #     if not automation_data:
-    #         logger.warning("No data received in ServiceNow event")
-    #         return False
-
-    #     try:
-    #         # Log the automation data (sanitized)
-    #         logger.info(f"Processing automation data: {html.escape(json.dumps(automation_data))}")
-
-    #         # Create an EventPublisherService instance
-    #         event_publisher = EventPublisherService(event_bus_name)
-
-    #         # Get ServiceNow incident ID from the automation data
-    #         service_now_incident_id = automation_data.get("IncidentId")
-    #         if not service_now_incident_id:
-    #             logger.error("No IncidentId found in automation data")
-    #             return False
-
-    #         # Get ServiceNow incident details from ServiceNow first
-    #         service_now_incident_details = self.service_now_service._get_incident_details(service_now_incident_id)
-    #         if not service_now_incident_details:
-    #             logger.error(f"Failed to get incident details for {service_now_incident_id} from ServiceNow")
-    #             return False
-
-    #         # Get ServiceNow incident details from database
-    #         service_now_incident_details_ddb = self.db_service._get_incident_details(service_now_incident_id)
-
-    #         # If incident not found in database, publish created event and update the database
-    #         if not service_now_incident_details_ddb:
-    #             logger.info(f"ServiceNow incident details for {service_now_incident_id} not found in database")
-    #             # Update the database with the ServiceNow incident ID and details
-    #             try:
-    #                 logger.info(f"Publishing IncidentCreatedEvent for ServiceNow incident {service_now_incident_id}")
-    #                 event_publisher._publish_event(IncidentCreatedEvent(service_now_incident_details))
-    #                 # Use a composite key pattern to maintain data model integrity
-    #                 logger.info(f"Adding ServiceNow incident details for {service_now_incident_id} to database")
-    #                 self.db_service._add_incident_details(service_now_incident_id, service_now_incident_details)
-    #                 return True
-    #             except Exception as e:
-    #                 logger.error(f"Error updating database with ServiceNow incident details: {str(e)}")
-    #                 return False
-
-    #         logger.info(f"ServiceNow incident details for {service_now_incident_id} found in database. Comparing it with the incident details from ServiceNow")
-    #         # Compare incident details to detect changes
-    #         service_now_details_json = json.dumps(service_now_incident_details)
-    #         if json.loads(service_now_details_json) != json.loads(service_now_incident_details_ddb):
-    #             logger.info(f"ServiceNow incident details for {service_now_incident_id} have changed. Publishing IncidentUpdatedEvent")
-    #             event_publisher._publish_event(IncidentUpdatedEvent(service_now_incident_details))
-    #             logger.info(f"Storing the updated incident details for ServiceNow incident {service_now_incident_id} in the database")
-    #             self.db_service._update_incident_details(service_now_incident_id, service_now_incident_details)
-    #             return True
-
-    #         logger.info(f"No changes detected for incident {service_now_incident_id}")
-    #         return True
-
-    #     except Exception as e:
-    #         logger.error(f"Error processing automation data: {str(e)}")
-    #         logger.error(traceback.format_exc())
-    #         return False
 
 
 class ResponseBuilderService:
@@ -733,16 +874,14 @@ class ResponseBuilderService:
             API Gateway compatible response
         """
         return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS'
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "POST,OPTIONS",
             },
-            'body': json.dumps({
-                'message': message
-            })
+            "body": json.dumps({"message": message}),
         }
 
     @staticmethod
@@ -757,16 +896,14 @@ class ResponseBuilderService:
             API Gateway compatible response
         """
         return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type',
-                'Access-Control-Allow-Methods': 'POST,OPTIONS'
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "POST,OPTIONS",
             },
-            'body': json.dumps({
-                'error': error
-            })
+            "body": json.dumps({"error": error}),
         }
 
 
@@ -783,20 +920,20 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         API Gateway compatible response
     """
     try:
-        # Log incoming event
-        logger.info(f"Received event: {json.dumps(event)}")
+        # Log incoming event with more details for debugging
+        logger.info("Received event from Service Now")
 
         # Handle OPTIONS request for CORS
-        if event.get('httpMethod') == 'OPTIONS':
+        if event.get("httpMethod") == "OPTIONS":
             return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type',
-                    'Access-Control-Allow-Methods': 'POST,OPTIONS'
+                "statusCode": 200,
+                "headers": {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+                    "Access-Control-Allow-Methods": "POST,OPTIONS",
                 },
-                'body': ''
+                "body": "",
             }
 
         # Validate event structure
@@ -804,40 +941,77 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
             raise ValueError(f"Expected dict event, got {type(event)}")
 
         # Get environment variables
-        table_name = os.environ["INCIDENTS_TABLE_NAME"]
-        event_bus_name = os.environ.get('EVENT_BUS_NAME', 'default')
+        try:
+            table_name = os.environ["INCIDENTS_TABLE_NAME"]
+            event_bus_name = os.environ.get("EVENT_BUS_NAME", "default")
+            logger.info(f"Using table: {table_name}, event bus: {event_bus_name}")
+        except KeyError as e:
+            logger.error(f"Missing required environment variable: {str(e)}")
+            return ResponseBuilderService._build_error_response(
+                f"Configuration error: Missing {str(e)}"
+            )
 
-        parameter_service = ParameterService()
         # Get credentials from SSM
-        instance_id = parameter_service._get_parameter(
-            os.environ.get("SERVICE_NOW_INSTANCE_ID"))
-        username = parameter_service._get_parameter(
-            os.environ.get("SERVICE_NOW_USER"))
-        password_param_name = parameter_service._get_parameter(
-            os.environ.get("SERVICE_NOW_PASSWORD_PARAM"))
+        try:
+            parameter_service = ParameterService()
+            instance_id_param = os.environ.get("SERVICE_NOW_INSTANCE_ID")
+            username_param = os.environ.get("SERVICE_NOW_USER")
+            password_param_name = os.environ.get("SERVICE_NOW_PASSWORD_PARAM")
+
+            logger.info(
+                f"Getting parameters: {instance_id_param}, {username_param}, {password_param_name}"
+            )
+
+            instance_id = parameter_service._get_parameter(instance_id_param)
+            username = parameter_service._get_parameter(username_param)
+
+            if not instance_id or not username or not password_param_name:
+                logger.error("Failed to retrieve ServiceNow credentials from SSM")
+                return ResponseBuilderService._build_error_response(
+                    "Failed to retrieve ServiceNow credentials"
+                )
+        except Exception as e:
+            logger.error(f"Error retrieving parameters: {str(e)}")
+            return ResponseBuilderService._build_error_response(
+                f"Parameter retrieval error: {str(e)}"
+            )
 
         # Create processor
         processor = ServiceNowMessageProcessorService(
-            instance_id, username, password_param_name, table_name, event_bus_name)
+            instance_id, username, password_param_name, table_name, event_bus_name
+        )
         processed_count = 0
 
         # Extract the request body from API Gateway event
         body = processor._extract_event_body(event)
-        if body is None:
-            return ResponseBuilderService._build_error_response("Failed to extract event body")
+        if body is None or body == "{}":
+            logger.error("Empty or invalid request body")
+            return ResponseBuilderService._build_error_response(
+                "Empty or invalid request body"
+            )
 
         # Parse the request body
         payload = processor._parse_message(body)
-        logger.info(f"Parsed event payload: {payload}")
+        logger.info("Parsed event payload")
+
+        # Check if payload has required fields
+        if not payload or "incident_number" not in payload:
+            logger.error("Missing required fields in payload")
+            return ResponseBuilderService._build_error_response(
+                "Missing required fields in payload"
+            )
 
         # Process the webhook payload
         success = processor._process_webhook_payload(payload)
 
         if not success:
-            return ResponseBuilderService._build_error_response("Failed to process ServiceNow webhook payload")
+            logger.error("Failed to process ServiceNow webhook payload")
+            return ResponseBuilderService._build_error_response(
+                "Failed to process ServiceNow webhook payload"
+            )
 
-        if success:
-            processed_count += 1
+        processed_count += 1
+        logger.info(f"Successfully processed {processed_count} records")
 
         return ResponseBuilderService._build_success_response(
             f"Successfully processed {processed_count} records"
@@ -846,4 +1020,6 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error in Lambda handler: {str(e)}")
         logger.error(traceback.format_exc())
-        return ResponseBuilderService._build_error_response(str(e))
+        return ResponseBuilderService._build_error_response(
+            f"Internal server error: {str(e)}"
+        )
