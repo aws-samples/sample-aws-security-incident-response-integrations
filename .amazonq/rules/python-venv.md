@@ -25,7 +25,7 @@ Before any Python command execution:
    pip install -r requirements.txt    # install dependencies
    python app.py                      # run Python scripts
    python run_test.py                 # run tests
-   npx cdk synth --app "python app.py"  # run CDK commands
+   npx cdk synth --app "python3 app_[integration-target].py"  # run CDK commands
    ```
 
 ## Virtual Environment Setup Commands

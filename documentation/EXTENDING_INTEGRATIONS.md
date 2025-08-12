@@ -59,10 +59,11 @@ Apply AI for:
 
 ### Step 1: Workspace Analysis
 
-Start by having your AI assistant analyze the existing codebase:
+Start by having your AI assistant analyze the existing codebase. Below is an example prompt on how to carry this out.
 
 ```
-Analyze the workspace structure and identify all components related to [existing integration] to understand the integration patterns used in this AWS Security Incident Response solution.
+Analyze the workspace structure and identify all components related to [existing integration] to understand the 
+integration patterns used in this AWS Security Incident Response solution.
 ```
 
 #### ServiceNow vs Jira
@@ -116,7 +117,9 @@ def update_issue(self, issue_id: str, fields: Dict[str, Any]):
 Research the target platform's capabilities:
 
 ```markdown
-Research the [target platform] API and Python SDK. Analyze authentication methods, incident/case management capabilities, webhook support, and data models. Use a Python virtual environment for any package analysis.
+Research the [target platform] API and Python SDK. Analyze authentication methods, incident/case management 
+capabilities, webhook support, and data models. Validate what resources are required to ensure bidirectional 
+communication with [target platform]. Use a Python virtual environment for any package analysis. 
 ```
 
 ### Step 3: Architecture Planning
@@ -124,16 +127,62 @@ Research the [target platform] API and Python SDK. Analyze authentication method
 Plan the new integration architecture:
 
 ```markdown
-Based on the existing [reference integration] pattern, design the architecture for [target platform] integration. Include Lambda functions, CDK components, data models, and event flows needed.
+Based on the existing [reference integration] pattern, design the architecture for [target platform] integration. 
+Include Lambda functions, CDK components, data models, and event flows needed.
 ```
 
 ### Step 4: Implementation
 
-Implement the integration components:
+We recommend a specification driven development when using tools like [Kiro](https://kiro.dev/). This means using an AI 
+assistant to build a specification before modifying code. We recommend this specification consist of three files:
+
+* A Requirements Document
+* A Design Document
+* A Task List.
+
+Below is are prompts to get started. One is a prompt to work with Kiro, which automated much of the process. The other is
+a set prompts when using other generative AI assistants 
+
+#### Kiro Version
+
+Kiro's **Spec** mode automatically walks you through specification driven development. In this case, it's best to
+describe the end goal.
 
 ```markdown
-Implement the [target platform] integration following the patterns established by [reference integration]. Create all necessary Lambda functions, CDK infrastructure, data mappers, and webhook handlers.
+Implement the [target platform] integration following the patterns established by [reference integration]. 
+Create all necessary Lambda functions, CDK infrastructure, data mappers, and webhook handlers.
 ```
+
+#### Non-Kiro Version
+
+Below is a prompt to create a requirements document.
+
+```markdown
+Create a requirements document that modifies this solution to bidirectionally communicate with 
+[target platform] integration following the patterns established by [reference integration]. [Target Platform] will 
+notify the system of changes via [target platform's method of emitting events (usually this is an SNS Topic or Web 
+Hook Architecture]. Write the requirements in a file to disk called `[target platform]-requirements.md`.
+```
+
+Below is a prompt to create a design document.
+
+```markdown
+Using `[target platform]-requirements.md` as requirements create a design document to modify this solution create 
+bidirectional synchronization between AWS Security Incident Response and [target Platform. Include any work to modify 
+Lambda functions, CDK infrastructure, data mappers, and webhook handlers.  Write the design in a file to 
+disk called `[target platform]-design.md`.
+```
+
+Below is a prompt for a task list.
+
+```markdown
+Using `[target platform]-design.md` as a design and `[target platform]-requirements.md` as requirements, create a list 
+of tasks that need to be accomplished.
+```
+
+To execute tasks, we recommend executing each task one-by-one using a generative AI assistant. Require this tool to author
+tests alongside executing the tasks. We recommend tell this tool that running all tests is how to ensure the task 
+is complete. 
 
 ## Integration Examples
 

@@ -51,7 +51,7 @@ detect-secrets scan                      # secret detection
 ### CDK Operations
 ```bash
 npx cdk synth                            # synthesize templates
-npx cdk deploy --app "python3 app.py" StackName  # deploy
+npx cdk deploy --app "python3 app_[integration-target].py" StackName  # deploy
 npx cdk destroy StackName                # destroy
 ```
 
