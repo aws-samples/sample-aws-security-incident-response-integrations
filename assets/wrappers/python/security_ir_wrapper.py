@@ -23,52 +23,55 @@ except ImportError:
     except ImportError:
         from ...mappers.python.jira_sir_mapper import map_watchers
 
+
 class SecurityIRClient:
     """Class to handle Security IR API interactions"""
 
     def __init__(self):
-        """Initialize the Jira client"""
+        """Initialize the Security IR client."""
         self.client = self._create_client()
 
     def _create_client(self) -> client:
         """
-        Create a Jira client instance
-        
+        Create a Security IR client instance.
+
         Returns:
-            Security IR client or None if creation fails
+            boto3.client: Security IR client or None if creation fails
         """
         try:
             return client("security-ir")
-            
+
         except Exception as e:
             logger.error(f"Error creating Security IR client: {str(e)}")
             return None
-        
+
     def get_case(self, case_id: str) -> dict:
         """
-        Get a Security IR case by ID
-        
+        Get a Security IR case by ID.
+
         Args:
-            case_id: The Security IR case ID
-            
+            case_id (str): The Security IR case ID
+
         Returns:
-            Security IR case object or None if retrieval fails
+            dict: Security IR case object or None if retrieval fails
         """
         try:
             return self.client.get_case(case_id)
         except Exception as e:
-            logger.error(f"Error getting case %s from Security IR API: {str(e)}", case_id)
+            logger.error(
+                f"Error getting case %s from Security IR API: {str(e)}", case_id
+            )
             return None
-        
+
     def create_case(self, fields: Dict[str, Any]) -> Optional[Any]:
         """
-        Create a new Security IR case
-        
+        Create a new Security IR case.
+
         Args:
-            fields: Dictionary of issue fields
-            
+            fields (Dict[str, Any]): Dictionary of case fields
+
         Returns:
-            Created Security IR case or None if creation fails
+            Optional[Any]: Created Security IR case or None if creation fails
         """
         try:
             return self.client.create_issue(fields=fields)
@@ -76,17 +79,17 @@ class SecurityIRClient:
             logging.error("Error creating Security IR case: %s", str(e))
 
             return None
-        
+
     def update_case(self, case_id: str, fields: Dict[str, Any]) -> bool:
         """
-        Update a Security IR case
-        
+        Update a Security IR case.
+
         Args:
-            issue_id: The Security IR case ID
-            fields: Dictionary of issue fields to update
-            
+            case_id (str): The Security IR case ID
+            fields (Dict[str, Any]): Dictionary of case fields to update
+
         Returns:
-            True if successful, False otherwise
+            bool: True if successful, False otherwise
         """
         try:
             case = self.client.issue(case_id)
@@ -95,17 +98,20 @@ class SecurityIRClient:
         except Exception as e:
             logger.error(f"Error updating Security IR case %s: {str(e)}", case_id)
             return False
-        
-    def update_status(self, case_id: str, status: str, comment: Optional[str] = None) -> bool:
+
+    def update_status(
+        self, case_id: str, status: str, comment: Optional[str] = None
+    ) -> bool:
         """
-        Update the status of a Security IR case
-        
+        Update the status of a Security IR case.
+
         Args:
-            case_id: The Security IR case ID
-            status: Target status to set case to
-            
+            case_id (str): The Security IR case ID
+            status (str): Target status to set case to
+            comment (Optional[str]): Optional comment (unused)
+
         Returns:
-            True if successful, False otherwise
+            bool: True if successful, False otherwise
         """
         try:
             # Get current issue to check status
@@ -116,14 +122,12 @@ class SecurityIRClient:
             if current_status != status:
                 # Get available transitions
                 case.update_case_status(case_id, status)
-                
+
             else:
                 logger.error(f"Could not change case status to {status}")
                 return False
-                    
+
             return True
         except Exception as e:
             logger.error(f"Error updating status for Jira issue %s: {str(e)}", case_id)
             return False
-        
-    

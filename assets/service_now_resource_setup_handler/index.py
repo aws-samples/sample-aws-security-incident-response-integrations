@@ -84,10 +84,15 @@ class SecretsManagerService:
 class ServiceNowApiService:
     """Class to manage ServiceNow API operations"""
 
-    def __init__(
-        self, instance_id, username, password_param_name
-    ):
-        """Initialize the ServiceNow API service"""
+    def __init__(self, instance_id, username, password_param_name):
+        """
+        Initialize the ServiceNow API service.
+
+        Args:
+            instance_id (str): ServiceNow instance ID
+            username (str): ServiceNow username
+            password_param_name (str): SSM parameter name containing ServiceNow password
+        """
         self.instance_id = instance_id
         self.username = username
         self.password_param_name = password_param_name
@@ -95,10 +100,13 @@ class ServiceNowApiService:
 
     def __get_password(self, password_param_name) -> Optional[str]:
         """
-        Fetch the ServiceNow password from SSM Parameter Store
+        Fetch the ServiceNow password from SSM Parameter Store.
+
+        Args:
+            password_param_name (str): SSM parameter name containing the password
 
         Returns:
-            Password or None if retrieval fails
+            Optional[str]: Password or None if retrieval fails
         """
         try:
             if not password_param_name:
@@ -114,7 +122,12 @@ class ServiceNowApiService:
             return None
 
     def __get_request_headers(self):
-        """Get headers for ServiceNow API requests"""
+        """
+        Get headers for ServiceNow API requests.
+
+        Returns:
+            dict: HTTP headers with Basic authentication or None if error
+        """
         try:
             password = self.__get_password(self.password_param_name)
             auth = b64encode(f"{self.username}:{password}".encode()).decode()
@@ -128,7 +141,12 @@ class ServiceNowApiService:
             return None
 
     def __get_request_base_url(self):
-        """Get base url for ServiceNow API requests"""
+        """
+        Get base URL for ServiceNow API requests.
+
+        Returns:
+            str: ServiceNow instance base URL or None if error
+        """
         try:
             return f"https://{self.instance_id}.service-now.com"
         except Exception as e:
@@ -136,7 +154,15 @@ class ServiceNowApiService:
             return None
 
     def __get_json_keys_list(self, json_string):
-        """Get list of keys from a JSON string"""
+        """
+        Get list of keys from a JSON string.
+
+        Args:
+            json_string (str): JSON string to parse
+
+        Returns:
+            list: List of keys from JSON object or None if error
+        """
         try:
             json_object = json.loads(json_string)
             return list(json_object.keys())
@@ -151,7 +177,15 @@ class ServiceNowApiService:
         request_content,
         outbound_rest_message_request_function_sys_id,
     ):
-        """Add parameters to Http request function for Outbound REST Message resource in ServiceNow for integration with AWS Security Incident Response"""
+        """
+        Add parameters to HTTP request function for Outbound REST Message resource in ServiceNow.
+
+        Args:
+            headers (dict): HTTP headers for ServiceNow API requests
+            base_url (str): ServiceNow instance base URL
+            request_content (str): JSON string containing request parameters
+            outbound_rest_message_request_function_sys_id (str): System ID of the REST message function
+        """
         try:
             logger.info(
                 "Adding parameters to Http request function for Outbound REST Message resource in ServiceNow for integration with AWS Security Incident Response"
@@ -187,35 +221,43 @@ class ServiceNowApiService:
                 )
         except Exception as e:
             logger.error(f"Error adding parameters to Http request function: {str(e)}")
-            
+
     def __update_outbound_rest_message_request_function_headers(
         self,
         headers,
         base_url,
         outbound_rest_message_request_function_name,
-        api_auth_secret_arn
+        api_auth_secret_arn,
     ):
-        """Create/Update Http request headers to be used in the Outbound REST Message function resource in ServiceNow for integration"""
+        """
+        Create/Update HTTP request headers for the Outbound REST Message function in ServiceNow.
+
+        Args:
+            headers (dict): HTTP headers for ServiceNow API requests
+            base_url (str): ServiceNow instance base URL
+            outbound_rest_message_request_function_name (str): Name of the REST message function
+            api_auth_secret_arn (str): ARN of the API auth secret in Secrets Manager
+        """
         try:
             logger.info(
                 "Updating Http request headers in the Outbound REST Message function resource in ServiceNow for integration with AWS Security Incident Response"
             )
-            
+
             # Get API auth token from Secrets Manager
             auth_token = (
                 self.secrets_manager_service.get_secret_value(api_auth_secret_arn)
                 if api_auth_secret_arn
                 else None
             )
-            
+
             # Update Authorization header if token is available
             if auth_token:
-                rest_message_post_function_headers_payload = { 
-                                    "rest_message_function": f"{outbound_rest_message_request_function_name}",
-                                    "name": "Authorization",
-                                    "value": f"Bearer {auth_token}"
-                            }
-            
+                rest_message_post_function_headers_payload = {
+                    "rest_message_function": f"{outbound_rest_message_request_function_name}",
+                    "name": "Authorization",
+                    "value": f"Bearer {auth_token}",
+                }
+
             rest_message_post_function_headers_response = requests.post(
                 f"{base_url}/api/now/table/sys_rest_message_fn_headers",
                 json=rest_message_post_function_headers_payload,
@@ -231,7 +273,9 @@ class ServiceNowApiService:
                 f"Http request authorization headers added for Outbound REST Message function with response: {rest_message_post_function_headers_response_json}"
             )
         except Exception as e:
-            logger.error(f"Error updating Http request headers for the Outbound REST message function: {str(e)}")
+            logger.error(
+                f"Error updating Http request headers for the Outbound REST message function: {str(e)}"
+            )
             return None
 
     def __create_outbound_rest_message_request_function(
@@ -244,7 +288,21 @@ class ServiceNowApiService:
         outbound_rest_message_request_function_name,
         api_auth_secret_arn,
     ):
-        """Create Http request function to be used in the Outbound REST Message resource in ServiceNow for integration"""
+        """
+        Create HTTP request function for the Outbound REST Message resource in ServiceNow.
+
+        Args:
+            headers (dict): HTTP headers for ServiceNow API requests
+            base_url (str): ServiceNow instance base URL
+            request_type (str): HTTP method (e.g., 'POST')
+            request_content (str): JSON string containing request body template
+            outbound_rest_message_name (str): Name of the outbound REST message
+            outbound_rest_message_request_function_name (str): Name of the request function
+            api_auth_secret_arn (str): ARN of the API auth secret in Secrets Manager
+
+        Returns:
+            str: System ID of the created function or None if error
+        """
         try:
             logger.info(
                 "Creating Http request function in the Outbound REST Message resource in ServiceNow for integration with AWS Security Incident Response"
@@ -270,8 +328,13 @@ class ServiceNowApiService:
             logger.info(
                 f"Http request function for Outbound REST Message created with response: {rest_message_post_function_response_json}"
             )
-            
-            self.__update_outbound_rest_message_request_function_headers(headers, base_url, outbound_rest_message_request_function_name, api_auth_secret_arn)
+
+            self.__update_outbound_rest_message_request_function_headers(
+                headers,
+                base_url,
+                outbound_rest_message_request_function_name,
+                api_auth_secret_arn,
+            )
 
             rest_message_post_function_sys_id = (
                 rest_message_post_function_response_json.get("result").get("sys_id")
@@ -284,7 +347,17 @@ class ServiceNowApiService:
     def _create_outbound_rest_message(
         self, webhook_url, resource_prefix, api_auth_secret_arn
     ):
-        """Create Outbound REST Message to be used in the Business Rule for publishing Incident events to the integration solution"""
+        """
+        Create Outbound REST Message for publishing Incident events to the integration solution.
+
+        Args:
+            webhook_url (str): URL of the webhook endpoint
+            resource_prefix (str): Prefix for ServiceNow resource naming
+            api_auth_secret_arn (str): ARN of the API auth secret in Secrets Manager
+
+        Returns:
+            tuple: (outbound_rest_message_name, outbound_rest_message_request_function_name) or None if error
+        """
         try:
             logger.info(
                 "Creating Outbound REST Message in Service Now to publish Incident related events to AWS Security Incident Response"
@@ -356,6 +429,7 @@ class ServiceNowApiService:
             logger.error(
                 f"Error while creating Outbound REST Message in Service Now to publish Incident related events to AWS Security Incident Response: {str(e)}"
             )
+            return None
 
     def _create_incident_business_rule(
         self,
@@ -363,7 +437,17 @@ class ServiceNowApiService:
         outbound_rest_message_request_function_name,
         resource_prefix,
     ):
-        """Create Business Rule to trigger Incident events"""
+        """
+        Create Business Rule to trigger Incident events.
+
+        Args:
+            outbound_rest_message_name (str): Name of the outbound REST message
+            outbound_rest_message_request_function_name (str): Name of the request function
+            resource_prefix (str): Prefix for ServiceNow resource naming
+
+        Returns:
+            requests.Response: Response from ServiceNow API or None if error
+        """
         try:
             logger.info(
                 "Creating Business Rule in Service Now to publish Incident related events to AWS"
@@ -433,41 +517,69 @@ class ServiceNowApiService:
 
 def handler(event, context):
     """
-    Custom resource handler to create ServiceNow resources
+    Custom resource handler to create ServiceNow resources.
+
+    Creates outbound REST message and business rule in ServiceNow for integration
+    with AWS Security Incident Response.
+
+    Args:
+        event (dict): CloudFormation custom resource event
+        context: Lambda context object (unused)
+
+    Returns:
+        dict: CloudFormation custom resource response with Status and PhysicalResourceId
     """
-    # Get environment variables
-    service_now_resource_prefix = os.environ.get("SERVICE_NOW_RESOURCE_PREFIX")
-    webhook_url = os.environ.get("WEBHOOK_URL", "")
-    api_auth_secret_arn = os.environ.get("API_AUTH_SECRET")
+    request_type = event.get("RequestType")
 
-    # Get credentials from SSM
-    parameter_service = ParameterService()
-    instance_id = parameter_service.get_parameter(
-        os.environ.get("SERVICE_NOW_INSTANCE_ID")
-    )
-    username = parameter_service.get_parameter(os.environ.get("SERVICE_NOW_USER"))
-    password_param_name = os.environ.get("SERVICE_NOW_PASSWORD_PARAM")
+    # Handle DELETE events - just return success
+    if request_type == "DELETE":
+        logger.info("DELETE request received - returning success")
+        return {"Status": "SUCCESS", "PhysicalResourceId": "service-now-api-setup"}
 
-    service_now_api_service = ServiceNowApiService(
-        instance_id, username, password_param_name
-    )
-    (
-        service_now_api_outbound_rest_message_name,
-        service_now_api_outbound_rest_message_request_function_name,
-    ) = service_now_api_service._create_outbound_rest_message(
-        webhook_url, service_now_resource_prefix, api_auth_secret_arn
-    )
+    # Handle CREATE and UPDATE events
+    try:
+        # Get environment variables
+        service_now_resource_prefix = os.environ.get("SERVICE_NOW_RESOURCE_PREFIX")
+        webhook_url = os.environ.get("WEBHOOK_URL", "")
+        api_auth_secret_arn = os.environ.get("API_AUTH_SECRET")
 
-    if service_now_api_outbound_rest_message_name is None:
-        logger.error(
-            "Failed to create Outbound REST Message resources in ServiceNow to provide automated publishing of Incident related events to AWS Security Incident Response. Exiting."
+        # Get credentials from SSM
+        parameter_service = ParameterService()
+        instance_id = parameter_service.get_parameter(
+            os.environ.get("SERVICE_NOW_INSTANCE_ID")
         )
+        username = parameter_service.get_parameter(os.environ.get("SERVICE_NOW_USER"))
+        password_param_name = os.environ.get("SERVICE_NOW_PASSWORD_PARAM")
+
+        service_now_api_service = ServiceNowApiService(
+            instance_id, username, password_param_name
+        )
+
+        outbound_rest_message_result = (
+            service_now_api_service._create_outbound_rest_message(
+                webhook_url, service_now_resource_prefix, api_auth_secret_arn
+            )
+        )
+
+        if outbound_rest_message_result is None:
+            logger.error(
+                "Failed to create Outbound REST Message resources in ServiceNow to provide automated publishing of Incident related events to AWS Security Incident Response. Exiting."
+            )
+            return {"Status": "FAILED", "PhysicalResourceId": "service-now-api-setup"}
+
+        (
+            service_now_api_outbound_rest_message_name,
+            service_now_api_outbound_rest_message_request_function_name,
+        ) = outbound_rest_message_result
+
+        service_now_api_service._create_incident_business_rule(
+            service_now_api_outbound_rest_message_name,
+            service_now_api_outbound_rest_message_request_function_name,
+            service_now_resource_prefix,
+        )
+
+        return {"Status": "SUCCESS", "PhysicalResourceId": "service-now-api-setup"}
+
+    except Exception as e:
+        logger.error(f"Error in custom resource handler: {str(e)}")
         return {"Status": "FAILED", "PhysicalResourceId": "service-now-api-setup"}
-
-    service_now_api_service._create_incident_business_rule(
-        service_now_api_outbound_rest_message_name,
-        service_now_api_outbound_rest_message_request_function_name,
-        service_now_resource_prefix,
-    )
-
-    return {"Status": "SUCCESS", "PhysicalResourceId": "service-now-api-setup"}

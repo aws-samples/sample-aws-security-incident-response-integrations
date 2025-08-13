@@ -165,8 +165,6 @@ def test_security_compliance(app, stack):
 
 def test_lambda_function_exist(stack):
     template = Template.from_stack(stack)
-    template.has_resource("AWS::Lambda::Function", {
-        "Properties": {
-            "Handler": "index.handler"
-        }
-    })
+    template.has_resource(
+        "AWS::Lambda::Function", {"Properties": {"Handler": "index.handler"}}
+    )

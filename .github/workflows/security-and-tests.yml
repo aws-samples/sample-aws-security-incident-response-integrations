@@ -86,11 +86,8 @@ jobs:
         run: |
           # TODO: use the renamed app_jira.py in the following command once the Service Now integration implementation is complete
           # TODO: see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210524326651427?focus=true
-          # node --experimental-wasm-reftypes $(which cdk) synth --app "python app.py"
           npx cdk synth --app "python app.py"
-          # TODO: uncomment/enable the following command once the Service Now integration implementation is complete
-          # TODO: see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210524326651427?focus=true
-          # npx cdk synth --app "python app_service_now.py"
+          npx cdk synth --app "python app_service_now.py"
           # CDK Nag is integrated into the CDK app, so it will run during synthesis
 
   tests:

@@ -18,12 +18,17 @@ from aws_cdk import (
 from .event_bus_logger_construct import EventBusLoggerConstruct
 from cdk_nag import NagSuppressions
 from constructs import Construct
-from .constants import SECURITY_IR_EVENT_SOURCE, JIRA_EVENT_SOURCE
+from .constants import (
+    SECURITY_IR_EVENT_SOURCE,
+    JIRA_EVENT_SOURCE,
+    SERVICE_NOW_EVENT_SOURCE,
+)
+
 
 class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
-        
+
         """
         cdk for log_level_parameter
         """
@@ -34,9 +39,9 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             type="String",
             description="The log level for Lambda functions (info or debug). Error logs are always enabled.",
             allowed_values=["info", "debug", "error"],
-            default="error"
+            default="error",
         )
-        
+
         """
         cdk for dynamoDb
         """
@@ -52,7 +57,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             point_in_time_recovery=True,
         )
-        
+
         """
         cdk for event_bus
         """
@@ -62,16 +67,16 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             "SecurityIncidentEventBus",
             event_bus_name="security-incident-event-bus",
         )
-        
+
         # Create an EventBusLogger to log all events from the event bus to CloudWatch Logs
         self.event_bus_logger = EventBusLoggerConstruct(
             self,
             "SecurityIncidentEventBusLogger",
             event_bus=self.event_bus,
             log_group_name=f"/aws/events/{self.event_bus.event_bus_name}",
-            log_retention=aws_logs.RetentionDays.ONE_WEEK
+            log_retention=aws_logs.RetentionDays.ONE_WEEK,
         )
-        
+
         """
         cdk for lambda_layers
         """
@@ -95,7 +100,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             compatible_runtimes=[aws_lambda.Runtime.PYTHON_3_13],
             description="Layer containing field mappers for security incident response",
         )
-        
+
         self.wrappers_layer = aws_lambda.LayerVersion(
             self,
             "WrappersLayer",
@@ -105,7 +110,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             compatible_runtimes=[aws_lambda.Runtime.PYTHON_3_13],
             description="Layer containing field mappers for security incident response",
         )
-        
+
         """
         cdk for assets/security_ir_poller
         """
@@ -114,23 +119,23 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             self,
             "SecurityIncidentResponsePollerRole",
             assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
-            description="Custom role for Security Incident Response Poller Lambda function"
+            description="Custom role for Security Incident Response Poller Lambda function",
         )
-        
+
         poller_role.add_to_policy(
             aws_iam.PolicyStatement(
                 effect=aws_iam.Effect.ALLOW,
                 actions=[
                     "logs:CreateLogGroup",
                     "logs:CreateLogStream",
-                    "logs:PutLogEvents"
+                    "logs:PutLogEvents",
                 ],
                 resources=[
                     f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
-                ]
+                ],
             )
         )
-        
+
         self.poller = py_lambda.PythonFunction(
             self,
             "SecurityIncidentResponsePoller",
@@ -142,16 +147,17 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 "INCIDENTS_TABLE_NAME": self.table.table_name,
                 "EVENT_BUS_NAME": self.event_bus.event_bus_name,
                 "EVENT_SOURCE": SECURITY_IR_EVENT_SOURCE,
-                "LOG_LEVEL": self.log_level_param.value_as_string
+                "LOG_LEVEL": self.log_level_param.value_as_string,
             },
-            role=poller_role
+            role=poller_role,
         )
 
-        aws_events.Rule(
+        self.poller_rule = aws_events.Rule(
             self,
             "SecurityIncidentResponsePollerRule",
             schedule=aws_events.Schedule.rate(duration=Duration.minutes(1)),
             targets=[aws_events_targets.LambdaFunction(self.poller)],
+            enabled=False,  # Start disabled
         )
 
         self.poller.add_to_role_policy(
@@ -183,7 +189,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         )
 
         self.table.grant_read_write_data(self.poller)
-        
+
         """
         cdk for assets/security_ir_client
         """
@@ -192,9 +198,9 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             self,
             "SecurityIncidentResponseClientRole",
             assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
-            description="Custom role for Security Incident Response Client Lambda function"
+            description="Custom role for Security Incident Response Client Lambda function",
         )
-        
+
         # Add custom policy for CloudWatch Logs permissions
         security_ir_client_role.add_to_policy(
             aws_iam.PolicyStatement(
@@ -202,14 +208,14 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 actions=[
                     "logs:CreateLogGroup",
                     "logs:CreateLogStream",
-                    "logs:PutLogEvents"
+                    "logs:PutLogEvents",
                 ],
                 resources=[
                     f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
-                ]
+                ],
             )
         )
-        
+
         security_ir_client = py_lambda.PythonFunction(
             self,
             "SecurityIncidentResponseClient",
@@ -219,23 +225,27 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             layers=[self.domain_layer, self.mappers_layer, self.wrappers_layer],
             environment={
                 "JIRA_EVENT_SOURCE": JIRA_EVENT_SOURCE,
-                # Add ServiceNow event source
+                "SERVICE_NOW_EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
                 "INCIDENTS_TABLE_NAME": self.table.table_name,
-                "LOG_LEVEL": self.log_level_param.value_as_string
+                "LOG_LEVEL": self.log_level_param.value_as_string,
             },
-            role=security_ir_client_role
+            role=security_ir_client_role,
         )
-        
+
         # create Event Bridge rule for Security Incident Response Client Lambda function
         security_ir_client_rule = aws_events.Rule(
             self,
             "security-ir-client-rule",
             description="Rule to send all events to Security Incident Response Client lambda function",
-            event_pattern=aws_events.EventPattern(source=[JIRA_EVENT_SOURCE]),
+            event_pattern=aws_events.EventPattern(
+                source=[JIRA_EVENT_SOURCE, SERVICE_NOW_EVENT_SOURCE]
+            ),
             event_bus=self.event_bus,
         )
-        security_ir_client_rule.add_target(aws_events_targets.LambdaFunction(security_ir_client))
-        
+        security_ir_client_rule.add_target(
+            aws_events_targets.LambdaFunction(security_ir_client)
+        )
+
         # Add permissions for Security IR API
         security_ir_client.add_to_role_policy(
             aws_iam.PolicyStatement(
@@ -249,22 +259,22 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                     "security-ir:GetCase",
                     "security-ir:CreateCase",
                     "security-ir:CloseCase",
-                    "security-ir:GetCaseAttachmentUploadUrl"
+                    "security-ir:GetCaseAttachmentUploadUrl",
                 ],
                 resources=["*"],
             )
         )
-        
+
         # Grant specific DynamoDB permissions instead of full access
         self.table.grant_read_write_data(security_ir_client)
-        
+
         CfnOutput(
             self,
             "SecurityIRClientLambdaArn",
             value=security_ir_client.function_arn,
             description="Security Incident Response Client Lambda Function ARN",
         )
-        
+
         # Add suppressions for IAM5 findings related to wildcard resources
         NagSuppressions.add_resource_suppressions(
             security_ir_client,
@@ -272,12 +282,12 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 {
                     "id": "AwsSolutions-IAM5",
                     "reason": "Wildcard resources are required for security-ir actions",
-                    "applies_to": ["Resource::*"]
+                    "applies_to": ["Resource::*"],
                 }
             ],
-            True
+            True,
         )
-        
+
         # Add suppressions for IAM5 findings related to wildcard resources
         NagSuppressions.add_resource_suppressions(
             self.poller,
@@ -285,36 +295,36 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 {
                     "id": "AwsSolutions-IAM5",
                     "reason": "Wildcard resources are required for security-ir, events, and lambda actions",
-                    "applies_to": ["Resource::*"]
+                    "applies_to": ["Resource::*"],
                 }
             ],
-            True
+            True,
         )
-        
+
         # Add stack-level suppressions for all resources
         NagSuppressions.add_stack_suppressions(
             self,
             [
                 {
                     "id": "AwsSolutions-IAM4",
-                    "reason": "Built-in LogRetention Lambda role requires AWSLambdaBasicExecutionRole managed policy"
+                    "reason": "Built-in LogRetention Lambda role requires AWSLambdaBasicExecutionRole managed policy",
                 },
                 {
                     "id": "AwsSolutions-IAM5",
                     "reason": "Built-in LogRetention Lambda and EventBusLogger need these permissions to manage logs",
-                    "applies_to": ["Resource::*", "Action::logs:*"]
+                    "applies_to": ["Resource::*", "Action::logs:*"],
                 },
                 {
                     "id": "AwsSolutions-SQS3",
-                    "reason": "DLQs are used appropriately in the architecture and don't need their own DLQs"
+                    "reason": "DLQs are used appropriately in the architecture and don't need their own DLQs",
                 },
                 {
                     "id": "AwsSolutions-L1",
-                    "reason": "Using the latest available runtime for Python (3.13)"
-                }
-            ]
+                    "reason": "Using the latest available runtime for Python (3.13)",
+                },
+            ],
         )
-        
+
         # Add direct suppressions to the EventBusLogger construct
         NagSuppressions.add_resource_suppressions(
             self.event_bus_logger,
@@ -322,12 +332,12 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 {
                     "id": "AwsSolutions-IAM5",
                     "reason": "EventBusLogger requires these permissions to log events to CloudWatch",
-                    "applies_to": ["Resource::*", "Action::logs:*"]
+                    "applies_to": ["Resource::*", "Action::logs:*"],
                 },
                 {
                     "id": "AwsSolutions-SQS3",
-                    "reason": "This is a DLQ for the EventBusLogger and doesn't need its own DLQ"
-                }
+                    "reason": "This is a DLQ for the EventBusLogger and doesn't need its own DLQ",
+                },
             ],
-            True
+            True,
         )

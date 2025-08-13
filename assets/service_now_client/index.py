@@ -7,6 +7,7 @@ import json
 import os
 import re
 import logging
+import requests
 from typing import Dict, Optional, Any, Tuple
 import boto3
 from botocore.exceptions import ClientError
@@ -14,29 +15,41 @@ from botocore.exceptions import ClientError
 try:
     # This import works for lambda function and imports the lambda layer at runtime
     from service_now_wrapper import ServiceNowClient
-    from service_now_sir_mapper import map_fields_to_service_now, map_case_status
+    from service_now_sir_mapper import (
+        map_sir_fields_to_service_now,
+        map_case_status,
+        map_sir_case_comments_to_service_now_incident,
+        convert_unmapped_fields_to_string_for_snow_comments,
+    )
 except ImportError:
     # This import works for local development and imports locally from the file system
     from ..wrappers.python.service_now_wrapper import ServiceNowClient
     from ..mappers.python.service_now_sir_mapper import (
-        map_fields_to_service_now,
+        map_sir_fields_to_service_now,
         map_case_status,
+        map_sir_case_comments_to_service_now_incident,
+        convert_unmapped_fields_to_string_for_snow_comments,
     )
 
 # Configure logging
 logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-# Get log level from environment variable
-log_level = os.environ.get("LOG_LEVEL", "error").lower()
-if log_level == "debug":
-    logger.setLevel(logging.DEBUG)
-elif log_level == "info":
-    logger.setLevel(logging.INFO)
-else:
-    # Default to ERROR level
-    logger.setLevel(logging.ERROR)
+# # Configure logging
+# logger = logging.getLogger()
+
+# # Get log level from environment variable
+# log_level = os.environ.get("LOG_LEVEL", "error").lower()
+# if log_level == "debug":
+#     logger.setLevel(logging.DEBUG)
+# elif log_level == "info":
+#     logger.setLevel(logging.INFO)
+# else:
+#     # Default to ERROR level
+#     logger.setLevel(logging.ERROR)
 
 # Initialize AWS clients
+security_incident_response_client = boto3.client("security-ir")
 dynamodb = boto3.resource("dynamodb")
 
 
@@ -44,18 +57,18 @@ class ParameterService:
     """Class to handle parameter operations"""
 
     def __init__(self):
-        """Initialize the parameter service"""
+        """Initialize the parameter service."""
         self.ssm_client = boto3.client("ssm")
 
     def get_parameter(self, parameter_name: str) -> Optional[str]:
         """
-        Get a parameter from SSM Parameter Store
+        Get a parameter from SSM Parameter Store.
 
         Args:
-            parameter_name: The name of the parameter to retrieve
+            parameter_name (str): The name of the parameter to retrieve
 
         Returns:
-            Parameter value or None if retrieval fails
+            Optional[str]: Parameter value or None if retrieval fails
         """
         try:
             response = self.ssm_client.get_parameter(
@@ -72,18 +85,23 @@ class DatabaseService:
     """Class to handle database operations"""
 
     def __init__(self, table_name):
-        """Initialize the database service"""
+        """
+        Initialize the database service.
+
+        Args:
+            table_name (str): Name of the DynamoDB table
+        """
         self.table = dynamodb.Table(table_name)
 
     def get_case(self, case_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get a case from the database
+        Get a case from the database.
 
         Args:
-            case_id: The IR case ID
+            case_id (str): The IR case ID
 
         Returns:
-            Case data or None if retrieval fails
+            Optional[Dict[str, Any]]: Case data or None if retrieval fails
         """
         try:
             response = self.table.get_item(
@@ -104,14 +122,14 @@ class DatabaseService:
 
     def update_mapping(self, case_id: str, service_now_incident_id: str) -> bool:
         """
-        Update the mapping between an IR case and a ServiceNow incident
+        Update the mapping between an IR case and a ServiceNow incident.
 
         Args:
-            case_id: The IR case ID
-            service_now_incident_id: The ServiceNow incident ID
+            case_id (str): The IR case ID
+            service_now_incident_id (str): The ServiceNow incident ID
 
         Returns:
-            True if successful, False otherwise
+            bool: True if successful, False otherwise
         """
         try:
             self.table.update_item(
@@ -133,15 +151,15 @@ class DatabaseService:
         self, case_id: str, service_now_incident_id: str, incident_details: Any
     ) -> bool:
         """
-        Update ServiceNow incident details in the database
+        Update ServiceNow incident details in the database.
 
         Args:
-            case_id: The Security IR case ID
-            service_now_incident_id: The ServiceNow incident ID
-            incident_details: ServiceNow incident details
+            case_id (str): The Security IR case ID
+            service_now_incident_id (str): The ServiceNow incident ID
+            incident_details (Any): ServiceNow incident details
 
         Returns:
-            True if successful, False otherwise
+            bool: True if successful, False otherwise
         """
         try:
             # Update the database
@@ -167,20 +185,26 @@ class ServiceNowService:
     """Service for ServiceNow operations"""
 
     def __init__(self, instance_id, username, password_param_name):
-        """Initialize the ServiceNow service"""
+        """
+        Initialize the ServiceNow service.
+
+        Args:
+            instance_id (str): ServiceNow instance ID
+            username (str): ServiceNow username
+            password_param_name (str): SSM parameter name containing password
+        """
         self.service_now_client = ServiceNowClient(
             instance_id, username, password_param_name
         )
 
     def get_incident(self, service_now_incident_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Get incident details from ServiceNow
+        """Get incident details from ServiceNow.
 
         Args:
-            service_now_incident_id: The ServiceNow incident ID
+            service_now_incident_id (str): The ServiceNow incident ID
 
         Returns:
-            Dictionary of incident details or None if retrieval fails
+            Optional[Dict[str, Any]]: Dictionary of incident details or None if retrieval fails
         """
         try:
             service_now_incident = self.service_now_client.get_incident(
@@ -192,20 +216,25 @@ class ServiceNowService:
                 )
                 return None
 
-            return self.extract_incident_details(service_now_incident)
+            service_now_incident_attachments = (
+                self.service_now_client.get_incident_attachments(service_now_incident)
+            )
+
+            return self.extract_incident_details(
+                service_now_incident, service_now_incident_attachments
+            )
         except Exception as e:
             logger.error(f"Error getting incident details from ServiceNow: {str(e)}")
             return None
 
-    def create_incident(self, service_now_fields: Dict[str, Any]):
-        """
-        Create incident in ServiceNow
+    def create_incident(self, service_now_fields: Dict[str, Any]) -> Optional[str]:
+        """Create incident in ServiceNow.
 
         Args:
-            service_now_fields: The ServiceNow incident fields
+            service_now_fields (Dict[str, Any]): The ServiceNow incident fields
 
         Returns:
-            Incident number of the created incident or None if retrieval fails
+            Optional[str]: Incident number of the created incident or None if creation fails
         """
         try:
             service_now_incident_number = self.service_now_client.create_incident(
@@ -223,17 +252,16 @@ class ServiceNowService:
             return None
 
     def update_incident(
-        self, service_now_incident_number, service_now_fields: Dict[str, Any]
-    ):
-        """
-        Update incident in ServiceNow
+        self, service_now_incident_number: str, service_now_fields: Dict[str, Any]
+    ) -> Optional[Any]:
+        """Update incident in ServiceNow.
 
         Args:
-            incident_number: Incident number in ServiceNow to be updated
-            fields: Dictionary of incident fields
+            service_now_incident_number (str): Incident number in ServiceNow to be updated
+            service_now_fields (Dict[str, Any]): Dictionary of incident fields
 
         Returns:
-            Updated ServiceNow incident or None if update fails
+            Optional[Any]: Updated ServiceNow incident or None if update fails
         """
         try:
             service_now_incident = self.service_now_client.update_incident(
@@ -250,23 +278,32 @@ class ServiceNowService:
             logger.error(f"Error updating incident details from ServiceNow: {str(e)}")
             return None
 
-    def extract_incident_details(self, service_now_incident: Any) -> Dict[str, Any]:
-        """
-        Extract relevant details from a ServiceNow incident object into a serializable dictionary
+    def extract_incident_details(
+        self, service_now_incident: Any, service_now_incident_attachments: Any
+    ) -> Dict[str, Any]:
+        """Extract relevant details from a ServiceNow incident object into a serializable dictionary.
 
         Args:
-            service_now_incident: ServiceNow incident object
+            service_now_incident (Any): ServiceNow incident object
+            service_now_incident_attachments (Any): ServiceNow incident attachments
 
         Returns:
-            Dictionary with serializable ServiceNow incident details
+            Dict[str, Any]: Dictionary with serializable ServiceNow incident details
         """
         try:
+            attachments_list = [
+                {
+                    "filename": attachment.file_name,
+                    "content_type": attachment.content_type,
+                }
+                for attachment in service_now_incident_attachments
+            ]
+
             incident_dict = {
-                "sys_id": service_now_incident.sys_id,
-                "number": service_now_incident.number,
-                "short_description": service_now_incident.short_description,
-                "description": service_now_incident.description,
-                "sys_updated_on": service_now_incident.sys_updated_on.get_display_value(),
+                "sys_id": service_now_incident.sys_id.get_display_value(),
+                "number": service_now_incident.number.get_display_value(),
+                "short_description": service_now_incident.short_description.get_display_value(),
+                "description": service_now_incident.description.get_display_value(),
                 "sys_created_on": service_now_incident.sys_created_on.get_display_value(),
                 "sys_created_by": service_now_incident.sys_created_by.get_display_value(),
                 "resolved_by": service_now_incident.resolved_by.get_display_value(),
@@ -281,6 +318,8 @@ class ServiceNowService:
                 "incident_state": service_now_incident.incident_state.get_display_value(),
                 "urgency": service_now_incident.urgency.get_display_value(),
                 "severity": service_now_incident.severity.get_display_value(),
+                "comments": service_now_incident.comments.get_display_value(),
+                "work_notes": service_now_incident.work_notes.get_display_value(),
                 "comments_and_work_notes": service_now_incident.comments_and_work_notes.get_display_value(),
                 "close_code": service_now_incident.close_code.get_display_value(),
                 "close_notes": service_now_incident.close_notes.get_display_value(),
@@ -291,6 +330,7 @@ class ServiceNowService:
                 "sys_tags": service_now_incident.sys_tags.get_display_value(),
                 "category": service_now_incident.subcategory.get_display_value(),
                 "subcategory": service_now_incident.subcategory.get_display_value(),
+                "attachments": attachments_list,
             }
             return incident_dict
         except Exception as e:
@@ -315,7 +355,14 @@ class IncidentService:
     """Class to handle incident operations"""
 
     def __init__(self, instance_id, username, password_param_name, table_name):
-        """Initialize the incident service"""
+        """Initialize the incident service.
+
+        Args:
+            instance_id (str): ServiceNow instance ID
+            username (str): ServiceNow username
+            password_param_name (str): SSM parameter name containing password
+            table_name (str): Name of the DynamoDB table
+        """
         self.db_service = DatabaseService(table_name)
         self.service_now_service = ServiceNowService(
             instance_id, username, password_param_name
@@ -324,14 +371,13 @@ class IncidentService:
     def extract_case_details(
         self, ir_case: Dict[str, Any]
     ) -> Tuple[Dict[str, Any], str, str, str]:
-        """
-        Extract case details from an IR case
+        """Extract case details from an IR case.
 
         Args:
-            ir_case: IR case data
+            ir_case (Dict[str, Any]): IR case data
 
         Returns:
-            Tuple of (ir_case_detail, ir_event_type, ir_case_id, sir_case_status)
+            Tuple[Dict[str, Any], str, str, str]: Tuple of (ir_case_detail, ir_event_type, ir_case_id, sir_case_status)
         """
         ir_case_detail = ir_case["detail"]
         ir_event_type = ir_case_detail["eventType"]
@@ -344,50 +390,59 @@ class IncidentService:
             logger.error(f"Failed to extract case ID from ARN: {ir_case_arn}")
             raise ValueError(f"Invalid case ARN format: {ir_case_arn}")
 
-        sir_case_status = ir_case_detail.get("caseStatus", "")
+        ir_case_status = ir_case_detail.get("caseStatus", "")
+        ir_case_comments = ir_case_detail.get("caseComments", "")
+        ir_case_attachments = ir_case_detail.get("caseAttachments", "")
 
-        return ir_case_detail, ir_event_type, ir_case_id, sir_case_status
+        return (
+            ir_case_detail,
+            ir_event_type,
+            ir_case_id,
+            ir_case_status,
+            ir_case_comments,
+            ir_case_attachments,
+        )
 
     def map_sir_case_to_snow_incident(
         self, ir_case_detail: Dict[str, Any], ir_case_id: str
     ) -> Dict[str, Any]:
-        """
-        Prepare ServiceNow fields from IR case details
+        """Prepare ServiceNow fields from IR case details.
 
         Args:
-            ir_case_detail: IR case details
-            ir_case_id: IR case ID
+            ir_case_detail (Dict[str, Any]): IR case details
+            ir_case_id (str): IR case ID
 
         Returns:
-            Dictionary of ServiceNow fields
+            Dict[str, Any]: Dictionary of ServiceNow fields
         """
         # Map fields from SIR to ServiceNow
-        service_now_fields = map_fields_to_service_now(ir_case_detail)
-
-        # Ensure base fields are set
-        service_now_fields["short_description"] = (
-            f"{ir_case_detail.get('title', 'SIR Case')} - AWS Security Incident Response Case#{ir_case_id}"
-        )
+        service_now_fields = map_sir_fields_to_service_now(ir_case_detail)
 
         return service_now_fields
 
     def process_security_incident(
         self, ir_case: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """
-        Process a security incident event
+        """Process a security incident event.
 
-        Args:
-            ir_case: IR case data
+        Args:v
+            ir_case (Dict[str, Any]): IR case data
 
         Returns:
-            ServiceNow incident or None if processing fails
+            Optional[Dict[str, Any]]: ServiceNow incident or None if processing fails
         """
         try:
+            service_now_incident_id = None
+            comments_list = []
             # Extract case details
-            ir_case_detail, ir_event_type, ir_case_id, sir_case_status = (
-                self.extract_case_details(ir_case)
-            )
+            (
+                ir_case_detail,
+                ir_event_type,
+                ir_case_id,
+                sir_case_status,
+                sir_case_comments,
+                sir_case_attachments,
+            ) = self.extract_case_details(ir_case)
 
             # Check if ServiceNow client is available
             if (
@@ -397,56 +452,124 @@ class IncidentService:
                 logger.error("Failed to create ServiceNow client")
                 return None
 
-            # Prepare ServiceNow fields
+            # Map Security IR case fields to ServiceNow incident
             service_now_fields = self.map_sir_case_to_snow_incident(
                 ir_case_detail, ir_case_id
             )
 
-            # Get status mapping
+            # Ensure base fields are set
+            # Map Security IR case status to ServiceNow incident
             service_now_status = None
             status_comment = None
             if sir_case_status:
                 service_now_status, status_comment = map_case_status(sir_case_status)
 
+            if service_now_status:
+                service_now_fields["state"] = service_now_status
+
+            if status_comment:
+                # If the status of Security IR case does not map to any status in ServiceNow incident, add the status as a comment for user visibility
+                comments_list.append(status_comment)
+
+            # Map Security IR case comments to ServiceNow incident
+            if sir_case_comments:
+                comments_to_be_added = map_sir_case_comments_to_service_now_incident(
+                    sir_case_comments, service_now_comments
+                )
+                if comments_to_be_added:
+                    comments_list.extend(comments_to_be_added)
+
+            # Get short description mapping
+            service_now_short_description = f"{ir_case_detail.get('title', 'SIR Case')} - AWS Security Incident Response Case#{ir_case_id}"
+
+            # Get unmapped fields comments
+            unmapped_sir_fields_comment = (
+                convert_unmapped_fields_to_string_for_snow_comments(ir_case_detail)
+            )
+
             # Handle based on event type
             if ir_event_type == "CaseCreated":
-                return self.handle_case_creation(ir_case_id, service_now_fields)
+                service_now_incident_id = self.handle_case_creation(
+                    ir_case_id,
+                    service_now_fields,
+                    comments_list,
+                    service_now_short_description,
+                    unmapped_sir_fields_comment,
+                )
             elif ir_event_type == "CaseUpdated":
-                return self.handle_case_update(
+                service_now_incident_id = self.handle_case_update(
                     ir_case_detail,
                     ir_case_id,
                     service_now_fields,
-                    service_now_status,
-                    status_comment,
+                    comments_list,
+                    unmapped_sir_fields_comment,
+                    service_now_short_description,
                 )
             else:
                 logger.warning(f"Unhandled event type: {ir_event_type}")
                 return None
+
+            # Map Security IR case attachments to ServiceNow incident
+            if sir_case_attachments:
+                logger.info(
+                    "Uploading Security IR case attachments to ServiceNow incident"
+                )
+                for sir_case_attachment in sir_case_attachments:
+                    logger.info(f"Attachment to be uploaded: {ir_attachment}")
+                    sir_case_attachment_id = sir_case_attachment["attachmentId"]
+                    sir_case_attachment_name = sir_case_attachment["fileName"]
+                    self.upload_attachment_to_service_now_incident(
+                        service_now_incident_id,
+                        ir_case_id,
+                        sir_case_attachment_id,
+                        sir_case_attachment_name,
+                    )
+
+            return service_now_incident_id
 
         except Exception as e:
             logger.error(f"Error in process_security_incident: {str(e)}")
             return None
 
     def handle_case_creation(
-        self, ir_case_id: str, service_now_fields: Dict[str, Any]
+        self,
+        ir_case_id: str,
+        service_now_fields: Dict[str, Any],
+        comments_list: List[str],
+        short_description: str,
+        unmapped_sir_fields_comment: str,
     ) -> Optional[str]:
-        """
-        Handle the creation of a new IR case
+        """Handle the creation of a new IR case.
 
         Args:
-            ir_case_detail: IR case details
-            ir_case_id: IR case ID
-            service_now_fields: ServiceNow fields
+            ir_case_id (str): IR case ID
+            service_now_fields (Dict[str, Any]): ServiceNow fields
+            short_description (str): Short description for the incident
+            unmapped_sir_fields_comment (str): Comments containing unmapped SIR fields
 
         Returns:
-            ServiceNow incident ID or None if creation fails
+            Optional[str]: ServiceNow incident ID or None if creation fails
         """
+        # Ensure base fields are set for incident creation in ServiceNow
+        service_now_fields["short_description"] = short_description
         # Create new incident in ServiceNow
         service_now_incident_number = self.service_now_service.create_incident(
             service_now_fields
         )
         if not service_now_incident_number:
             return None
+
+        # Update comments in the newly created incident
+        # Add unmapped fields to the comment list if they exist
+        if unmapped_sir_fields_comment:
+            comments_list.append(unmapped_sir_fields_comment)
+
+        if comments_list:
+            for comment in comments_list:
+                service_now_fields["work_notes"] = comment
+                self.service_now_service.update_incident(
+                    service_now_incident_number, service_now_fields
+                )
 
         # Create mapping between Security IR case id and ServiceNow incident id in the database
         self.db_service.update_mapping(ir_case_id, service_now_incident_number)
@@ -470,21 +593,21 @@ class IncidentService:
         ir_case_detail: Dict[str, Any],
         ir_case_id: str,
         service_now_fields: Dict[str, Any],
-        service_now_status: Optional[str],
-        status_comment: Optional[str],
+        comments_list: List[str],
+        unmapped_fields_comment: Optional[str],
+        service_now_short_description: Optional[str],
     ) -> Optional[str]:
-        """
-        Handle the update of an existing IR case
+        """Handle the update of an existing IR case.
 
         Args:
-            ir_case_detail: IR case details
-            ir_case_id: IR case ID
-            service_now_fields: ServiceNow fields
-            service_now_status: Target ServiceNow status
-            status_comment: Status comment
+            ir_case_detail (Dict[str, Any]): IR case details
+            ir_case_id (str): IR case ID
+            service_now_fields (Dict[str, Any]): ServiceNow fields
+            unmapped_fields_comment (Optional[str]): Comments containing additional info for unmapped SIR fields
+            service_now_short_description (Optional[str]): Short description containing the AWS Security Incident Response Case Id
 
         Returns:
-            ServiceNow incident ID or None if update fails
+            Optional[str]: ServiceNow incident ID or None if update fails
         """
         # Get case details from database
         case_from_ddb = self.db_service.get_case(ir_case_id)
@@ -502,15 +625,28 @@ class IncidentService:
             logger.info(
                 f"No ServiceNow incident found for IR case {ir_case_id} in database, creating ServiceNow incident..."
             )
-            return self.handle_case_creation(ir_case_id, service_now_fields)
+            return self.handle_case_creation(
+                ir_case_id,
+                service_now_fields,
+                comments_list,
+                service_now_short_description,
+                unmapped_fields_comment,
+            )
         else:
             # Update existing incident in ServiceNow
             logger.info(
                 f"ServiceNow incident {service_now_incident_id} found for IR case {ir_case_id} in database, updating ServiceNow incident..."
             )
-            self.service_now_service.update_incident(
-                service_now_incident_id, service_now_fields
-            )
+            if comments_list:
+                for comment in comments_list:
+                    service_now_fields["work_notes"] = comment
+                    self.service_now_service.update_incident(
+                        service_now_incident_id, service_now_fields
+                    )
+            else:
+                self.service_now_service.update_incident(
+                    service_now_incident_id, service_now_fields
+                )
 
         # Get ServiceNow incident latest details post update
         service_now_incident = self.service_now_service.get_incident(
@@ -529,17 +665,60 @@ class IncidentService:
         )
         return service_now_incident_id
 
+    def upload_attachment_to_service_now_incident(
+        self, service_now_incident_id, ir_case_id, ir_attachment_id, ir_attachment_name
+    ):
+        # Upload the file to the fetched incident
+        # Replace 'path/to/your/file.txt'
+        download_path = f"/tmp/{ir_attachment_name}"
+        try:
+            # Get presigned URL
+            ir_attachment_presigned_url = (
+                security_incident_response_client.get_case_attachment_download_url(
+                    caseId=ir_case_id, attachmentId=ir_attachment_id
+                )
+            )
+
+            ir_attachment_presigned_url_str = ir_attachment_presigned_url[
+                "attachmentPresignedUrl"
+            ]
+
+            # Download object to /tmp using the presigned URL
+            response = requests.get(ir_attachment_presigned_url_str)
+            with open(download_path, "wb") as f:
+                f.write(response.content)
+
+            # Upload from /tmp and add to ServiceNow issue as attachment
+            self.service_now_service.service_now_client.upload_incident_attachment(
+                service_now_incident_id, download_path
+            )
+
+            logger.info(
+                f"Added attachment {ir_attachment_name} to ServiceNow issue {service_now_incident_id}"
+            )
+
+            # Delete file from /tmp directory
+            os.remove(download_path)
+
+        except Exception as e:
+            logger.error(f"Error trying to download IR attachment: {e}")
+            # Clean up if file exists
+            if os.path.exists(download_path):
+                os.remove(download_path)
+
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Lambda handler to process security incidents
+    Lambda handler to process security incidents.
+
+    Processes Security IR events and creates/updates corresponding ServiceNow incidents.
 
     Args:
-        event: Lambda event object
-        context: Lambda context object
+        event (Dict[str, Any]): Lambda event object containing Security IR case data
+        context (Any): Lambda context object
 
     Returns:
-        Dictionary containing response status and details
+        Dict[str, Any]: Dictionary containing response status and details
     """
     try:
         # Only process events from Security Incident Response

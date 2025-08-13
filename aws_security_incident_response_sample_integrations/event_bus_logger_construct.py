@@ -6,14 +6,14 @@ from aws_cdk import (
     aws_events,
     aws_events_targets,
     aws_logs,
-    aws_cloudwatch_actions as actions, 
+    aws_cloudwatch_actions as actions,
     aws_iam as iam,
     aws_kms as kms,
-    aws_sqs as sqs, 
-    aws_sns as sns, 
-    aws_cloudwatch as cloudwatch, 
+    aws_sqs as sqs,
+    aws_sns as sns,
+    aws_cloudwatch as cloudwatch,
     Duration,
-    RemovalPolicy
+    RemovalPolicy,
 )
 from constructs import Construct
 
@@ -23,7 +23,7 @@ class EventBusLoggerConstruct(Construct):
     CDK construct that creates a CloudWatch LogGroup and configures it as a target
     for an EventBridge Rule that matches events from a specified EventBus.
     """
-    
+
     def __init__(
         self,
         scope: Construct,
@@ -31,26 +31,30 @@ class EventBusLoggerConstruct(Construct):
         event_bus: aws_events.IEventBus,
         log_group_name: str = None,
         log_retention: aws_logs.RetentionDays = aws_logs.RetentionDays.ONE_MONTH,
-        **kwargs
+        **kwargs,
     ) -> None:
         """
         Initialize the EventBusLoggerConstruct.
-        
+
+        Creates a CloudWatch LogGroup and configures it as a target for an EventBridge Rule
+        that matches events from the specified EventBus. Includes DLQ, alarms, and dashboard.
+
         Args:
-            scope: The scope in which to define this construct.
-            construct_id: The ID of the construct.
-            event_bus: The EventBus to read events from.
-            log_group_name: Optional name for the CloudWatch LogGroup. If not provided, a name will be generated.
-            log_retention: The number of days to retain log events in the CloudWatch LogGroup.
+            scope (Construct): The scope in which to define this construct
+            construct_id (str): The ID of the construct
+            event_bus (aws_events.IEventBus): The EventBus to read events from
+            log_group_name (str, optional): Optional name for the CloudWatch LogGroup
+            log_retention (aws_logs.RetentionDays): The number of days to retain log events
+            **kwargs: Additional keyword arguments
         """
         super().__init__(scope, construct_id, **kwargs)
-        
+
         # Create KMS key for the DLQ
         dlq_key = kms.Key(
             self,
             "DLQKey",
             enable_key_rotation=True,
-            removal_policy=RemovalPolicy.DESTROY
+            removal_policy=RemovalPolicy.DESTROY,
         )
 
         # Add permissions for EventBridge to use the KMS key
@@ -58,22 +62,19 @@ class EventBusLoggerConstruct(Construct):
             iam.PolicyStatement(
                 effect=iam.Effect.ALLOW,
                 principals=[iam.ServicePrincipal("events.amazonaws.com")],
-                actions=[
-                    "kms:GenerateDataKey",
-                    "kms:Decrypt"
-                ],
-                resources=["*"]
+                actions=["kms:GenerateDataKey", "kms:Decrypt"],
+                resources=["*"],
             )
         )
 
         # Create DLQ with the KMS key
         dlq = sqs.Queue(
-            self, 
+            self,
             "deadletter-queue",
             retention_period=Duration.days(14),
             visibility_timeout=Duration.seconds(300),
             encryption=sqs.QueueEncryption.KMS,
-            encryption_master_key=dlq_key
+            encryption_master_key=dlq_key,
         )
 
         # Add HTTPS enforcement policy
@@ -83,11 +84,7 @@ class EventBusLoggerConstruct(Construct):
                 principals=[iam.AnyPrincipal()],
                 actions=["sqs:*"],
                 resources=[dlq.queue_arn],
-                conditions={
-                    "Bool": {
-                        "aws:SecureTransport": "false"
-                    }
-                }
+                conditions={"Bool": {"aws:SecureTransport": "false"}},
             )
         )
 
@@ -97,7 +94,7 @@ class EventBusLoggerConstruct(Construct):
                 effect=iam.Effect.ALLOW,
                 principals=[iam.ServicePrincipal("events.amazonaws.com")],
                 actions=["sqs:SendMessage"],
-                resources=[dlq.queue_arn]
+                resources=[dlq.queue_arn],
             )
         )
 
@@ -105,13 +102,17 @@ class EventBusLoggerConstruct(Construct):
         alarm_topic = sns.Topic(
             self,
             "DLQAlarmTopic",
-            master_key=kms.Key(self, "TopicKey", enable_key_rotation=True, removal_policy=RemovalPolicy.DESTROY)
+            master_key=kms.Key(
+                self,
+                "TopicKey",
+                enable_key_rotation=True,
+                removal_policy=RemovalPolicy.DESTROY,
+            ),
         )
 
         # Create metric
         dlq_messages = dlq.metric_approximate_number_of_messages_visible(
-            period=Duration.minutes(1),
-            statistic="Sum"
+            period=Duration.minutes(1), statistic="Sum"
         )
 
         # Create CloudWatch Alarm
@@ -133,22 +134,13 @@ class EventBusLoggerConstruct(Construct):
         )
 
         # Add SNS action to alarm
-        alarm.add_alarm_action(
-            actions.SnsAction(alarm_topic)
-
-        )
+        alarm.add_alarm_action(actions.SnsAction(alarm_topic))
 
         # Create a dashboard
-        dashboard = cloudwatch.Dashboard(
-            self,
-            "DLQDashboard"
-        )
+        dashboard = cloudwatch.Dashboard(self, "DLQDashboard")
 
         dashboard.add_widgets(
-            cloudwatch.GraphWidget(
-                title="DLQ Messages",
-                left=[dlq_messages]
-            )
+            cloudwatch.GraphWidget(title="DLQ Messages", left=[dlq_messages])
         )
 
         # Create a CloudWatch LogGroup
@@ -157,9 +149,9 @@ class EventBusLoggerConstruct(Construct):
             "LogGroup",
             log_group_name=log_group_name or f"/aws/events/{event_bus.event_bus_name}",
             retention=log_retention,
-            removal_policy=RemovalPolicy.DESTROY
+            removal_policy=RemovalPolicy.DESTROY,
         )
-        
+
         # Create an EventBridge Rule that matches all events from the EventBus
         rule = aws_events.Rule(
             self,
@@ -167,17 +159,15 @@ class EventBusLoggerConstruct(Construct):
             event_bus=event_bus,
             description=f"Rule to log all events from {event_bus.event_bus_name} to CloudWatch Logs",
             # Match all events from the security-ir-poller source
-            event_pattern=aws_events.EventPattern(
-                source=["security-ir-poller"]
-            )
+            event_pattern=aws_events.EventPattern(source=["security-ir-poller"]),
         )
-        
+
         # Add the CloudWatch LogGroup as a target for the rule
         rule.add_target(
             aws_events_targets.CloudWatchLogGroup(
                 self.log_group,
                 dead_letter_queue=dlq,
                 retry_attempts=2,
-                max_event_age=Duration.minutes(1)
+                max_event_age=Duration.minutes(1),
             )
         )

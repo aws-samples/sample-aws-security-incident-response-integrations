@@ -28,9 +28,13 @@ except ImportError:
 # Constants
 EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "service-now")
 
-# Configure logging with AWS Lambda Powertools
-log_level = os.environ.get("LOG_LEVEL", "error").lower()
-logger = Logger(service="service-now-notifications-handler", level=log_level)
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+# # Configure logging with AWS Lambda Powertools
+# log_level = os.environ.get("LOG_LEVEL", "error").lower()
+# logger = Logger(service="service-now-notifications-handler", level=log_level)
 
 # Initialize AWS clients
 events_client = boto3.client("events")
@@ -86,7 +90,6 @@ class IncidentCreatedEvent(BaseEvent):
             "number": self.incident.get("number", ""),
             "short_description": self.incident.get("short_description", ""),
             "description": self.incident.get("description", ""),
-            "sys_updated_on": self.incident.get("sys_updated_on", ""),
             "sys_created_on": self.incident.get("sys_created_on", ""),
             "sys_created_by": self.incident.get("sys_created_by", ""),
             "resolved_by": self.incident.get("resolved_by", ""),
@@ -101,6 +104,8 @@ class IncidentCreatedEvent(BaseEvent):
             "incident_state": self.incident.get("incident_state", ""),
             "urgency": self.incident.get("urgency", ""),
             "severity": self.incident.get("severity", ""),
+            "comments": self.incident.get("comments", ""),
+            "work_notes": self.incident.get("work_notes", ""),
             "comments_and_work_notes": self.incident.get("comments_and_work_notes", ""),
             "close_code": self.incident.get("close_code", ""),
             "close_notes": self.incident.get("close_notes", ""),
@@ -143,7 +148,6 @@ class IncidentUpdatedEvent(BaseEvent):
             "number": self.incident.get("number", ""),
             "short_description": self.incident.get("short_description", ""),
             "description": self.incident.get("description", ""),
-            "sys_updated_on": self.incident.get("sys_updated_on", ""),
             "sys_created_on": self.incident.get("sys_created_on", ""),
             "sys_created_by": self.incident.get("sys_created_by", ""),
             "resolved_by": self.incident.get("resolved_by", ""),
@@ -248,6 +252,7 @@ class ParameterService:
                 f"Unexpected error retrieving parameter {parameter_name}: {str(e)}"
             )
             return None
+
 
 class EventPublisherService:
     """Service for publishing events to EventBridge"""
@@ -492,13 +497,12 @@ class ServiceNowService:
                 }
                 for attachment in service_now_incident_attachments
             ]
-            
+
             incident_dict = {
-                "sys_id": service_now_incident.sys_id,
-                "number": service_now_incident.number,
-                "short_description": service_now_incident.short_description,
-                "description": service_now_incident.description,
-                "sys_updated_on": service_now_incident.sys_updated_on.get_display_value(),
+                "sys_id": service_now_incident.sys_id.get_display_value(),
+                "number": service_now_incident.number.get_display_value(),
+                "short_description": service_now_incident.short_description.get_display_value(),
+                "description": service_now_incident.description.get_display_value(),
                 "sys_created_on": service_now_incident.sys_created_on.get_display_value(),
                 "sys_created_by": service_now_incident.sys_created_by.get_display_value(),
                 "resolved_by": service_now_incident.resolved_by.get_display_value(),
@@ -513,6 +517,8 @@ class ServiceNowService:
                 "incident_state": service_now_incident.incident_state.get_display_value(),
                 "urgency": service_now_incident.urgency.get_display_value(),
                 "severity": service_now_incident.severity.get_display_value(),
+                "comments": service_now_incident.comments.get_display_value(),
+                "work_notes": service_now_incident.work_notes.get_display_value(),
                 "comments_and_work_notes": service_now_incident.comments_and_work_notes.get_display_value(),
                 "close_code": service_now_incident.close_code.get_display_value(),
                 "close_notes": service_now_incident.close_notes.get_display_value(),
@@ -838,8 +844,11 @@ class ServiceNowMessageProcessorService:
         """
         try:
             # Compare incident details to detect changes
-            incident_details_json = json.dumps(incident_details)
-            if json.loads(incident_details_json) != json.loads(existing_details):
+            logger.info(f"Latest Incident details from ServiceNow {incident_details}")
+            logger.info(
+                f"Existing Incident details from DDB {json.loads(existing_details)}"
+            )
+            if incident_details != json.loads(existing_details):
                 logger.info(
                     f"Publishing IncidentUpdatedEvent for ServiceNow incident {incident_number}"
                 )
@@ -907,7 +916,7 @@ class ResponseBuilderService:
         }
 
 
-@logger.inject_lambda_context
+# @logger.inject_lambda_context
 def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     """
     Lambda handler for processing API Gateway webhook events from ServiceNow
