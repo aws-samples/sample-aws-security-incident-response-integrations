@@ -22,4 +22,46 @@ SLACK_MAX_RETRIES = 5
 SLACK_INITIAL_RETRY_DELAY = 1  # seconds
 SLACK_MAX_RETRY_DELAY = 60  # seconds
 
+# Slack API and Bolt framework constants
+SLACK_BOT_TOKEN_PARAMETER = "/SecurityIncidentResponse/slackBotToken"
+SLACK_SIGNING_SECRET_PARAMETER = "/SecurityIncidentResponse/slackSigningSecret"
+SLACK_APP_TOKEN_PARAMETER = "/SecurityIncidentResponse/slackAppToken"
+SLACK_CLIENT_ID_PARAMETER = "/SecurityIncidentResponse/slackClientId"
+SLACK_CLIENT_SECRET_PARAMETER = "/SecurityIncidentResponse/slackClientSecret"
+
+# Slack file upload limits
+SLACK_MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024  # 100MB limit for AWS SIR attachments
+SLACK_SUPPORTED_FILE_TYPES = [
+    "pdf", "doc", "docx", "txt", "rtf", "odt",
+    "jpg", "jpeg", "png", "gif", "bmp", "tiff",
+    "zip", "tar", "gz", "7z", "rar",
+    "csv", "xls", "xlsx", "json", "xml", "log"
+]
+
+# Slack channel and message limits
+SLACK_MAX_CHANNEL_NAME_LENGTH = 21
+SLACK_MAX_MESSAGE_LENGTH = 4000
+SLACK_MAX_BLOCKS_PER_MESSAGE = 50
+SLACK_MAX_USERS_PER_INVITE = 1000
+
+# Slack event types
+SLACK_EVENT_MESSAGE = "message"
+SLACK_EVENT_FILE_SHARED = "file_shared"
+SLACK_EVENT_MEMBER_JOINED = "member_joined_channel"
+SLACK_EVENT_MEMBER_LEFT = "member_left_channel"
+SLACK_EVENT_CHANNEL_CREATED = "channel_created"
+SLACK_EVENT_CHANNEL_DELETED = "channel_deleted"
+SLACK_EVENT_CHANNEL_RENAMED = "channel_rename"
+
+# Slack command constants
+SLACK_COMMAND_PREFIX = "/security-ir"
+SLACK_COMMAND_HELP = "help"
+SLACK_COMMAND_STATUS = "status"
+SLACK_COMMAND_UPDATE = "update"
+SLACK_COMMAND_CLOSE = "close"
+SLACK_COMMAND_REOPEN = "reopen"
+SLACK_COMMAND_ASSIGN = "assign"
+SLACK_COMMAND_WATCHERS = "watchers"
+SLACK_COMMAND_SUMMARY = "summary"
+
 # ServiceNow automation constants
