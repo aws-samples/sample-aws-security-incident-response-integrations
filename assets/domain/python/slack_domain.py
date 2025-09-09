@@ -1,5 +1,22 @@
 """
 Slack domain models for AWS Security Incident Response integration.
+
+This module provides domain models for Slack entities used in the AWS Security
+Incident Response integration. All models include comprehensive validation,
+serialization support, and factory methods for creating instances from Slack API responses.
+
+Key Features:
+- Comprehensive validation with Slack-specific format checking
+- Full serialization support (to_dict/from_dict)
+- Factory methods for Slack API integration
+- Type hints and comprehensive documentation
+- Error handling with descriptive messages
+
+Models:
+- SlackChannel: Represents a Slack channel associated with a security incident
+- SlackMessage: Represents a message in a Slack channel
+- SlackAttachment: Represents a file attachment in Slack
+- SlackCommand: Represents a slash command invocation
 """
 
 import datetime
@@ -22,7 +39,7 @@ class SlackChannel:
         channel_name: str,
         case_id: str,
         members: Optional[List[str]] = None,
-        created_at: Optional[datetime.datetime] = None,
+        created_at: Optional[datetime.datetime] = ...,  # Use Ellipsis as sentinel
         topic: Optional[str] = None,
         purpose: Optional[str] = None
     ):
@@ -42,12 +59,23 @@ class SlackChannel:
         self.channel_name = channel_name
         self.case_id = case_id
         self.members = members or []
-        self.created_at = created_at or datetime.datetime.utcnow()
+        # Set default timestamp only if not explicitly provided
+        # Using Ellipsis (...) as sentinel to distinguish between None (explicit) 
+        # and default parameter (implicit) - allows factory methods to pass None explicitly
+        if created_at is ...:
+            self.created_at = datetime.datetime.now(datetime.timezone.utc)
+        else:
+            self.created_at = created_at
         self.topic = topic
         self.purpose = purpose
 
     def validate(self) -> bool:
         """Validate the SlackChannel model.
+        
+        Performs comprehensive validation including:
+        - Required field presence checks
+        - Slack channel ID format validation (C + 8+ alphanumeric chars)
+        - Channel name format validation (lowercase, alphanumeric, hyphens, underscores)
 
         Returns:
             bool: True if valid, False otherwise
@@ -65,10 +93,12 @@ class SlackChannel:
             raise ValueError("Case ID is required")
         
         # Validate Slack channel ID format (should start with 'C' and be alphanumeric)
+        # Slack channel IDs follow pattern: C + 8 or more uppercase alphanumeric characters
         if not re.match(r'^C[A-Z0-9]{8,}$', self.channel_id):
             raise ValueError(f"Invalid Slack channel ID format: {self.channel_id}")
         
         # Validate channel name format (lowercase, alphanumeric, hyphens, underscores)
+        # Slack channel names must be lowercase and can contain letters, numbers, hyphens, underscores
         if not re.match(r'^[a-z0-9\-_]+$', self.channel_name):
             raise ValueError(f"Invalid channel name format: {self.channel_name}")
         
@@ -91,6 +121,30 @@ class SlackChannel:
         }
 
     @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SlackChannel':
+        """Create a SlackChannel from a dictionary.
+
+        Args:
+            data (Dict[str, Any]): Dictionary representation of the channel
+
+        Returns:
+            SlackChannel: SlackChannel domain model
+        """
+        created_at = None
+        if data.get("createdAt"):
+            created_at = datetime.datetime.fromisoformat(data["createdAt"])
+        
+        return cls(
+            channel_id=data.get("channelId"),
+            channel_name=data.get("channelName"),
+            case_id=data.get("caseId"),
+            members=data.get("members", []),
+            created_at=created_at,
+            topic=data.get("topic"),
+            purpose=data.get("purpose")
+        )
+
+    @classmethod
     def from_slack_response(cls, response: Dict[str, Any], case_id: str) -> 'SlackChannel':
         """Create a SlackChannel from Slack API response.
 
@@ -101,7 +155,7 @@ class SlackChannel:
         Returns:
             SlackChannel: SlackChannel domain model
         """
-        created_timestamp = response.get("created", 0)
+        created_timestamp = response.get("created")
         created_at = datetime.datetime.fromtimestamp(created_timestamp) if created_timestamp else None
         
         return cls(
@@ -110,8 +164,8 @@ class SlackChannel:
             case_id=case_id,
             members=response.get("members", []),
             created_at=created_at,
-            topic=response.get("topic", {}).get("value"),
-            purpose=response.get("purpose", {}).get("value")
+            topic=response.get("topic", {}).get("value") if response.get("topic") else None,
+            purpose=response.get("purpose", {}).get("value") if response.get("purpose") else None
         )
 
 
@@ -216,6 +270,29 @@ class SlackMessage:
         }
 
     @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SlackMessage':
+        """Create a SlackMessage from a dictionary.
+
+        Args:
+            data (Dict[str, Any]): Dictionary representation of the message
+
+        Returns:
+            SlackMessage: SlackMessage domain model
+        """
+        return cls(
+            message_id=data.get("messageId"),
+            channel_id=data.get("channelId"),
+            user_id=data.get("userId"),
+            text=data.get("text", ""),
+            timestamp=data.get("timestamp"),
+            thread_ts=data.get("threadTs"),
+            message_type=data.get("messageType", "message"),
+            subtype=data.get("subtype"),
+            user_name=data.get("userName"),
+            attachments=data.get("attachments", [])
+        )
+
+    @classmethod
     def from_slack_event(cls, event: Dict[str, Any]) -> 'SlackMessage':
         """Create a SlackMessage from Slack event.
 
@@ -239,6 +316,9 @@ class SlackMessage:
 
     def is_bot_message(self) -> bool:
         """Check if this is a bot message that should be filtered out.
+        
+        Bot messages should not be synchronized to AWS SIR to avoid loops and noise.
+        This method identifies messages from bots, apps, or system-generated content.
 
         Returns:
             bool: True if this is a bot message, False otherwise
@@ -354,6 +434,29 @@ class SlackAttachment:
             "channelId": self.channel_id,
             "initialComment": self.initial_comment
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SlackAttachment':
+        """Create a SlackAttachment from a dictionary.
+
+        Args:
+            data (Dict[str, Any]): Dictionary representation of the attachment
+
+        Returns:
+            SlackAttachment: SlackAttachment domain model
+        """
+        return cls(
+            file_id=data.get("fileId"),
+            filename=data.get("filename"),
+            url=data.get("url"),
+            size=data.get("size", 0),
+            mimetype=data.get("mimetype", "application/octet-stream"),
+            title=data.get("title"),
+            timestamp=data.get("timestamp"),
+            user_id=data.get("userId"),
+            channel_id=data.get("channelId"),
+            initial_comment=data.get("initialComment")
+        )
 
     @classmethod
     def from_slack_file(cls, file_data: Dict[str, Any], channel_id: Optional[str] = None) -> 'SlackAttachment':
@@ -489,6 +592,28 @@ class SlackCommand:
         }
 
     @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SlackCommand':
+        """Create a SlackCommand from a dictionary.
+
+        Args:
+            data (Dict[str, Any]): Dictionary representation of the command
+
+        Returns:
+            SlackCommand: SlackCommand domain model
+        """
+        return cls(
+            command=data.get("command"),
+            text=data.get("text", ""),
+            user_id=data.get("userId"),
+            channel_id=data.get("channelId"),
+            team_id=data.get("teamId"),
+            response_url=data.get("responseUrl"),
+            trigger_id=data.get("triggerId"),
+            user_name=data.get("userName"),
+            channel_name=data.get("channelName")
+        )
+
+    @classmethod
     def from_slack_payload(cls, payload: Dict[str, Any]) -> 'SlackCommand':
         """Create a SlackCommand from Slack command payload.
 
@@ -512,6 +637,13 @@ class SlackCommand:
 
     def parse_subcommand(self) -> tuple[str, str]:
         """Parse the command text to extract subcommand and arguments.
+        
+        Splits the command text on the first space to separate the subcommand
+        from its arguments. Handles cases with no arguments gracefully.
+        
+        Example:
+            "/security-ir status" -> ("status", "")
+            "/security-ir update-description New description" -> ("update-description", "New description")
 
         Returns:
             tuple[str, str]: (subcommand, arguments)
