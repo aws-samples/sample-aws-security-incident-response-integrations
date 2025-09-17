@@ -9,7 +9,7 @@
 
 - [x] 2. Implement Slack domain models and data structures
 
-  - [x] 2.1 Create Slack domain models in assets/domain/python/
+  - [ ] 2.1 Create Slack domain models in assets/domain/python/
 
     - Write SlackChannel, SlackMessage, SlackAttachment models
     - Implement model validation and serialization methods
