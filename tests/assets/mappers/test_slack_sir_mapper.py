@@ -6,6 +6,9 @@ import pytest
 from datetime import datetime
 from unittest.mock import patch
 
+# Mark this test as requiring Slack SDK dependencies
+pytestmark = pytest.mark.requires_slack_sdk
+
 # Import the mapper
 import sys
 import os

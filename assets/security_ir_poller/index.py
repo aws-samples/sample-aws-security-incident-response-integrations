@@ -561,3 +561,16 @@ def handler(event: Dict, context: Any) -> Dict:
             "count": len(incidents),
         },
     }
+
+
+def lambda_handler(event: Dict, context: Any) -> Dict:
+    """AWS Lambda handler function.
+    
+    Args:
+        event (Dict): Lambda event object
+        context (Any): Lambda context object
+        
+    Returns:
+        Dict: Dictionary containing response status and details
+    """
+    return handler(event, context)

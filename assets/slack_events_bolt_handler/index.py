@@ -623,8 +623,8 @@ if app:
                         "errorType": "unexpected_error"
                     }
                     publish_event_to_eventbridge("File Upload Error", error_detail)
-            except:
-                pass  # Avoid cascading errors
+            except Exception as e:
+                logger.error(f"Failed to publish error event for file upload: {str(e)}")
     
     
     # Slash command router
@@ -707,8 +707,8 @@ if app:
                     user=command["user_id"],
                     text="❌ Error: An unexpected error occurred while processing your command."
                 )
-            except:
-                pass  # Avoid cascading errors
+            except Exception as e:
+                logger.error(f"Failed to send error message to Slack: {str(e)}")
     
     
     # URL verification handler (required for Slack Events API)

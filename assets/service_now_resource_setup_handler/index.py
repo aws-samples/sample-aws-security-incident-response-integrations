@@ -573,3 +573,14 @@ def handler(event, context):
     except Exception as e:
         logger.error(f"Error in custom resource handler: {str(e)}")
         return {"Status": "FAILED", "PhysicalResourceId": "service-now-api-setup"}
+def lambda_handler(event, context):
+    """AWS Lambda handler function.
+    
+    Args:
+        event: Lambda event object
+        context: Lambda context object
+        
+    Returns:
+        Response from handler function
+    """
+    return handler(event, context)
