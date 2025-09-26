@@ -6,12 +6,10 @@ This module processes notifications from Jira and publishes events to EventBridg
 import json
 import html
 import os
-import sys
 import datetime
-import re
 import traceback
 import logging
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List
 
 from boto3 import client, resource
 from boto3.dynamodb.conditions import Attr

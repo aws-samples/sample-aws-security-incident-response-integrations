@@ -15,8 +15,6 @@ from aws_cdk import (
     aws_logs,
     aws_secretsmanager,
     aws_ssm,
-    aws_sns as sns,
-    aws_sns_subscriptions as subscriptions,
     CustomResource,
     custom_resources as cr,
 )
@@ -25,7 +23,6 @@ from constructs import Construct
 from .constants import (
     SECURITY_IR_EVENT_SOURCE,
     SERVICE_NOW_EVENT_SOURCE,
-    SERVICE_NOW_AWS_ACCOUNT_ID,
 )
 from .aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
@@ -78,6 +75,16 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             type="String",
             description="The user password that will be used with the Service Now API.",
             no_echo=True,
+        )
+
+        # Integration module parameter
+        self.integration_module_param = CfnParameter(
+            self,
+            "integrationModule",
+            type="String",
+            description="ServiceNow integration module: 'itsm' for IT Service Management or 'ir' for Incident Response",
+            allowed_values=["itsm", "ir"],
+            default="itsm",
         )
 
         # Create SSM parameters
@@ -148,6 +155,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "INCIDENTS_TABLE_NAME": table.table_name,
                 "SERVICE_NOW_PASSWORD_PARAM": service_now_password_ssm_param.parameter_name,
                 "EVENT_SOURCE": SECURITY_IR_EVENT_SOURCE,
+                "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
                 "LOG_LEVEL": log_level_param.value_as_string,
             },
             role=service_now_client_role,
@@ -454,6 +462,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "SERVICE_NOW_PASSWORD_PARAM": service_now_password_ssm_param.parameter_name,
                 "INCIDENTS_TABLE_NAME": table.table_name,
                 "EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
+                "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
                 "LOG_LEVEL": log_level_param.value_as_string,
             },
             role=service_now_notifications_handler_role,
@@ -679,6 +688,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "SERVICE_NOW_RESOURCE_PREFIX": service_now_api_gateway.rest_api_id,
                 "WEBHOOK_URL": f"{service_now_api_gateway.url.rstrip('/')}/webhook",
                 "API_AUTH_SECRET": api_auth_secret.secret_arn,
+                "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
                 "LOG_LEVEL": log_level_param.value_as_string,
             },
             role=service_now_resource_setup_role,
@@ -692,12 +702,13 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
 
         # Create custom resource
-        service_now_resource_setup_cr = CustomResource(
+        CustomResource(
             self,
             "ServiceNowResourceSetupCr",
             service_token=service_now_cr_provider.service_token,
             properties={
-                "WebhookUrl": f"{service_now_api_gateway.url.rstrip('/')}/webhook"
+                "WebhookUrl": f"{service_now_api_gateway.url.rstrip('/')}/webhook",
+                "IntegrationModule": self.integration_module_param.value_as_string,
             },
         )
 

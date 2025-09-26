@@ -6,11 +6,10 @@ This module handles the creation and updating of Jira issues based on Security I
 import json
 import os
 import re
-import sys
 import logging
 import requests
 import datetime
-from typing import List, Dict, Optional, Any, Tuple, Union
+from typing import List, Dict, Optional, Any, Tuple
 
 import boto3
 from botocore.exceptions import ClientError
@@ -48,8 +47,6 @@ try:
 except ImportError:
     # This import works for local development and imports locally from the file system
     from ..mappers.python.jira_sir_mapper import (
-        Case,
-        create_case_from_api_response,
         map_fields_to_jira,
         map_case_status,
     )

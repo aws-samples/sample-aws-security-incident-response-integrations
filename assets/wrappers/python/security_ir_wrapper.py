@@ -3,12 +3,10 @@ Security IR API wrapper for AWS Security Incident Response integration.
 This module provides a wrapper around the Jira API for use in the Security Incident Response integration.
 """
 
-import os
 import logging
-from typing import List, Dict, Optional, Any, Union
+from typing import Dict, Optional, Any
 
-import boto3
-from boto3 import client, resource
+from boto3 import client
 
 # Configure logging
 logger = logging.getLogger()

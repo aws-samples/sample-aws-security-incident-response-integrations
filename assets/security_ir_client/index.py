@@ -8,12 +8,11 @@ import os
 import re
 import logging
 import datetime
-from typing import List, Dict, Optional, Any, Tuple, Union
+from typing import List, Dict, Optional, Any
 import boto3
 from botocore.exceptions import ClientError
-from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.conditions import Attr
 import requests
-import mimetypes
 
 # Configure logging
 logger = logging.getLogger()
@@ -38,57 +37,108 @@ try:
     from service_now_wrapper import ServiceNowClient
     from service_now_sir_mapper import (
         map_service_now_fields_to_sir,
-        map_closure_code,
         map_service_now_incident_comments_to_sir_case,
     )
     from jira_sir_mapper import (
-        map_case_status,
         map_fields_to_sir,
-        map_closure_code,
     )
 except ImportError:
     # This import works for local development and imports locally from the file system
     from ..wrappers.python.service_now_wrapper import ServiceNowClient
     from ..mappers.python.service_now_sir_mapper import (
         map_service_now_fields_to_sir,
-        map_closure_code,
         map_service_now_incident_comments_to_sir_case,
     )
     from ..mappers.python.jira_sir_mapper import (
-        map_case_status,
         map_fields_to_sir,
-        map_closure_code,
     )
 
 # Initialize AWS clients
 security_ir_client = boto3.client("security-ir")
 
 
-def process_service_now_event(service_now_incident: dict, event_source: str) -> None:
+def process_service_now_event(
+    service_now_incident: dict, event_source: str, integration_module: str = "itsm"
+) -> None:
     """Process ServiceNow event and create/update Security IR case.
 
     Args:
         service_now_incident (dict): ServiceNow incident details
         event_source (str): Source of the event
+        integration_module (str): Integration module type ('itsm' or 'ir')
     """
-    security_ir_case = {}
-    service_now_event_type = service_now_incident["eventType"]
+    if not service_now_incident:
+        logger.error("ServiceNow incident data is None or empty")
+        return
+
+    service_now_event_type = service_now_incident.get("eventType", "")
     logger.info(f"Processing ServiceNow event {service_now_event_type}")
 
     # map ServiceNow incident to Security Incident Response case
-    service_now_incident_id = service_now_incident["number"]
-    service_now_issue_status = service_now_incident["state"]
+    service_now_incident_id = service_now_incident.get("number", "")
+    service_now_issue_status = service_now_incident.get("state", "")
 
-    # map ServiceNow incident state to Security Incident Response case status
-    if service_now_issue_status in ["Closed", "Resolved", "Canceled", "6", "7", "8"]:
-        ir_case_status = "Closed"
-    elif service_now_issue_status in ["In Progress", "On Hold", "2", "3"]:
-        ir_case_status = "Detection and Analysis"
-    elif service_now_issue_status in ["New", "1"]:
-        ir_case_status = "Submitted"
+    if not service_now_incident_id:
+        logger.error("ServiceNow incident number is missing")
+        return
+
+    # map ServiceNow incident state to Security Incident Response case status based on integration module
+    ir_case_status = "Submitted"  # Default status
+
+    if integration_module == "itsm":
+        # ITSM status mapping
+        if service_now_issue_status in [
+            "Closed",
+            "Resolved",
+            "Canceled",
+            "6",
+            "7",
+            "8",
+        ]:
+            ir_case_status = "Closed"
+        elif service_now_issue_status in ["In Progress", "On Hold", "2", "3"]:
+            ir_case_status = "Detection and Analysis"
+        elif service_now_issue_status in ["New", "1"]:
+            ir_case_status = "Submitted"
+    elif integration_module == "ir":
+        # IR status mapping
+        if service_now_issue_status in ["Closed", "3"]:
+            ir_case_status = "Closed"
+        elif service_now_issue_status in ["Review", "100"]:
+            ir_case_status = "Post-incident Activities"
+        elif service_now_issue_status in [
+            "Contain",
+            "Eradicate",
+            "Recover",
+            "18",
+            "19",
+            "20",
+        ]:
+            ir_case_status = "Containment, Eradication and Recovery"
+        elif service_now_issue_status in ["Analysis", "16"]:
+            ir_case_status = "Detection and Analysis"
+        elif service_now_issue_status in ["Draft", "10"]:
+            ir_case_status = "Submitted"
+    else:
+        # Default to ITSM mapping
+        if service_now_issue_status in [
+            "Closed",
+            "Resolved",
+            "Canceled",
+            "6",
+            "7",
+            "8",
+        ]:
+            ir_case_status = "Closed"
+        elif service_now_issue_status in ["In Progress", "On Hold", "2", "3"]:
+            ir_case_status = "Detection and Analysis"
+        elif service_now_issue_status in ["New", "1"]:
+            ir_case_status = "Submitted"
 
     # map fields from incident to case
-    security_ir_fields = map_service_now_fields_to_sir(service_now_incident)
+    security_ir_fields = map_service_now_fields_to_sir(
+        service_now_incident, integration_module
+    )
     security_ir_fields["caseStatus"] = ir_case_status
     security_ir_fields["key"] = service_now_incident_id
 
@@ -180,7 +230,9 @@ def process_service_now_event(service_now_incident: dict, event_source: str) -> 
     )
 
     # extract ServiceNow incident comments in a list for validation, comparison and updates to SIR case
-    service_now_incident_comments = service_now_incident["comments_and_work_notes"]
+    service_now_incident_comments = service_now_incident.get(
+        "comments_and_work_notes", ""
+    )
 
     logger.info(
         f"Mapping ServiceNow incident comments to Security IR case : {service_now_incident_comments}"
@@ -198,51 +250,6 @@ def process_service_now_event(service_now_incident: dict, event_source: str) -> 
                 security_ir_case_id=security_ir_case_id,
                 ir_case_comment=comment,
             )
-
-    # service_now_incident_comments_list = convert_service_now_comments_to_list(
-    #     service_now_incident_comments
-    # )
-
-    # sir_comment_bodies = [comment["body"] for comment in sir_comments["items"]]
-
-    # for service_now_incident_comment in service_now_incident_comments_list:
-    #     logger.info(f"Validating ServiceNow incident comment: {service_now_incident_comment}")
-    #     if sir_comment_bodies:
-    #         for sir_comment in sir_comment_bodies:
-    #             add_comment = True
-
-    #             if UPDATE_TAG_TO_SKIP in service_now_incident_comment:
-    #                 add_comment = False
-
-    #             for sir_comment in sir_comment_bodies:
-    #                 logger.info(f"Security IR incident comment: {sir_comment}")
-    #                 if (
-    #                         service_now_incident_comment
-    #                         == str(sir_comment).strip()
-    #                     ):
-    #                     add_comment = False
-
-    #             if add_comment is True:
-    #                 logger.info(
-    #                     f"Adding {service_now_incident_comment} comment to Security IR case {security_ir_case_id}"
-    #                 )
-    #                 _ = incident_service.add_incident_comment_in_sir(
-    #                     security_ir_case_id=security_ir_case_id,
-    #                     ir_case_comment=service_now_incident_comment,
-    #                 )
-    #     else:
-    #         logger.info(
-    #             f"Adding {service_now_incident_comment} comment to Security IR case {security_ir_case_id}"
-    #         )
-    #         _ = incident_service.add_incident_comment_in_sir(
-    #             security_ir_case_id=security_ir_case_id,
-    #             ir_case_comment=service_now_incident_comment,
-    #         )
-
-    # TODO: add missing attachments as files to case (see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210991530761700?focus=true)
-    # security_ir_case = incident_service.get_incident_from_sir(
-    #     security_ir_case_id
-    # )
 
     # Add attachments to the SIR case
     # get attachments for matching sir case
@@ -671,7 +678,10 @@ class ServiceNowService:
 
         try:
             # Get the incident record
-            glide_record = self.service_now_client.get_incident(incident_number)
+            integration_module = os.environ.get("INTEGRATION_MODULE", "itsm")
+            glide_record = self.service_now_client.get_incident(
+                incident_number, integration_module
+            )
             if not glide_record:
                 logger.error(f"Incident {incident_number} not found in ServiceNow")
                 return None
@@ -998,7 +1008,7 @@ class IncidentService:
                         logger.info(
                             f"Successfully retrieved the attachment content: {attachment_content}"
                         )
-                        
+
                         # Upload attachment data to Security IR
                         response = requests.put(
                             attachment_upload_presigned_url,
@@ -1006,10 +1016,10 @@ class IncidentService:
                             headers={
                                 "If-None-Match": "*",
                                 "Content-Length": content_length,
-                                "Content-Type": "application/octet-stream"
-                                },
+                                "Content-Type": "application/octet-stream",
+                            },
                         )
-                        
+
                         if response.status_code == 200:
                             logger.info(
                                 f"Successfully uploaded attachment {attachment_filename} to Security IR case {security_ir_case_id}"
@@ -1077,7 +1087,9 @@ def handler(event, context) -> dict:
         logger.info(
             "Received ServiceNow event. Security Incident Response Client lambda handler will process this event."
         )
-        process_service_now_event(event.get("detail"), event_source)
+        # Get integration module once
+        integration_module = os.environ.get("INTEGRATION_MODULE", "itsm")
+        process_service_now_event(event.get("detail"), event_source, integration_module)
 
     return {
         "statusCode": 200,

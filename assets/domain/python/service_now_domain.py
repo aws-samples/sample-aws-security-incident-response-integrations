@@ -2,7 +2,6 @@
 Domain models for Service Now
 """
 
-import datetime
 import logging
 
 # Configure logging

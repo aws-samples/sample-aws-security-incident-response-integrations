@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-# TODO: rename this file to app_jira.py once the Service Now integration implementation is complete
-# TODO: see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210524326651427?focus=true
-import os
+"""Jira Integration CDK Application.
+
+This module defines the CDK application for deploying AWS Security Incident Response
+Jira integration infrastructure. It creates the common stack and Jira-specific stack.
+
+TODO: rename this file to app_jira.py once the Service Now integration implementation is complete
+TODO: see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210524326651427?focus=true
+"""
 import aws_cdk as cdk
 from aws_security_incident_response_sample_integrations.aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,

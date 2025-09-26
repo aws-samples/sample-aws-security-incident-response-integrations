@@ -26,10 +26,15 @@ This document provides detailed information on troubleshooting, validation, and 
      --instance-id <your-servicenow-instance-id> \
      --username <your-servicenow-username> \
      --password <your-servicenow-password> \
+     --integration-module <itsm|ir> \
      --log-level info
    ```
    
-   Note: The `--log-level` parameter is optional and defaults to `error`. Valid values are `info`, `debug`, and `error`.
+   **Required Parameters:**
+   - `--integration-module`: Choose `itsm` for IT Service Management or `ir` for Incident Response module
+   
+   **Optional Parameters:**
+   - `--log-level`: Defaults to `error`. Valid values are `info`, `debug`, and `error`
 
 3. **Automatic Configuration**:
    - The ServiceNow Resource Setup Lambda will automatically:
@@ -112,7 +117,7 @@ To validate the resources created in ServiceNow:
    - Navigate to System Definition > Business Rules
    - Search for rules with names containing the resource prefix
    - Verify that the following rules exist:
-     - **Incident Business Rule**: Monitors the `incident` table for create, update, and delete operations
+     - **Incident Business Rule**: Monitors the appropriate table (`incident` for ITSM or `sn_si_incident` for IR) for create, update, and delete operations
      - **Attachment Business Rule**: Monitors the `sys_attachment` table for attachment changes on incidents
    - Check that both rules are active and properly configured
    - Verify the script content includes proper event type detection and payload formatting
@@ -126,40 +131,6 @@ To validate the resources created in ServiceNow:
    - Navigate to System Definition > Script Includes
    - Look for script includes related to the AWS integration
    - Verify they contain the correct formatting logic for incident data
-
-## Setup and Configuration
-
-1. **Prepare ServiceNow**:
-   - Ensure you have a ServiceNow instance with admin access
-   - Create a dedicated service account for the integration if needed
-
-2. **Deploy the Stack**:
-   ```bash
-   # Using the deploy-integrations-solution script
-   deploy-integrations-solution service-now \
-     --instance-id <your-servicenow-instance-id> \
-     --username <your-servicenow-username> \
-     --password <your-servicenow-password> \
-     --log-level info
-   ```
-   
-   Note: The `--log-level` parameter is optional and defaults to `error`. Valid values are `info`, `debug`, and `error`.
-
-3. **Automatic Configuration**:
-   - The ServiceNow Resource Setup Lambda will automatically:
-     - Create business rules in ServiceNow to detect incident changes
-     - Configure outbound REST messages to send data to the API Gateway
-     - Set up the webhook URL in ServiceNow
-
-4. **Verify the Setup**:
-   - Check CloudFormation outputs for the webhook URL
-   - Verify in ServiceNow that the business rules and outbound REST messages were created
-   - The business rules will be prefixed with the Lambda function name for easy identification
-
-5. **Test the Integration**:
-   - Create a test incident in ServiceNow
-   - Verify that the incident appears in AWS Security Incident Response
-   - Update the incident in AWS and verify the changes appear in ServiceNow
 
 ## Security Considerations
 
@@ -179,20 +150,26 @@ To validate the resources created in ServiceNow:
    - Check that the ServiceNow instance is accessible from AWS Lambda
    - Verify the API Gateway webhook URL is properly formatted
 
-2. **Attachment Synchronization Issues**:
+2. **Integration Module Configuration Issues**:
+   - Verify the correct `--integration-module` parameter was used during deployment (`itsm` or `ir`)
+   - Check that business rules are targeting the correct table (`incident` for ITSM, `sn_si_incident` for IR)
+   - Ensure field mappings are appropriate for the selected integration module
+   - Verify closure code handling is only applied for ITSM module
+
+3. **Attachment Synchronization Issues**:
    - Check file size limits (5MB maximum for direct upload)
    - Verify attachment comments are not being duplicated
    - Review CloudWatch logs for attachment processing errors
    - Ensure ServiceNow attachment API permissions are properly configured
    - Check that attachment business rule is triggering correctly
 
-3. **Authentication Failures**:
+4. **Authentication Failures**:
    - Verify Bearer token is properly configured in ServiceNow outbound REST message
    - Check AWS Secrets Manager for correct token value
    - Ensure API Gateway authorizer is functioning correctly
    - Test webhook authentication manually using curl or Postman
 
-4. **Events Not Flowing from ServiceNow to AWS**:
+5. **Events Not Flowing from ServiceNow to AWS**:
    - Verify the business rules were created in ServiceNow
    - Check the outbound REST message configuration in ServiceNow
    - Examine ServiceNow system logs for errors in the business rules
@@ -201,7 +178,7 @@ To validate the resources created in ServiceNow:
    - Test the webhook endpoint directly with sample payloads
    - Verify Bearer token authentication is working correctly
 
-5. **Events Not Flowing from AWS to ServiceNow**:
+6. **Events Not Flowing from AWS to ServiceNow**:
    - Check CloudWatch Logs for the ServiceNow Client Lambda
    - Verify the ServiceNow API is accessible from AWS
    - Ensure the ServiceNow credentials are still valid
@@ -209,7 +186,7 @@ To validate the resources created in ServiceNow:
    - Review DynamoDB table for proper incident mapping
    - Verify attachment upload permissions and file size limits
 
-6. **Incident Mapping Issues**:
+7. **Incident Mapping Issues**:
    - Examine the DynamoDB table for incident mapping information
    - Verify that incident IDs are being correctly stored and retrieved
    - Check for duplicate entries or missing mappings
@@ -231,6 +208,7 @@ To validate the resources created in ServiceNow:
 3. Ensure the ServiceNow user has sufficient permissions
 4. Review ServiceNow system logs for rule execution errors
 5. Test rule execution by manually creating/updating incidents and attachments
+6. Verify the business rules are targeting the correct table based on integration module
 
 #### Webhook Authentication Failures
 1. Verify the API Gateway authorizer is properly configured
@@ -252,6 +230,7 @@ To validate the resources created in ServiceNow:
 3. Review Lambda function logs for processing errors
 4. Ensure ServiceNow incident fields are properly mapped
 5. Verify incident mapping entries in DynamoDB
+6. Check that the correct integration module is being used for field mappings
 
 ### Enhanced Monitoring and Logging
 
@@ -271,3 +250,4 @@ To validate the resources created in ServiceNow:
 - Monitor outbound REST message success/failure rates
 - Check ServiceNow event logs for webhook delivery status
 - Verify attachment business rule execution for incident attachments
+- Ensure business rules are targeting the correct table based on integration module selection

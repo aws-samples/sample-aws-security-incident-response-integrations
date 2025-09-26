@@ -422,13 +422,13 @@ class ServiceNowApiService:
             )
             return None
 
-    def _create_incident_business_rule(
+    def _create_incident_business_rule_itsm(
         self,
         outbound_rest_message_name,
         outbound_rest_message_request_function_name,
         resource_prefix,
     ):
-        """Create Business Rule to trigger Incident events.
+        """Create Business Rule to trigger Incident events for ITSM module.
 
         Args:
             outbound_rest_message_name (str): Name of the outbound REST message
@@ -440,7 +440,7 @@ class ServiceNowApiService:
         """
         try:
             logger.info(
-                "Creating Business Rule in Service Now to publish Incident related events to AWS"
+                "Creating ITSM Business Rule in Service Now to publish Incident related events to AWS"
             )
 
             # Get headers for ServiceNow API requests
@@ -494,17 +494,99 @@ class ServiceNowApiService:
             )
 
             logger.info(
-                f"Business Rule created in Service Now: {json.loads(response.text)}"
+                f"ITSM Business Rule created in Service Now: {json.loads(response.text)}"
             )
 
             return response
         except Exception as e:
             logger.error(
-                f"Error while creating Business Rule in Service Now to publish Incident related events to AWS: {str(e)}"
+                f"Error while creating ITSM Business Rule in Service Now to publish Incident related events to AWS: {str(e)}"
             )
             return None
 
-    def _create_attachment_business_rule(
+    def _create_incident_business_rule_ir(
+        self,
+        outbound_rest_message_name,
+        outbound_rest_message_request_function_name,
+        resource_prefix,
+    ):
+        """Create Business Rule to trigger Incident events for IR module.
+
+        Args:
+            outbound_rest_message_name (str): Name of the outbound REST message
+            outbound_rest_message_request_function_name (str): Name of the request function
+            resource_prefix (str): Prefix for ServiceNow resource naming
+
+        Returns:
+            Optional[requests.Response]: Response from ServiceNow API or None if error
+        """
+        try:
+            logger.info(
+                "Creating IR Business Rule in Service Now to publish Security Incident related events to AWS"
+            )
+
+            # Get headers for ServiceNow API requests
+            headers = self.__get_request_headers()
+
+            # Get base url for ServiceNow API requests
+            base_url = self.__get_request_base_url()
+
+            # Business rule for security incident events
+            rule_payload = {
+                "name": f"{resource_prefix}-ir-business-rule",
+                "collection": "sn_si_incident",
+                "when": "after",
+                "action_insert": True,
+                "action_update": True,
+                "active": True,
+                "script": f"""
+        (function executeRule(current, previous) {{
+            try {{
+                var event_type = previous ? 'IncidentUpdated' : 'IncidentCreated';
+                var payload = {{
+                    "event_type": event_type,
+                    "incident_number": current.number.toString(),
+                    "short_description": current.short_description.toString(),
+                }};
+                var outbound_rest_message_name_str = "{outbound_rest_message_name}";
+                var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
+                var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                request.setRequestBody(JSON.stringify(payload));
+                
+                var response = request.executeAsync();
+                gs.info('Security Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
+                var responseBody = response.getBody();
+                var httpStatus = response.getStatusCode();
+                gs.info("Security Incident Event Response: " + responseBody);
+                gs.info("Security Incident Event HTTP Status: " + httpStatus);
+                
+            }} catch (error) {{
+                gs.error('Error sending security incident event: ' + error.message);
+            }}
+        }})(current, previous);
+        """,
+            }
+
+            # Create Business Rule resource in Service Now using REST API
+            response = requests.post(
+                f"{base_url}/api/now/table/sys_script",
+                json=rule_payload,
+                headers=headers,
+                timeout=30,
+            )
+
+            logger.info(
+                f"IR Business Rule created in Service Now: {json.loads(response.text)}"
+            )
+
+            return response
+        except Exception as e:
+            logger.error(
+                f"Error while creating IR Business Rule in Service Now to publish Security Incident related events to AWS: {str(e)}"
+            )
+            return None
+
+    def _create_attachment_business_rule_itsm(
         self,
         outbound_rest_message_name,
         outbound_rest_message_request_function_name,
@@ -553,6 +635,103 @@ class ServiceNowApiService:
                 
                 // Get incident record to fetch incident number
                 var incident = new GlideRecord('incident');
+                if (incident.get(incident_sys_id)) {{
+                    var payload = {{
+                        "event_type": event_type,
+                        "incident_number": incident.number.toString(),
+                        "short_description": incident.short_description.toString(),
+                    }};
+                    
+                    var outbound_rest_message_name_str = "{outbound_rest_message_name}";
+                    var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
+                    var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                    request.setRequestBody(JSON.stringify(payload));
+                    
+                    var response = request.executeAsync();
+                    gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
+                    var responseBody = response.getBody();
+                    var httpStatus = response.getStatusCode();
+                    gs.info("Attachment Event Response: " + responseBody);
+                    gs.info("Attachment Event HTTP Status: " + httpStatus);
+                }} else {{
+                    gs.warn('Could not find incident with sys_id: ' + incident_sys_id);
+                }}
+                
+            }} catch (error) {{
+                gs.error('Error sending incident attachment event: ' + error.message);
+            }}
+        }})(current, previous);
+        """,
+            }
+
+            # Create Business Rule resource in Service Now using REST API
+            response = requests.post(
+                f"{base_url}/api/now/table/sys_script",
+                json=rule_payload,
+                headers=headers,
+                timeout=30,
+            )
+
+            logger.info(
+                f"Attachment Business Rule created in Service Now: {json.loads(response.text)}"
+            )
+
+            return response
+        except Exception as e:
+            logger.error(
+                f"Error while creating Attachment Business Rule in Service Now: {str(e)}"
+            )
+            return None
+
+    def _create_attachment_business_rule_ir(
+        self,
+        outbound_rest_message_name,
+        outbound_rest_message_request_function_name,
+        resource_prefix,
+    ):
+        """Create Business Rule to trigger Incident events for attachment changes.
+
+        Args:
+            outbound_rest_message_name (str): Name of the outbound REST message
+            outbound_rest_message_request_function_name (str): Name of the request function
+            resource_prefix (str): Prefix for ServiceNow resource naming
+
+        Returns:
+            Optional[requests.Response]: Response from ServiceNow API or None if error
+        """
+        try:
+            logger.info(
+                "Creating Attachment Business Rule in Service Now to publish Incident attachment events to AWS"
+            )
+
+            # Get headers for ServiceNow API requests
+            headers = self.__get_request_headers()
+
+            # Get base url for ServiceNow API requests
+            base_url = self.__get_request_base_url()
+
+            # Business rule for attachment events on incident table
+            rule_payload = {
+                "name": f"{resource_prefix}-attachment-business-rule",
+                "collection": "sys_attachment",
+                "when": "after",
+                "action_insert": True,
+                "active": True,
+                "script": f"""
+        (function executeRule(current, previous) {{
+            try {{
+                // Only process attachments for incident table
+                gs.info('The current table name is:' + current.table_name);
+                if (current.table_name != 'sn_si_incident') {{
+                    return;
+                }}
+                
+                var event_type = 'IncidentUpdated';
+                var incident_sys_id = current.table_sys_id.getDisplayValue().toString();
+				gs.info('The incident sys_id: ' + incident_sys_id);
+                
+                // Get incident record to fetch incident number
+                var incident = new GlideRecord('sn_si_incident');
                 if (incident.get(incident_sys_id)) {{
                     var payload = {{
                         "event_type": event_type,
@@ -659,18 +838,34 @@ def handler(event, context):
             service_now_api_outbound_rest_message_request_function_name,
         ) = outbound_rest_message_result
 
-        service_now_api_service._create_incident_business_rule(
-            service_now_api_outbound_rest_message_name,
-            service_now_api_outbound_rest_message_request_function_name,
-            service_now_resource_prefix,
-        )
+        # Get integration module from environment variable
+        integration_module = os.environ.get("INTEGRATION_MODULE", "itsm")
 
-        # Create attachment business rule
-        service_now_api_service._create_attachment_business_rule(
-            service_now_api_outbound_rest_message_name,
-            service_now_api_outbound_rest_message_request_function_name,
-            service_now_resource_prefix,
-        )
+        # Create appropriate business rule based on integration module
+        if integration_module == "ir":
+            service_now_api_service._create_incident_business_rule_ir(
+                service_now_api_outbound_rest_message_name,
+                service_now_api_outbound_rest_message_request_function_name,
+                service_now_resource_prefix,
+            )
+            # Create attachment business rule
+            service_now_api_service._create_attachment_business_rule_ir(
+                service_now_api_outbound_rest_message_name,
+                service_now_api_outbound_rest_message_request_function_name,
+                service_now_resource_prefix,
+            )
+        else:
+            service_now_api_service._create_incident_business_rule_itsm(
+                service_now_api_outbound_rest_message_name,
+                service_now_api_outbound_rest_message_request_function_name,
+                service_now_resource_prefix,
+            )
+            # Create attachment business rule
+            service_now_api_service._create_attachment_business_rule_itsm(
+                service_now_api_outbound_rest_message_name,
+                service_now_api_outbound_rest_message_request_function_name,
+                service_now_resource_prefix,
+            )
 
         return {"Status": "SUCCESS", "PhysicalResourceId": "service-now-api-setup"}
 

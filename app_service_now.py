@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-import os
+"""ServiceNow Integration CDK Application.
+
+This module defines the CDK application for deploying AWS Security Incident Response
+ServiceNow integration infrastructure. It creates the common stack with ServiceNow
+parameters and the ServiceNow-specific stack.
+"""
 import aws_cdk as cdk
 from aws_security_incident_response_sample_integrations.aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,

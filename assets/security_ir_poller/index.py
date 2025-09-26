@@ -1,3 +1,17 @@
+"""Security IR Poller Lambda function for AWS Security Incident Response integration.
+
+This module polls AWS Security Incident Response for case updates and publishes
+events to EventBridge. It implements adaptive polling based on the number of
+active incidents and stores case data in DynamoDB for tracking changes.
+
+Key Features:
+- Polls Security IR API for case updates
+- Publishes CaseCreated/CaseUpdated events to EventBridge
+- Adaptive polling frequency based on active incident count
+- Stores case data in DynamoDB for change detection
+- Handles pagination for large case lists
+"""
+
 import datetime
 import json
 import boto3
@@ -19,7 +33,6 @@ else:
     logger.setLevel(logging.ERROR)
 
 
-
 # Import types
 from typing import List, Dict, Optional, Any
 
@@ -28,7 +41,7 @@ try:
     from models import Case, create_case_from_api_response
 except ImportError:
     # This import works for local development and imports locally from the file system
-    from ..domain.python.models import Case, create_case_from_api_response
+    from ..domain.python.models import create_case_from_api_response
 
 # Constants
 DEFAULT_MAX_RESULTS = 25

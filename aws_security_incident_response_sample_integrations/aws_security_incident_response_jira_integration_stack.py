@@ -89,7 +89,7 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
             string_value=jira_token_param.value_as_string,
         )
 
-        jira_email_ssm = aws_ssm.StringParameter(
+        aws_ssm.StringParameter(
             self,
             "jiraEmailSSM",
             parameter_name="/SecurityIncidentResponse/jiraEmail",
@@ -97,7 +97,7 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
             description="Jira email",
         )
 
-        jira_url_ssm = aws_ssm.StringParameter(
+        aws_ssm.StringParameter(
             self,
             "jiraUrlSSM",
             parameter_name="/SecurityIncidentResponse/jiraUrl",
@@ -105,7 +105,7 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
             description="Jira URL",
         )
 
-        jira_project_ssm = aws_ssm.StringParameter(
+        aws_ssm.StringParameter(
             self,
             "jiraProjectKeySSM",
             parameter_name="/SecurityIncidentResponse/jiraProjectKey",

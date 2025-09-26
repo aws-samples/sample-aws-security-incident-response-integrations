@@ -2,7 +2,6 @@
 Domain models for security incident response.
 """
 
-import datetime
 import logging
 
 # Configure logging
