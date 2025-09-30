@@ -91,3 +91,14 @@ def handler(event, context):
                 ],
             },
         }
+def lambda_handler(event, context):
+    """AWS Lambda handler function.
+    
+    Args:
+        event: Lambda event object
+        context: Lambda context object
+        
+    Returns:
+        Response from handler function
+    """
+    return handler(event, context)
