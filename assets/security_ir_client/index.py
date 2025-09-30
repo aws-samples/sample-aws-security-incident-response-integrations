@@ -908,3 +908,14 @@ def handler(event, context) -> dict:
             "Security Incident Response Client Lambda function processing completed"
         ),
     }
+def lambda_handler(event, context) -> dict:
+    """AWS Lambda handler function.
+    
+    Args:
+        event: Lambda event object
+        context: Lambda context object
+        
+    Returns:
+        dict: Response from handler function
+    """
+    return handler(event, context)
