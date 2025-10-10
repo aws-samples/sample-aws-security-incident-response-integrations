@@ -586,7 +586,7 @@ class ResponseBuilderService:
 
 
 @logger.inject_lambda_context
-def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
+def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     """Lambda handler for processing SNS notifications.
 
     Args:

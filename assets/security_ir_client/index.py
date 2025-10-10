@@ -872,7 +872,7 @@ class IncidentService:
         return True
 
 
-def handler(event, context) -> dict:
+def lambda_handler(event, context) -> dict:
     """Lambda handler to process jira events/notifications.
 
     Args:
