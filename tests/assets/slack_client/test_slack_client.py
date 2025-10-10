@@ -19,7 +19,6 @@ mock_slack_sir_mapper = Mock()
 # Mock the imports
 sys.modules['slack_bolt_wrapper'] = Mock()
 sys.modules['slack_sir_mapper'] = Mock()
-sys.modules['requests'] = Mock()
 
 # Mock AWS clients and other dependencies
 with patch('boto3.client'), patch('boto3.resource'):

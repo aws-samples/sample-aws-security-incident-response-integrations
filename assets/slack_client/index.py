@@ -108,7 +108,7 @@ class DatabaseService:
             bool: True if successful, False otherwise
         """
         try:
-            current_timestamp = datetime.datetime.utcnow().isoformat()
+            current_timestamp = datetime.datetime.now(datetime.UTC).isoformat()
             self.table.update_item(
                 Key={"PK": f"Case#{case_id}", "SK": "latest"},
                 UpdateExpression="set slackChannelId = :s, slackChannelUpdateTimestamp = :t",
@@ -141,7 +141,7 @@ class DatabaseService:
             bool: True if successful, False otherwise
         """
         try:
-            current_timestamp = datetime.datetime.utcnow().isoformat()
+            current_timestamp = datetime.datetime.now(datetime.UTC).isoformat()
             update_expression_parts = ["slackChannelUpdateTimestamp = :t"]
             expression_values = {":t": current_timestamp}
 
@@ -541,7 +541,7 @@ class SlackService:
                 "createdDate": comment.get("createdDate", ""),
                 "createdBy": comment.get("createdBy", {}),
                 "syncedToSlack": True,
-                "syncTimestamp": datetime.datetime.utcnow().isoformat()
+                "syncTimestamp": datetime.datetime.now(datetime.UTC).isoformat()
             }
 
             # Add to comments list
@@ -695,14 +695,14 @@ class SlackService:
                 "user": message.get("user", ""),
                 "text": message.get("text", ""),
                 "syncedToSIR": True,
-                "syncTimestamp": datetime.datetime.utcnow().isoformat()
+                "syncTimestamp": datetime.datetime.now(datetime.UTC).isoformat()
             }
 
             # Add to synced messages list
             synced_messages.append(message_record)
 
             # Update database - we need to extend the database service for this
-            current_timestamp = datetime.datetime.utcnow().isoformat()
+            current_timestamp = datetime.datetime.now(datetime.UTC).isoformat()
             self.db_service.table.update_item(
                 Key={"PK": f"Case#{case_id}", "SK": "latest"},
                 UpdateExpression="set slackSyncedMessages = :messages, slackChannelUpdateTimestamp = :timestamp",
@@ -1224,32 +1224,42 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         logger.info(f"Processing event: {json.dumps(event, default=str)}")
         
+        EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "security-ir")
         event_source = event.get("source", "")
-        incident_service = IncidentService()
         
-        # Process based on event source
-        if event_source == "security-ir":
-            # Process AWS SIR events
-            success = incident_service.process_case_event(event)
-        elif event_source == "slack":
-            # Process Slack events
-            success = incident_service.process_slack_event(event)
+        # Only process events from the configured EVENT_SOURCE
+        if event_source == EVENT_SOURCE:
+            incident_service = IncidentService()
+            
+            # Process based on event source
+            if event_source == "security-ir":
+                # Process AWS SIR events
+                success = incident_service.process_case_event(event)
+            elif event_source == "slack":
+                # Process Slack events
+                success = incident_service.process_slack_event(event)
+            else:
+                logger.info(f"Slack Client lambda will skip processing event from unsupported source: {event_source}")
+                return {
+                    "statusCode": 200,
+                    "body": json.dumps(f"Event skipped - unsupported source: {event_source}")
+                }
+            
+            if success:
+                return {
+                    "statusCode": 200,
+                    "body": json.dumps({"message": "Event processed successfully"})
+                }
+            else:
+                return {
+                    "statusCode": 500,
+                    "body": json.dumps({"error": "Failed to process event"})
+                }
         else:
-            logger.info(f"Slack Client lambda will skip processing event from unknown source: {event_source}")
+            logger.info(f"Slack Client lambda will skip processing event from non-configured source: {event_source}")
             return {
                 "statusCode": 200,
-                "body": json.dumps(f"Event skipped - unknown source: {event_source}")
-            }
-        
-        if success:
-            return {
-                "statusCode": 200,
-                "body": json.dumps({"message": "Event processed successfully"})
-            }
-        else:
-            return {
-                "statusCode": 500,
-                "body": json.dumps({"error": "Failed to process event"})
+                "body": json.dumps(f"Event skipped - source {event_source} not matching EVENT_SOURCE {EVENT_SOURCE}")
             }
         
     except Exception as e:

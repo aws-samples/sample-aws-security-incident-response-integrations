@@ -20,7 +20,6 @@ logger.setLevel(logging.INFO)
 try:
     ssm_client = boto3.client("ssm")
 except Exception:
-    # For testing environments without AWS credentials
     ssm_client = None
 
 # Import constants with fallbacks for different environments
@@ -54,6 +53,15 @@ class SlackBoltClient:
         """Initialize the Slack Bolt client."""
         self.app = self._create_app()
         self.client = self.app.client if self.app else None
+        self.lambda_context = None
+    
+    def set_lambda_context(self, context):
+        """Set the Lambda context for timeout-aware operations.
+        
+        Args:
+            context: AWS Lambda context object
+        """
+        self.lambda_context = context
 
     def _create_app(self) -> Optional[App]:
         """Create a Slack Bolt app instance.
@@ -130,35 +138,52 @@ class SlackBoltClient:
             Function result or None if all retries fail
         """
         delay = SLACK_INITIAL_RETRY_DELAY
+        buffer_seconds = 30  # Buffer time before lambda timeout
         
         for attempt in range(SLACK_MAX_RETRIES):
             try:
                 return func(*args, **kwargs)
             except SlackApiError as e:
-                if e.response["error"] == "rate_limited":
-                    # Handle rate limiting - check both response headers and nested headers
-                    headers = e.response.get("headers", {})
-                    if hasattr(headers, 'get'):
-                        retry_after = int(headers.get("Retry-After", delay))
+                if attempt < SLACK_MAX_RETRIES - 1:
+                    if e.response["error"] == "rate_limited":
+                        # Handle rate limiting - check both response headers and nested headers
+                        headers = e.response.get("headers", {})
+                        if hasattr(headers, 'get'):
+                            retry_after = int(headers.get("Retry-After", delay))
+                        else:
+                            retry_after = delay
+                        sleep_time = retry_after
+                        logger.warning(f"Rate limited, retrying after {retry_after} seconds")
                     else:
-                        retry_after = delay
-                    logger.warning(f"Rate limited, retrying after {retry_after} seconds")
-                    time.sleep(retry_after)
-                elif attempt < SLACK_MAX_RETRIES - 1:
-                    logger.warning(f"Slack API error on attempt {attempt + 1}: {e.response['error']}")
-                    time.sleep(delay)
-                    delay = min(delay * 2, SLACK_MAX_RETRY_DELAY)
+                        sleep_time = delay
+                        logger.warning(f"Slack API error on attempt {attempt + 1}: {e.response['error']}")
+                        delay = min(delay * 2, SLACK_MAX_RETRY_DELAY)
+                    
+                    # single timeout check for all sleep scenarios
+                    if (self.lambda_context and 
+                        hasattr(self.lambda_context, 'get_remaining_time_in_millis')):
+                        remaining_ms = self.lambda_context.get_remaining_time_in_millis()
+                        if remaining_ms < ((sleep_time + buffer_seconds) * 1000):
+                            logger.warning(f"Insufficient time for delay ({sleep_time}s), aborting")
+                            break
+                    
+                    time.sleep(sleep_time)
                 else:
                     logger.error(f"Slack API error after {SLACK_MAX_RETRIES} attempts: {e.response['error']}")
                     raise
-            except Exception as e:
+            except (ConnectionError, TimeoutError, OSError) as e:
+                # Only retry network-related transient failures
                 if attempt < SLACK_MAX_RETRIES - 1:
-                    logger.warning(f"Error on attempt {attempt + 1}: {str(e)}")
+                    logger.warning(f"Network error on attempt {attempt + 1}: {str(e)}")
                     time.sleep(delay)
                     delay = min(delay * 2, SLACK_MAX_RETRY_DELAY)
                 else:
-                    logger.error(f"Error after {SLACK_MAX_RETRIES} attempts: {str(e)}")
+                    logger.error(f"Network error after {SLACK_MAX_RETRIES} attempts: {str(e)}")
                     raise
+            except Exception as e:
+                # Don't retry programming errors - fail fast
+                logger.error(f"Non-retryable error: {str(e)}")
+                raise
         
         return None
 

@@ -5,7 +5,6 @@ Unit tests for Slack message synchronization functionality.
 import json
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from moto import mock_aws
 import boto3
 import sys
 import os
@@ -52,38 +51,28 @@ class TestSlackMessageSynchronization:
     @pytest.fixture
     def mock_aws_services(self):
         """Set up mock AWS services"""
-        with mock_aws():
-            # Create mock DynamoDB table
-            dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-            table = dynamodb.create_table(
-                TableName="test-incidents-table",
-                KeySchema=[
-                    {"AttributeName": "PK", "KeyType": "HASH"},
-                    {"AttributeName": "SK", "KeyType": "RANGE"}
-                ],
-                AttributeDefinitions=[
-                    {"AttributeName": "PK", "AttributeType": "S"},
-                    {"AttributeName": "SK", "AttributeType": "S"}
-                ],
-                BillingMode="PAY_PER_REQUEST"
-            )
-            
-            # Add test data to DynamoDB
-            table.put_item(
-                Item={
-                    "PK": "Case#12345",
-                    "SK": "latest",
-                    "slackChannelId": "C1234567890",
-                    "caseId": "12345",
-                    "status": "Open",
-                    "slackSyncedMessages": []
-                }
-            )
-            
-            yield {
-                "dynamodb": dynamodb,
-                "table": table
+        # Create mock DynamoDB table
+        mock_table = Mock()
+        mock_table.put_item = Mock()
+        mock_table.update_item = Mock()
+        mock_table.get_item = Mock(return_value={
+            "Item": {
+                "PK": "Case#12345",
+                "SK": "latest",
+                "slackChannelId": "C1234567890",
+                "caseId": "12345",
+                "status": "Open",
+                "slackSyncedMessages": []
             }
+        })
+        
+        mock_dynamodb = Mock()
+        mock_dynamodb.Table = Mock(return_value=mock_table)
+        
+        yield {
+            "dynamodb": mock_dynamodb,
+            "table": mock_table
+        }
 
     @pytest.fixture
     def mock_slack_message_event(self):
@@ -181,12 +170,15 @@ class TestSlackMessageSynchronization:
 
     def test_process_slack_message_event_duplicate_detection(self, mock_aws_services, mock_slack_message_event):
         """Test duplicate message detection"""
-        # Add existing synced message to DynamoDB
-        mock_aws_services["table"].update_item(
-            Key={"PK": "Case#12345", "SK": "latest"},
-            UpdateExpression="set slackSyncedMessages = :messages",
-            ExpressionAttributeValues={
-                ":messages": [
+        # Mock existing synced message in DynamoDB
+        mock_aws_services["table"].get_item.return_value = {
+            "Item": {
+                "PK": "Case#12345",
+                "SK": "latest",
+                "slackChannelId": "C1234567890",
+                "caseId": "12345",
+                "status": "Open",
+                "slackSyncedMessages": [
                     {
                         "ts": "1234567890.123456",
                         "user": "U1234567890",
@@ -196,7 +188,7 @@ class TestSlackMessageSynchronization:
                     }
                 ]
             }
-        )
+        }
         
         with patch.object(index, "security_incident_response_client") as mock_sir_client:
             # Create incident service and process event
@@ -334,12 +326,15 @@ class TestSlackMessageSynchronization:
 
     def test_is_slack_message_synced_true(self, mock_aws_services):
         """Test message sync detection - already synced"""
-        # Add synced message to DynamoDB
-        mock_aws_services["table"].update_item(
-            Key={"PK": "Case#12345", "SK": "latest"},
-            UpdateExpression="set slackSyncedMessages = :messages",
-            ExpressionAttributeValues={
-                ":messages": [
+        # Mock DynamoDB response with synced message
+        mock_aws_services["table"].get_item.return_value = {
+            "Item": {
+                "PK": "Case#12345",
+                "SK": "latest",
+                "slackChannelId": "C1234567890",
+                "caseId": "12345",
+                "status": "Open",
+                "slackSyncedMessages": [
                     {
                         "ts": "1234567890.123456",
                         "user": "U1234567890",
@@ -349,7 +344,7 @@ class TestSlackMessageSynchronization:
                     }
                 ]
             }
-        )
+        }
         
         slack_service = index.SlackService()
         slack_service.db_service.table = mock_aws_services["table"]
