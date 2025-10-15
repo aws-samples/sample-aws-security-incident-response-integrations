@@ -5,25 +5,25 @@ env:
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ main, v4/slack-integration ]
 
 jobs:
   security-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.9'
           cache: 'pip'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -33,7 +33,7 @@ jobs:
           uv pip install -r requirements-dev.txt
 
       - name: Run Bandit
-        run: bandit -r . -x ./tests --skip B113,B108,B404
+        run: bandit -r . -x ./tests,./venv --skip B113,B108,B404
           
       - name: Run detect-secrets
         run: detect-secrets scan --baseline .secrets.baseline
@@ -51,7 +51,7 @@ jobs:
           output-file: "${{ github.event.repository.name }}-sbom.spdx.json"
 
       - name: Run Grype (Scan SBOM)
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@v7
         with:
           sbom: "${{ github.event.repository.name }}-sbom.spdx.json"
           fail-build: true
@@ -63,15 +63,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.9'
           cache: 'pip'
@@ -109,4 +109,6 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run pytest
-        run: pytest tests/ -v
+        run: |
+          # Run all tests (tests that need to be skipped use @pytest.mark.skip)
+          pytest tests/ -v
