@@ -12,9 +12,6 @@ from datetime import datetime
 import sys
 import os
 
-# Add the slack_client directory to the path
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'assets', 'slack_client'))
-
 # Mock all the dependencies before importing
 mock_slack_bolt_client = Mock()
 mock_slack_sir_mapper = Mock()
@@ -23,10 +20,19 @@ mock_slack_sir_mapper = Mock()
 sys.modules['slack_bolt_wrapper'] = Mock()
 sys.modules['slack_sir_mapper'] = Mock()
 
-# Mock AWS clients and other dependencies
+# Import the correct module using importlib
+import importlib.util
+import importlib
+
+# Load the slack_client index module directly
+slack_client_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'assets', 'slack_client', 'index.py')
+spec = importlib.util.spec_from_file_location("index", slack_client_path)
+index = importlib.util.module_from_spec(spec)
+
+# Mock AWS clients before executing the module
 with patch('boto3.client'), patch('boto3.resource'):
-    # Import the module under test
-    import index
+    sys.modules['index'] = index
+    spec.loader.exec_module(index)
     
     # Get the classes we need to test
     DatabaseService = index.DatabaseService
@@ -44,13 +50,14 @@ class TestDatabaseService:
         # Setup
         mock_table = Mock()
         mock_dynamodb.Table.return_value = mock_table
-        mock_table.get_item.return_value = {
+        expected_response = {
             "Item": {
                 "PK": "Case#12345",
                 "SK": "latest",
                 "slackChannelId": "C1234567890"
             }
         }
+        mock_table.get_item.return_value = expected_response
         
         # Set environment variable
         with patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table"}):
@@ -59,7 +66,7 @@ class TestDatabaseService:
         
         # Assertions
         assert result is not None
-        assert "Item" in result
+        assert result == expected_response
         assert result["Item"]["slackChannelId"] == "C1234567890"
         mock_table.get_item.assert_called_once_with(
             Key={"PK": "Case#12345", "SK": "latest"}
@@ -71,14 +78,15 @@ class TestDatabaseService:
         # Setup
         mock_table = Mock()
         mock_dynamodb.Table.return_value = mock_table
-        mock_table.get_item.return_value = {}
+        expected_response = {}
+        mock_table.get_item.return_value = expected_response
         
         with patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table"}):
             db_service = DatabaseService()
             result = db_service.get_case("12345")
         
         # Assertions
-        assert result == {}
+        assert result == expected_response
 
     @patch('index.dynamodb')
     @pytest.mark.skip(reason="Database service mock configuration issue")
@@ -122,13 +130,13 @@ class TestDatabaseService:
 class TestSlackService:
     """Test cases for SlackService class"""
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
-    @patch('index.map_case_to_slack_channel_name')
-    @patch('index.map_case_to_slack_channel_topic')
-    @patch('index.map_case_to_slack_notification')
-    @patch('index.map_watchers_to_slack_users')
-    @patch('index.create_system_comment')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
+    @patch.object(index, 'map_case_to_slack_channel_name')
+    @patch.object(index, 'map_case_to_slack_channel_topic')
+    @patch.object(index, 'map_case_to_slack_notification')
+    @patch.object(index, 'map_watchers_to_slack_users')
+    @patch.object(index, 'create_system_comment')
     def test_create_channel_for_case_success(self, mock_create_comment, mock_map_watchers, 
                                            mock_map_notification, mock_map_topic, mock_map_name,
                                            mock_db_service, mock_slack_client):
@@ -174,8 +182,8 @@ class TestSlackService:
         mock_slack_instance.post_message.assert_called_once()
         mock_db_instance.update_slack_mapping.assert_called_once_with("12345", "C1234567890")
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
     def test_create_channel_for_case_failure(self, mock_db_service, mock_slack_client):
         """Test channel creation failure"""
         # Setup
@@ -201,10 +209,10 @@ class TestSlackService:
         assert result is None
         mock_slack_instance.create_channel.assert_called_once()
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
-    @patch('index.map_case_to_slack_channel_topic')
-    @patch('index.map_case_update_to_slack_message')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
+    @patch.object(index, 'map_case_to_slack_channel_topic')
+    @patch.object(index, 'map_case_update_to_slack_message')
     def test_update_channel_for_case_success(self, mock_map_update, mock_map_topic, 
                                            mock_db_service, mock_slack_client):
         """Test successful channel update for a case"""
@@ -241,10 +249,10 @@ class TestSlackService:
         mock_slack_instance.update_channel_topic.assert_called_once()
         mock_slack_instance.post_message.assert_called_once()
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
-    @patch('index.should_skip_comment')
-    @patch('index.map_comment_to_slack_message')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
+    @patch.object(index, 'should_skip_comment')
+    @patch.object(index, 'map_comment_to_slack_message')
     def test_sync_comment_to_slack_success(self, mock_map_comment, mock_should_skip,
                                          mock_db_service, mock_slack_client):
         """Test successful comment sync to Slack"""
@@ -278,9 +286,9 @@ class TestSlackService:
         assert result is True
         mock_slack_instance.post_message.assert_called_once()
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
-    @patch('index.should_skip_comment')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
+    @patch.object(index, 'should_skip_comment')
     def test_sync_comment_skip_system_comment(self, mock_should_skip, mock_db_service, mock_slack_client):
         """Test skipping system comments to prevent loops"""
         # Setup
@@ -305,9 +313,9 @@ class TestSlackService:
         assert result is True
         mock_slack_instance.post_message.assert_not_called()
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
-    @patch('index.create_system_comment')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
+    @patch.object(index, 'create_system_comment')
     @patch('requests.get')
     def test_sync_attachment_to_slack_success(self, mock_requests_get, mock_create_comment, 
                                             mock_db_service, mock_slack_client):
@@ -362,9 +370,9 @@ class TestSlackService:
             attachmentId="att-12345"
         )
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
-    @patch('index.create_system_comment')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
+    @patch.object(index, 'create_system_comment')
     def test_sync_attachment_to_slack_size_limit_exceeded(self, mock_create_comment, 
                                                         mock_db_service, mock_slack_client):
         """Test attachment sync failure due to size limit"""
@@ -400,8 +408,8 @@ class TestSlackService:
         mock_slack_instance.upload_file.assert_not_called()
         mock_sir_client.create_case_comment.assert_called_once()
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
     def test_sync_attachment_to_slack_no_channel(self, mock_db_service, mock_slack_client):
         """Test attachment sync failure when no Slack channel exists"""
         # Setup
@@ -429,9 +437,9 @@ class TestSlackService:
         assert result is False
         mock_slack_instance.upload_file.assert_not_called()
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
-    @patch('index.create_system_comment')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
+    @patch.object(index, 'create_system_comment')
     @patch('requests.get')
     def test_sync_attachment_to_slack_download_failure(self, mock_requests_get, mock_create_comment,
                                                      mock_db_service, mock_slack_client):
@@ -472,12 +480,12 @@ class TestSlackService:
         mock_slack_instance.upload_file.assert_not_called()
         mock_sir_client.create_case_comment.assert_called_once()
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
-    @patch('index.create_system_comment')
     @patch('requests.get')
-    def test_sync_attachment_to_slack_upload_failure(self, mock_requests_get, mock_create_comment,
-                                                   mock_db_service, mock_slack_client):
+    @patch.object(index, 'create_system_comment')
+    @patch.object(index, 'DatabaseService')
+    @patch.object(index, 'SlackBoltClient')
+    def test_sync_attachment_to_slack_upload_failure(self, mock_slack_client, mock_db_service,
+                                                   mock_create_comment, mock_requests_get):
         """Test attachment sync failure during Slack upload"""
         # Setup
         mock_slack_instance = Mock()
@@ -529,8 +537,8 @@ class TestSlackService:
         mock_slack_instance.upload_file.assert_called_once()
         mock_sir_client.create_case_comment.assert_called_once()
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
     def test_sync_attachments_from_sir_to_slack_success(self, mock_db_service, mock_slack_client):
         """Test successful sync of multiple attachments"""
         # Setup
@@ -556,8 +564,8 @@ class TestSlackService:
         assert result is True
         assert mock_sync.call_count == 3
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
     def test_sync_attachments_from_sir_to_slack_partial_failure(self, mock_db_service, mock_slack_client):
         """Test partial failure when syncing multiple attachments"""
         # Setup
@@ -583,8 +591,8 @@ class TestSlackService:
         assert result is False  # Not all succeeded
         assert mock_sync.call_count == 3
 
-    @patch('index.SlackBoltClient')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackBoltClient')
+    @patch.object(index, 'DatabaseService')
     def test_sync_attachments_from_sir_to_slack_empty_list(self, mock_db_service, mock_slack_client):
         """Test sync with empty attachments list"""
         # Setup
@@ -807,8 +815,8 @@ class TestIncidentServiceHandlers:
     """Test cases for IncidentService handler methods (working around duplicate class issue)"""
 
     @patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table", "SLACK_BOT_TOKEN": "/test/token"})
-    @patch('index.SlackService')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackService')
+    @patch.object(index, 'DatabaseService')
     def test_handle_case_created_success(self, mock_db_service, mock_slack_service):
         """Test successful handle_case_created method"""
         # Setup
@@ -833,8 +841,8 @@ class TestIncidentServiceHandlers:
         mock_slack_instance.create_channel_for_case.assert_called_once_with("12345", case_detail)
 
     @patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table", "SLACK_BOT_TOKEN": "/test/token"})
-    @patch('index.SlackService')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackService')
+    @patch.object(index, 'DatabaseService')
     def test_handle_case_updated_success(self, mock_db_service, mock_slack_service):
         """Test successful handle_case_updated method"""
         # Setup
@@ -858,8 +866,8 @@ class TestIncidentServiceHandlers:
         mock_slack_instance.update_channel_for_case.assert_called_once_with("12345", case_detail, "status")
 
     @patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table", "SLACK_BOT_TOKEN": "/test/token"})
-    @patch('index.SlackService')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackService')
+    @patch.object(index, 'DatabaseService')
     def test_handle_comment_added_success(self, mock_db_service, mock_slack_service):
         """Test successful handle_comment_added method"""
         # Setup
@@ -889,8 +897,8 @@ class TestIncidentServiceHandlers:
         mock_slack_instance.sync_comment_to_slack.assert_called_once_with("12345", expected_comment)
 
     @patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table", "SLACK_BOT_TOKEN": "/test/token"})
-    @patch('index.SlackService')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackService')
+    @patch.object(index, 'DatabaseService')
     def test_handle_attachment_added_success(self, mock_db_service, mock_slack_service):
         """Test successful handle_attachment_added method"""
         # Setup
@@ -920,8 +928,8 @@ class TestIncidentServiceHandlers:
         mock_slack_instance.sync_attachment_to_slack.assert_called_once_with("12345", expected_attachment)
 
     @patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table", "SLACK_BOT_TOKEN": "/test/token"})
-    @patch('index.SlackService')
-    @patch('index.DatabaseService')
+    @patch.object(index, 'SlackService')
+    @patch.object(index, 'DatabaseService')
     def test_handle_attachment_added_no_attachments(self, mock_db_service, mock_slack_service):
         """Test handle_attachment_added with no attachments"""
         # Setup
@@ -946,7 +954,7 @@ class TestIncidentServiceHandlers:
 class TestLambdaHandler:
     """Test cases for lambda_handler function"""
 
-    @patch('index.IncidentService')
+    @patch.object(index, 'IncidentService')
     def test_lambda_handler_success(self, mock_incident_service):
         """Test successful lambda handler execution"""
         # Setup
@@ -971,7 +979,7 @@ class TestLambdaHandler:
         response_body = json.loads(result["body"])
         assert response_body["message"] == "Event processed successfully"
 
-    @patch('index.IncidentService')
+    @patch.object(index, 'IncidentService')
     def test_lambda_handler_wrong_source(self, mock_incident_service):
         """Test lambda handler with wrong event source"""
         # Setup
@@ -990,7 +998,7 @@ class TestLambdaHandler:
         assert "Event skipped" in response_body
         mock_incident_service.assert_not_called()
 
-    @patch('index.IncidentService')
+    @patch.object(index, 'IncidentService')
     def test_lambda_handler_processing_failure(self, mock_incident_service):
         """Test lambda handler with processing failure"""
         # Setup
@@ -1015,7 +1023,7 @@ class TestLambdaHandler:
         response_body = json.loads(result["body"])
         assert "Failed to process event" in response_body["error"]
 
-    @patch('index.IncidentService')
+    @patch.object(index, 'IncidentService')
     def test_lambda_handler_exception(self, mock_incident_service):
         """Test lambda handler with exception"""
         # Setup
@@ -1035,7 +1043,7 @@ class TestLambdaHandler:
         response_body = json.loads(result["body"])
         assert "Test exception" in response_body["error"]
 
-    @patch('index.IncidentService')
+    @patch.object(index, 'IncidentService')
     def test_lambda_handler_records_format_success(self, mock_incident_service):
         """Test lambda handler with Records format (SQS/SNS) containing EventBridge event"""
         # Setup
@@ -1073,7 +1081,7 @@ class TestLambdaHandler:
         # Verify the EventBridge event was extracted and passed correctly
         mock_incident_instance.process_case_event.assert_called_once_with(eventbridge_event)
 
-    @patch('index.IncidentService')
+    @patch.object(index, 'IncidentService')
     def test_lambda_handler_records_format_dict_body(self, mock_incident_service):
         """Test lambda handler with Records format where body is already a dict"""
         # Setup
@@ -1111,7 +1119,7 @@ class TestLambdaHandler:
         # Verify the EventBridge event was passed correctly
         mock_incident_instance.process_case_event.assert_called_once_with(eventbridge_event)
 
-    @patch('index.IncidentService')
+    @patch.object(index, 'IncidentService')
     def test_lambda_handler_records_format_wrong_source(self, mock_incident_service):
         """Test lambda handler with Records format but wrong event source"""
         # Setup
@@ -1142,7 +1150,7 @@ class TestLambdaHandler:
         assert "jira" in response_body
         mock_incident_service.assert_not_called()
 
-    @patch('index.IncidentService')
+    @patch.object(index, 'IncidentService')
     def test_lambda_handler_records_format_invalid_json(self, mock_incident_service):
         """Test lambda handler with Records format containing invalid JSON"""
         # Setup
@@ -1164,7 +1172,7 @@ class TestLambdaHandler:
         assert "error" in response_body
         mock_incident_service.assert_not_called()
 
-    @patch('index.IncidentService')
+    @patch.object(index, 'IncidentService')
     def test_lambda_handler_empty_records(self, mock_incident_service):
         """Test lambda handler with empty Records array"""
         # Setup

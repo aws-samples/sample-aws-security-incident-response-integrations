@@ -107,13 +107,13 @@ class TestSlackEventsBoltHandler:
         """Test successful case ID extraction from channel"""
         # Setup
         mock_table = Mock()
-        mock_dynamodb.Table.return_value = mock_table
         mock_table.scan.return_value = {
             "Items": [{"PK": "Case#12345", "slackChannelId": "C1234567890"}]
         }
         
         # Execute
-        result = index.get_case_id_from_channel("C1234567890")
+        with patch.object(index, 'incidents_table', mock_table):
+            result = index.get_case_id_from_channel("C1234567890")
         
         # Verify
         assert result == "12345"
@@ -211,7 +211,8 @@ class TestSlackEventsBoltHandler:
         context = Mock()
         
         # Execute
-        result = index.lambda_handler(event, context)
+        with patch.object(index, 'slack_handler', mock_handler):
+            result = index.lambda_handler(event, context)
         
         # Verify
         assert result["statusCode"] == 200
@@ -240,13 +241,15 @@ class TestSlackEventsBoltHandler:
     def test_lambda_handler_exception(self):
         """Test lambda handler with exception"""
         # Setup
-        mock_handler.handle.side_effect = Exception("Test exception")
+        mock_handler_with_exception = Mock()
+        mock_handler_with_exception.handle.side_effect = Exception("Test exception")
         
         event = {"body": json.dumps({"type": "event_callback"})}
         context = Mock()
         
         # Execute
-        result = index.lambda_handler(event, context)
+        with patch.object(index, 'slack_handler', mock_handler_with_exception):
+            result = index.lambda_handler(event, context)
         
         # Verify
         assert result["statusCode"] == 500

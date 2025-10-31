@@ -170,9 +170,10 @@ class TestDownloadSlackFile:
         assert mock_get.call_count == index.SLACK_MAX_RETRIES
         assert mock_sleep.call_count == index.SLACK_MAX_RETRIES - 1
 
+    @patch('index.time.sleep')  # Mock sleep to speed up test
     @patch('index.requests.head')
     @patch('index.requests.get')
-    def test_download_head_request_failure(self, mock_get, mock_head):
+    def test_download_head_request_failure(self, mock_get, mock_head, mock_sleep):
         """Test file download with HEAD request failure"""
         # Mock HEAD response failure
         mock_head.side_effect = requests.exceptions.RequestException("HEAD request failed")
@@ -182,8 +183,9 @@ class TestDownloadSlackFile:
         
         # Verify
         assert result is None
-        mock_head.assert_called_once()
+        assert mock_head.call_count == index.SLACK_MAX_RETRIES  # Should retry 5 times
         mock_get.assert_not_called()
+        assert mock_sleep.call_count == index.SLACK_MAX_RETRIES - 1  # Sleep between retries
 
     @patch('index.requests.head')
     @patch('index.requests.get')
