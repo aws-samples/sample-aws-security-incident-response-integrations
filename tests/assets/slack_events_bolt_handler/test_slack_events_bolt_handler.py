@@ -18,7 +18,7 @@ os.environ["SLACK_SIGNING_SECRET"] = "/test/slackSigningSecret"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["LOG_LEVEL"] = "INFO"
 
-# Add path for importing the handler
+# Add path for importing
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
 
 # Set up global mocks that will be accessible in tests
@@ -29,11 +29,11 @@ mock_lambda = Mock()
 mock_app = Mock()
 mock_handler = Mock()
 
-# Mock AWS clients and Slack Bolt before importing
-with patch("boto3.client") as mock_boto_client, \
-     patch("boto3.resource") as mock_boto_resource, \
-     patch("slack_bolt.App") as mock_app_class, \
-     patch("slack_bolt.adapter.aws_lambda.SlackRequestHandler") as mock_handler_class:
+# Mock environment variables and AWS services before importing
+with patch('boto3.client') as mock_boto_client, \
+     patch('boto3.resource') as mock_boto_resource, \
+     patch('slack_bolt.App') as mock_slack_app, \
+     patch('slack_bolt.adapter.aws_lambda.SlackRequestHandler') as mock_slack_handler:
     
     def mock_client_factory(service_name, **kwargs):
         if service_name == "events":
@@ -46,10 +46,8 @@ with patch("boto3.client") as mock_boto_client, \
     
     mock_boto_client.side_effect = mock_client_factory
     mock_boto_resource.return_value = mock_dynamodb
-    
-    # Mock Slack app and handler with proper return values
-    mock_app_class.return_value = mock_app
-    mock_handler_class.return_value = mock_handler
+    mock_slack_app.return_value = mock_app
+    mock_slack_handler.return_value = mock_handler
     
     # Import the module under test
     import index
@@ -68,10 +66,11 @@ class TestSlackEventsBoltHandler:
         mock_app.reset_mock()
         mock_handler.reset_mock()
 
-    def test_get_ssm_parameter_success(self):
+    @patch('index.ssm_client')
+    def test_get_ssm_parameter_success(self, mock_ssm_client):
         """Test successful SSM parameter retrieval"""
         # Setup
-        mock_ssm.get_parameter.return_value = {
+        mock_ssm_client.get_parameter.return_value = {
             "Parameter": {"Value": "test-value"}
         }
         
@@ -80,7 +79,7 @@ class TestSlackEventsBoltHandler:
         
         # Verify
         assert result == "test-value"
-        mock_ssm.get_parameter.assert_called_once_with(
+        mock_ssm_client.get_parameter.assert_called_once_with(
             Name="/test/parameter",
             WithDecryption=True
         )
