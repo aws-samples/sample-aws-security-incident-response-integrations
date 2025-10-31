@@ -18,8 +18,12 @@ os.environ["SLACK_SIGNING_SECRET"] = "/test/slackSigningSecret"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["LOG_LEVEL"] = "INFO"
 
-# Add path for importing
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
+# Ensure we import from the correct directory by cleaning sys.path and adding the right path
+slack_events_handler_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
+
+# Remove any conflicting paths and add the correct one at the beginning
+if slack_events_handler_path not in sys.path:
+    sys.path.insert(0, slack_events_handler_path)
 
 # Set up global mocks that will be accessible in tests
 mock_eventbridge = Mock()
