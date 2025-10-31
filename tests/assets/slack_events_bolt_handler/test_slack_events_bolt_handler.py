@@ -18,21 +18,11 @@ os.environ["SLACK_SIGNING_SECRET"] = "/test/slackSigningSecret"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["LOG_LEVEL"] = "INFO"
 
-# Ensure we import from the correct directory by aggressively cleaning sys.path
+# Use importlib to directly load the module from the specific file path
+import importlib.util
+
 slack_events_handler_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
-
-# Remove any paths that might contain conflicting index modules
-paths_to_remove = []
-for path in sys.path:
-    if 'slack_client' in path or (path.endswith('assets') and 'slack_events_bolt_handler' not in path):
-        paths_to_remove.append(path)
-
-for path in paths_to_remove:
-    if path in sys.path:
-        sys.path.remove(path)
-
-# Add the correct path at the very beginning
-sys.path.insert(0, slack_events_handler_path)
+index_file_path = os.path.join(slack_events_handler_path, "index.py")
 
 # Set up global mocks that will be accessible in tests
 mock_eventbridge = Mock()
@@ -62,14 +52,13 @@ with patch('boto3.client') as mock_boto_client, \
     mock_slack_app.return_value = mock_app
     mock_slack_handler.return_value = mock_handler
     
-    # Import the module under test
-    import index
+    # Import the module directly from file path
+    spec = importlib.util.spec_from_file_location("index", index_file_path)
+    index = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(index)
     
-    # Verify we imported the correct module
-    expected_path = slack_events_handler_path
-    actual_path = os.path.dirname(index.__file__)
-    if not actual_path.endswith('slack_events_bolt_handler'):
-        raise ImportError(f"Wrong module imported! Expected path containing 'slack_events_bolt_handler', got: {actual_path}")
+    # Make the module available globally for patch decorators
+    sys.modules['index'] = index
 
 
 class TestSlackEventsBoltHandler:
