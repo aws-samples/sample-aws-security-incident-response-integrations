@@ -18,12 +18,21 @@ os.environ["SLACK_SIGNING_SECRET"] = "/test/slackSigningSecret"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["LOG_LEVEL"] = "INFO"
 
-# Ensure we import from the correct directory by cleaning sys.path and adding the right path
+# Ensure we import from the correct directory by aggressively cleaning sys.path
 slack_events_handler_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
 
-# Remove any conflicting paths and add the correct one at the beginning
-if slack_events_handler_path not in sys.path:
-    sys.path.insert(0, slack_events_handler_path)
+# Remove any paths that might contain conflicting index modules
+paths_to_remove = []
+for path in sys.path:
+    if 'slack_client' in path or (path.endswith('assets') and 'slack_events_bolt_handler' not in path):
+        paths_to_remove.append(path)
+
+for path in paths_to_remove:
+    if path in sys.path:
+        sys.path.remove(path)
+
+# Add the correct path at the very beginning
+sys.path.insert(0, slack_events_handler_path)
 
 # Set up global mocks that will be accessible in tests
 mock_eventbridge = Mock()
@@ -55,6 +64,12 @@ with patch('boto3.client') as mock_boto_client, \
     
     # Import the module under test
     import index
+    
+    # Verify we imported the correct module
+    expected_path = slack_events_handler_path
+    actual_path = os.path.dirname(index.__file__)
+    if not actual_path.endswith('slack_events_bolt_handler'):
+        raise ImportError(f"Wrong module imported! Expected path containing 'slack_events_bolt_handler', got: {actual_path}")
 
 
 class TestSlackEventsBoltHandler:
