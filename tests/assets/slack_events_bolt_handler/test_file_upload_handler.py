@@ -15,9 +15,21 @@ os.environ["INCIDENTS_TABLE_NAME"] = "test-incidents-table"
 os.environ["EVENT_SOURCE"] = "slack"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 
-# Mock AWS clients before importing the handler
-with patch('boto3.client'), patch('boto3.resource'), patch('slack_bolt.App'), patch('slack_bolt.adapter.aws_lambda.SlackRequestHandler'):
-    sys.path.append(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
+# Mock AWS clients and Slack components before importing the handler
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
+
+# Mock all the dependencies that might cause issues
+with patch('boto3.client') as mock_boto_client, \
+     patch('boto3.resource') as mock_boto_resource, \
+     patch('slack_bolt.App') as mock_slack_app, \
+     patch('slack_bolt.adapter.aws_lambda.SlackRequestHandler') as mock_slack_handler:
+    
+    # Set up mock returns
+    mock_boto_client.return_value = Mock()
+    mock_boto_resource.return_value = Mock()
+    mock_slack_app.return_value = Mock()
+    mock_slack_handler.return_value = Mock()
+    
     import index
 
 

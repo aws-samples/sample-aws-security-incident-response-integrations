@@ -18,17 +18,22 @@ os.environ["SLACK_SIGNING_SECRET"] = "/test/slackSigningSecret"
 os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
 os.environ["LOG_LEVEL"] = "INFO"
 
+# Add path for importing the handler
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
+
+# Set up global mocks that will be accessible in tests
+mock_eventbridge = Mock()
+mock_dynamodb = Mock()
+mock_ssm = Mock()
+mock_lambda = Mock()
+mock_app = Mock()
+mock_handler = Mock()
+
 # Mock AWS clients and Slack Bolt before importing
 with patch("boto3.client") as mock_boto_client, \
      patch("boto3.resource") as mock_boto_resource, \
      patch("slack_bolt.App") as mock_app_class, \
      patch("slack_bolt.adapter.aws_lambda.SlackRequestHandler") as mock_handler_class:
-    
-    # Set up mocks
-    mock_eventbridge = Mock()
-    mock_dynamodb = Mock()
-    mock_ssm = Mock()
-    mock_lambda = Mock()
     
     def mock_client_factory(service_name, **kwargs):
         if service_name == "events":
@@ -42,14 +47,11 @@ with patch("boto3.client") as mock_boto_client, \
     mock_boto_client.side_effect = mock_client_factory
     mock_boto_resource.return_value = mock_dynamodb
     
-    # Mock Slack app
-    mock_app = Mock()
+    # Mock Slack app and handler with proper return values
     mock_app_class.return_value = mock_app
-    mock_handler = Mock()
     mock_handler_class.return_value = mock_handler
     
     # Import the module under test
-    sys.path.append(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
     import index
 
 
