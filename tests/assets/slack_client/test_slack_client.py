@@ -44,12 +44,10 @@ with patch('boto3.client'), patch('boto3.resource'):
 class TestDatabaseService:
     """Test cases for DatabaseService class"""
 
-    @patch('index.dynamodb')
-    def test_get_case_success(self, mock_dynamodb):
+    def test_get_case_success(self):
         """Test successful case retrieval from database"""
         # Setup
         mock_table = Mock()
-        mock_dynamodb.Table.return_value = mock_table
         expected_response = {
             "Item": {
                 "PK": "Case#12345",
@@ -59,8 +57,11 @@ class TestDatabaseService:
         }
         mock_table.get_item.return_value = expected_response
         
-        # Set environment variable
-        with patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table"}):
+        # Set environment variable and patch the global dynamodb
+        with patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table"}), \
+             patch.object(index, 'dynamodb') as mock_dynamodb:
+            
+            mock_dynamodb.Table.return_value = mock_table
             db_service = DatabaseService()
             result = db_service.get_case("12345")
         
@@ -72,16 +73,17 @@ class TestDatabaseService:
             Key={"PK": "Case#12345", "SK": "latest"}
         )
 
-    @patch('index.dynamodb')
-    def test_get_case_not_found(self, mock_dynamodb):
+    def test_get_case_not_found(self):
         """Test case not found in database"""
         # Setup
         mock_table = Mock()
-        mock_dynamodb.Table.return_value = mock_table
         expected_response = {}
         mock_table.get_item.return_value = expected_response
         
-        with patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table"}):
+        with patch.dict(os.environ, {"INCIDENTS_TABLE_NAME": "test-table"}), \
+             patch.object(index, 'dynamodb') as mock_dynamodb:
+            
+            mock_dynamodb.Table.return_value = mock_table
             db_service = DatabaseService()
             result = db_service.get_case("12345")
         
@@ -169,7 +171,7 @@ class TestSlackService:
             "watchers": ["user@example.com"]
         }
         
-        with patch('index.security_incident_response_client') as mock_sir_client:
+        with patch.object(index, 'security_incident_response_client') as mock_sir_client:
             mock_sir_client.create_case_comment.return_value = {}
             
             slack_service = SlackService()
@@ -199,7 +201,7 @@ class TestSlackService:
             "title": "Test Security Incident"
         }
         
-        with patch('index.security_incident_response_client') as mock_sir_client:
+        with patch.object(index, 'security_incident_response_client') as mock_sir_client:
             mock_sir_client.create_case_comment.return_value = {}
             
             slack_service = SlackService()
@@ -345,8 +347,8 @@ class TestSlackService:
             "size": 1024
         }
         
-        with patch('index.security_incident_response_client') as mock_sir_client, \
-             patch('index.map_attachment_to_slack_file') as mock_map_attachment:
+        with patch.object(index, 'security_incident_response_client') as mock_sir_client, \
+             patch.object(index, 'map_attachment_to_slack_file') as mock_map_attachment:
             
             mock_sir_client.get_case_attachment_download_url.return_value = {
                 "attachmentPresignedUrl": "https://example.com/download/test_file.pdf"
@@ -397,7 +399,7 @@ class TestSlackService:
             "size": 200 * 1024 * 1024  # 200MB, exceeds 100MB limit
         }
         
-        with patch('index.security_incident_response_client') as mock_sir_client:
+        with patch.object(index, 'security_incident_response_client') as mock_sir_client:
             mock_sir_client.create_case_comment.return_value = {}
             
             slack_service = SlackService()
@@ -466,7 +468,7 @@ class TestSlackService:
             "size": 1024
         }
         
-        with patch('index.security_incident_response_client') as mock_sir_client:
+        with patch.object(index, 'security_incident_response_client') as mock_sir_client:
             mock_sir_client.get_case_attachment_download_url.return_value = {
                 "attachmentPresignedUrl": "https://example.com/download/test_file.pdf"
             }
@@ -514,8 +516,8 @@ class TestSlackService:
             "size": 1024
         }
         
-        with patch('index.security_incident_response_client') as mock_sir_client, \
-             patch('index.map_attachment_to_slack_file') as mock_map_attachment:
+        with patch.object(index, 'security_incident_response_client') as mock_sir_client, \
+             patch.object(index, 'map_attachment_to_slack_file') as mock_map_attachment:
             
             mock_sir_client.get_case_attachment_download_url.return_value = {
                 "attachmentPresignedUrl": "https://example.com/download/test_file.pdf"
