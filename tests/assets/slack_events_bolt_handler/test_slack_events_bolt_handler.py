@@ -7,6 +7,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 
 # TODO: Fix import conflicts in CI environment to re-enable these tests
+#https://app.asana.com/1/8442528107068/project/1209571477232011/task/1211611017424273?focus=true
 # Skip entire file if moto import fails (CI environment issue)
 try:
     from moto import mock_aws
@@ -18,7 +19,7 @@ import boto3
 # Import the module under test
 import sys
 import os
-import importlib.util
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../../assets/slack_events_bolt_handler"))
 
 # Mock environment variables before importing
 os.environ["EVENT_BUS_NAME"] = "test-event-bus"
@@ -44,15 +45,7 @@ with patch("slack_bolt.App") as mock_app_class, \
     mock_boto_client.return_value = Mock()
     mock_boto_resource.return_value = Mock()
     
-    # Import the specific module from slack_events_bolt_handler using importlib
-    slack_events_bolt_handler_index_path = os.path.join(
-        os.path.dirname(__file__), 
-        "../../../assets/slack_events_bolt_handler/index.py"
-    )
-    spec = importlib.util.spec_from_file_location("slack_events_bolt_handler_index", slack_events_bolt_handler_index_path)
-    index = importlib.util.module_from_spec(spec)
-    sys.modules["slack_events_bolt_handler_index"] = index
-    spec.loader.exec_module(index)
+    import index
 
 
 class TestSlackEventsBoltHandler:
@@ -143,30 +136,30 @@ class TestSlackEventsBoltHandler:
             result = index.get_channel_id_from_case("99999")
             assert result is None
 
-    def test_publish_event_to_eventbridge_success(self):
+    @patch("index.eventbridge_client")
+    def test_publish_event_to_eventbridge_success(self, mock_eventbridge):
         """Test successful event publishing to EventBridge"""
-        with patch.object(index, "eventbridge_client") as mock_eventbridge:
-            mock_eventbridge.put_events.return_value = {"FailedEntryCount": 0}
-            
-            result = index.publish_event_to_eventbridge(
-                "Test Event",
-                {"test": "data"}
-            )
-            
-            assert result is True
-            mock_eventbridge.put_events.assert_called_once()
+        mock_eventbridge.put_events.return_value = {"FailedEntryCount": 0}
+        
+        result = index.publish_event_to_eventbridge(
+            "Test Event",
+            {"test": "data"}
+        )
+        
+        assert result is True
+        mock_eventbridge.put_events.assert_called_once()
 
-    def test_publish_event_to_eventbridge_failure(self):
+    @patch("index.eventbridge_client")
+    def test_publish_event_to_eventbridge_failure(self, mock_eventbridge):
         """Test EventBridge publishing failure"""
-        with patch.object(index, "eventbridge_client") as mock_eventbridge:
-            mock_eventbridge.put_events.side_effect = Exception("EventBridge error")
-            
-            result = index.publish_event_to_eventbridge(
-                "Test Event",
-                {"test": "data"}
-            )
-            
-            assert result is False
+        mock_eventbridge.put_events.side_effect = Exception("EventBridge error")
+        
+        result = index.publish_event_to_eventbridge(
+            "Test Event",
+            {"test": "data"}
+        )
+        
+        assert result is False
 
     def test_is_incident_channel_true(self):
         """Test incident channel detection - positive case"""
@@ -178,30 +171,30 @@ class TestSlackEventsBoltHandler:
         result = index.is_incident_channel("general")
         assert result is False
 
-    def test_invoke_command_handler_success(self):
+    @patch("index.lambda_client")
+    def test_invoke_command_handler_success(self, mock_lambda_client):
         """Test successful command handler invocation"""
-        with patch.object(index, "lambda_client") as mock_lambda_client:
-            mock_lambda_client.invoke.return_value = {"StatusCode": 202}
-            
-            # Patch the module-level variable
-            with patch.object(index, 'SLACK_COMMAND_HANDLER_FUNCTION', 'test-command-handler'):
-                result = index.invoke_command_handler({"command": "/security-ir status"})
-            
-            assert result is True
-            mock_lambda_client.invoke.assert_called_once()
-
-    def test_invoke_command_handler_failure(self):
-        """Test command handler invocation failure"""
-        with patch.object(index, "lambda_client") as mock_lambda_client:
-            mock_lambda_client.invoke.side_effect = Exception("Lambda error")
-            
+        mock_lambda_client.invoke.return_value = {"StatusCode": 202}
+        
+        # Patch the module-level variable
+        with patch.object(index, 'SLACK_COMMAND_HANDLER_FUNCTION', 'test-command-handler'):
             result = index.invoke_command_handler({"command": "/security-ir status"})
-            
-            assert result is False
+        
+        assert result is True
+        mock_lambda_client.invoke.assert_called_once()
+
+    @patch("index.lambda_client")
+    def test_invoke_command_handler_failure(self, mock_lambda_client):
+        """Test command handler invocation failure"""
+        mock_lambda_client.invoke.side_effect = Exception("Lambda error")
+        
+        result = index.invoke_command_handler({"command": "/security-ir status"})
+        
+        assert result is False
 
     def test_create_slack_app_success(self, mock_aws_services):
         """Test successful Slack app creation"""
-        with patch.object(index, "get_ssm_parameter") as mock_get_param:
+        with patch("index.get_ssm_parameter") as mock_get_param:
             mock_get_param.side_effect = ["xoxb-test-token", "test-signing-secret"]
             
             # Test that the function attempts to create an app when credentials are available
@@ -214,28 +207,28 @@ class TestSlackEventsBoltHandler:
 
     def test_create_slack_app_missing_credentials(self, mock_aws_services):
         """Test Slack app creation with missing credentials"""
-        with patch.object(index, "get_ssm_parameter") as mock_get_param:
+        with patch("index.get_ssm_parameter") as mock_get_param:
             mock_get_param.return_value = None
             
             result = index.create_slack_app()
             
             assert result is None
 
-    def test_lambda_handler_success(self):
+    @patch("index.slack_handler")
+    def test_lambda_handler_success(self, mock_slack_handler):
         """Test successful Lambda handler execution"""
-        with patch.object(index, "slack_handler") as mock_slack_handler:
-            mock_slack_handler.handle.return_value = {
-                "statusCode": 200,
-                "body": json.dumps({"message": "success"})
-            }
-            
-            event = {"body": json.dumps({"type": "event_callback"})}
-            context = Mock()
-            
-            result = index.lambda_handler(event, context)
-            
-            assert result["statusCode"] == 200
-            mock_slack_handler.handle.assert_called_once_with(event, context)
+        mock_slack_handler.handle.return_value = {
+            "statusCode": 200,
+            "body": json.dumps({"message": "success"})
+        }
+        
+        event = {"body": json.dumps({"type": "event_callback"})}
+        context = Mock()
+        
+        result = index.lambda_handler(event, context)
+        
+        assert result["statusCode"] == 200
+        mock_slack_handler.handle.assert_called_once_with(event, context)
 
     def test_lambda_handler_no_slack_handler(self):
         """Test Lambda handler when Slack handler is not initialized"""
@@ -354,8 +347,8 @@ class TestSlackEventHandlers:
 
     def test_handle_incident_message_success(self, mock_slack_client, mock_message_event):
         """Test successful incident message handling"""
-        with patch.object(index, "get_case_id_from_channel", return_value="12345"), \
-             patch.object(index, "publish_event_to_eventbridge", return_value=True) as mock_publish:
+        with patch("index.get_case_id_from_channel", return_value="12345"), \
+             patch("index.publish_event_to_eventbridge", return_value=True) as mock_publish:
             
             # Mock the message handler function
             say = Mock()
@@ -391,9 +384,9 @@ class TestSlackEventHandlers:
 
     def test_handle_member_joined_success(self, mock_slack_client, mock_member_joined_event):
         """Test successful member joined handling"""
-        with patch.object(index, "get_case_id_from_channel", return_value="12345"), \
-             patch.object(index, "publish_event_to_eventbridge", return_value=True) as mock_publish, \
-             patch.object(index, "is_incident_channel", return_value=True):
+        with patch("index.get_case_id_from_channel", return_value="12345"), \
+             patch("index.publish_event_to_eventbridge", return_value=True) as mock_publish, \
+             patch("index.is_incident_channel", return_value=True):
             
             # Simulate the member joined handler logic
             channel_response = mock_slack_client.conversations_info(channel=mock_member_joined_event["channel"])
@@ -423,9 +416,9 @@ class TestSlackEventHandlers:
 
     def test_handle_member_left_success(self, mock_slack_client, mock_member_left_event):
         """Test successful member left handling"""
-        with patch.object(index, "get_case_id_from_channel", return_value="12345"), \
-             patch.object(index, "publish_event_to_eventbridge", return_value=True) as mock_publish, \
-             patch.object(index, "is_incident_channel", return_value=True):
+        with patch("index.get_case_id_from_channel", return_value="12345"), \
+             patch("index.publish_event_to_eventbridge", return_value=True) as mock_publish, \
+             patch("index.is_incident_channel", return_value=True):
             
             # Simulate the member left handler logic
             channel_response = mock_slack_client.conversations_info(channel=mock_member_left_event["channel"])
@@ -455,11 +448,11 @@ class TestSlackEventHandlers:
 
     def test_handle_file_upload_success(self, mock_slack_client, mock_file_shared_event):
         """Test successful file upload handling with enhanced functionality"""
-        with patch.object(index, "get_case_id_from_channel", return_value="12345"), \
-             patch.object(index, "publish_event_to_eventbridge", return_value=True) as mock_publish, \
-             patch.object(index, "is_incident_channel", return_value=True), \
-             patch.object(index, "get_ssm_parameter", return_value="xoxb-test-token"), \
-             patch.object(index, "download_slack_file", return_value=b"test file content"):
+        with patch("index.get_case_id_from_channel", return_value="12345"), \
+             patch("index.publish_event_to_eventbridge", return_value=True) as mock_publish, \
+             patch("index.is_incident_channel", return_value=True), \
+             patch("index.get_ssm_parameter", return_value="xoxb-test-token"), \
+             patch("index.download_slack_file", return_value=b"test file content"):
             
             # Simulate the enhanced file upload handler logic
             channel_response = mock_slack_client.conversations_info(channel=mock_file_shared_event["channel_id"])
@@ -523,9 +516,9 @@ class TestSlackEventHandlers:
         
         mock_slack_client.files_info.return_value = {"file": large_file_info}
         
-        with patch.object(index, "get_case_id_from_channel", return_value="12345"), \
-             patch.object(index, "publish_event_to_eventbridge", return_value=True) as mock_publish, \
-             patch.object(index, "is_incident_channel", return_value=True):
+        with patch("index.get_case_id_from_channel", return_value="12345"), \
+             patch("index.publish_event_to_eventbridge", return_value=True) as mock_publish, \
+             patch("index.is_incident_channel", return_value=True):
             
             # Simulate the file upload handler logic for large files
             channel_response = mock_slack_client.conversations_info(channel=mock_file_shared_event["channel_id"])
@@ -560,11 +553,11 @@ class TestSlackEventHandlers:
 
     def test_handle_file_upload_download_failure(self, mock_slack_client, mock_file_shared_event):
         """Test file upload handling when download fails"""
-        with patch.object(index, "get_case_id_from_channel", return_value="12345"), \
-             patch.object(index, "publish_event_to_eventbridge", return_value=True) as mock_publish, \
-             patch.object(index, "is_incident_channel", return_value=True), \
-             patch.object(index, "get_ssm_parameter", return_value="xoxb-test-token"), \
-             patch.object(index, "download_slack_file", return_value=None):  # Download failure
+        with patch("index.get_case_id_from_channel", return_value="12345"), \
+             patch("index.publish_event_to_eventbridge", return_value=True) as mock_publish, \
+             patch("index.is_incident_channel", return_value=True), \
+             patch("index.get_ssm_parameter", return_value="xoxb-test-token"), \
+             patch("index.download_slack_file", return_value=None):  # Download failure
             
             # Simulate the file upload handler logic with download failure
             channel_response = mock_slack_client.conversations_info(channel=mock_file_shared_event["channel_id"])
@@ -603,9 +596,9 @@ class TestSlackEventHandlers:
 
     def test_handle_slash_command_success(self, mock_slack_client, mock_slash_command):
         """Test successful slash command handling"""
-        with patch.object(index, "get_case_id_from_channel", return_value="12345"), \
-             patch.object(index, "invoke_command_handler", return_value=True) as mock_invoke, \
-             patch.object(index, "is_incident_channel", return_value=True):
+        with patch("index.get_case_id_from_channel", return_value="12345"), \
+             patch("index.invoke_command_handler", return_value=True) as mock_invoke, \
+             patch("index.is_incident_channel", return_value=True):
             
             # Simulate the slash command handler logic
             ack = Mock()
@@ -652,7 +645,7 @@ class TestSlackEventHandlers:
             "ts": "1234567890.123456"
         }
         
-        with patch.object(index, "publish_event_to_eventbridge") as mock_publish:
+        with patch("index.publish_event_to_eventbridge") as mock_publish:
             # Simulate the message handler logic for bot messages
             if bot_message.get("subtype") in ["bot_message", "app_mention"] or not bot_message.get("user"):
                 # Should skip processing
@@ -673,7 +666,7 @@ class TestSlackEventHandlers:
             "ts": "1234567890.123456"
         }
         
-        with patch.object(index, "publish_event_to_eventbridge") as mock_publish:
+        with patch("index.publish_event_to_eventbridge") as mock_publish:
             # Simulate the message handler logic for system messages
             if "[Slack Update]" in system_message.get("text", ""):
                 # Should skip processing
