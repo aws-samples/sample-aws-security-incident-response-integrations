@@ -1,8 +1,9 @@
 -r requirements.txt
-pytest==6.2.5
+pytest>=7.0.0
 pytest-cov
 pytest-xdist
 pytest-mock
+typeguard<3.0.0
 black
 isort
 mypy
