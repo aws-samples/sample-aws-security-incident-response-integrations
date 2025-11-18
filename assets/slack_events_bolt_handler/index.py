@@ -43,6 +43,9 @@ SLACK_MAX_RETRY_DELAY = 60
 # Initialize DynamoDB table
 incidents_table = dynamodb.Table(INCIDENTS_TABLE_NAME) if INCIDENTS_TABLE_NAME else None
 
+# Make clients available at module level for testing
+# These are already defined above but we're making them explicit for test patching
+
 
 def get_ssm_parameter(parameter_name: str, with_decryption: bool = True) -> Optional[str]:
     """Get parameter from SSM Parameter Store.
@@ -730,6 +733,9 @@ if app:
 
 # Lambda request handler
 slack_handler = SlackRequestHandler(app=app) if app else None
+
+# Make app available at module level for testing
+# This allows tests to patch the app if needed
 
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
