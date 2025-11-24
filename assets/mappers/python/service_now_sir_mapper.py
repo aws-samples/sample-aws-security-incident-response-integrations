@@ -97,7 +97,7 @@ IR_MANDATORY_FIELDS = {
 def map_case_status(
     sir_case_status: str, integration_module: str = "itsm"
 ) -> Tuple[str, Optional[str]]:
-    """Maps AWS Security Incident Response case status to Service Now workflow status.
+    """Map AWS Security Incident Response case status to Service Now workflow status.
 
     Args:
         sir_case_status (str): Status from AWS Security Incident Response case
@@ -138,7 +138,7 @@ def map_case_status(
 def map_sir_fields_to_service_now(
     sir_case: Dict[str, Any], integration_module: str = "itsm"
 ) -> Dict[str, Any]:
-    """Maps AWS Security Incident Response case fields to Service Now fields.
+    """Map AWS Security Incident Response case fields to Service Now fields.
 
     Args:
         sir_case (Dict[str, Any]): Dictionary containing AWS Security Incident Response case data
@@ -185,7 +185,7 @@ def map_sir_fields_to_service_now(
 def map_sir_case_comments_to_service_now_incident(
     sir_case_comments: List[Dict[str, Any]], service_now_incident_comments: str
 ) -> List[str]:
-    """Maps AWS Security Incident Response case comments to Service Now incident comments.
+    """Map AWS Security Incident Response case comments to Service Now incident comments.
 
     Args:
         sir_case_comments (List[Dict[str, Any]]): List of comments from AWS Security Incident Response case
@@ -247,7 +247,7 @@ def map_sir_case_comments_to_service_now_incident(
 def convert_unmapped_fields_to_string_for_snow_comments(
     sir_case: Dict[str, Any],
 ) -> str:
-    """Maps unmapped or additional AWS Security Incident Response case fields to Service Now comments.
+    """Map unmapped or additional AWS Security Incident Response case fields to Service Now comments.
 
     Args:
         sir_case (Dict[str, Any]): Dictionary containing AWS Security Incident Response case data
@@ -314,7 +314,7 @@ def convert_unmapped_fields_to_string_for_snow_comments(
 def map_service_now_fields_to_sir(
     service_now_incident: Dict[str, Any], integration_module: str = "itsm"
 ) -> Dict[str, Any]:
-    """Maps Service Now fields to AWS Security Incident Response case fields.
+    """Map Service Now fields to AWS Security Incident Response case fields.
 
     Args:
         service_now_incident (Dict[str, Any]): Dictionary containing Service Now incident data
@@ -350,7 +350,7 @@ def map_service_now_fields_to_sir(
 def map_service_now_incident_comments_to_sir_case(
     service_now_incident_comments: str, sir_case_comments: List[Dict[str, Any]]
 ) -> List[str]:
-    """Maps ServiceNow incident comments to Security IR case comments.
+    """Map ServiceNow incident comments to Security IR case comments.
 
     Args:
         service_now_incident_comments (str): ServiceNow incident comments
@@ -404,8 +404,7 @@ def map_service_now_incident_comments_to_sir_case(
 
 
 def convert_service_now_comments_to_list(comments: str) -> List[str]:
-    """
-    Converts ServiceNow comments to a list of strings.
+    """Convert ServiceNow comments to a list of strings.
 
     Extracts lines following specific phrases like '(Additional comments)' and '(Work notes)'.
 
@@ -439,7 +438,7 @@ def convert_service_now_comments_to_list(comments: str) -> List[str]:
 def validate_if_comment_needs_to_be_added(
     source_comment, dest_comment, tag_to_skip
 ) -> bool:
-    """Validates if a comment needs to be added to the destination.
+    """Validate if a comment needs to be added to the destination.
 
     Args:
         source_comment (str): The comment to be validated
@@ -463,7 +462,7 @@ def validate_if_comment_needs_to_be_added(
 def map_watchers(
     sir_watchers: List[Any], service_now_watchers: List[str]
 ) -> Tuple[List[Any], List[str]]:
-    """Maps watchers between AWS Security Incident Response and Service Now.
+    """Map watchers between AWS Security Incident Response and Service Now.
 
     Args:
         sir_watchers (List[Any]): List of watcher objects from AWS Security Incident Response (can be strings or dicts with email field)
@@ -512,7 +511,7 @@ def map_watchers(
 
 
 def map_closure_code(sir_closure_code: str) -> str:
-    """Maps AWS Security Incident Response closure code to Service Now field value.
+    """Map AWS Security Incident Response closure code to Service Now field value.
 
     Args:
         sir_closure_code (str): Closure code from AWS Security Incident Response
@@ -527,7 +526,7 @@ def map_closure_code(sir_closure_code: str) -> str:
 
 # TODO: Move the below setup (for an integration target), which is being invoked from the handlers, outside of the lambdas to speed up processing like a pre-compute (see: https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210991530761708)
 def reverse_map_closure_code(service_now_closure_code: str) -> Optional[str]:
-    """Maps Service Now closure code back to AWS Security Incident Response closure code.
+    """Map Service Now closure code back to AWS Security Incident Response closure code.
 
     Args:
         service_now_closure_code (str): Closure code from Service Now

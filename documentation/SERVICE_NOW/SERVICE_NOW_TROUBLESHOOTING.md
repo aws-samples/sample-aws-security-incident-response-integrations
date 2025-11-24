@@ -21,16 +21,22 @@ This document provides detailed information on troubleshooting, validation, and 
 
 2. **Deploy the Stack**:
    ```bash
-   # Using the deploy-integrations-solution script
+   # Using the deploy-integrations-solution script with JWT OAuth
    deploy-integrations-solution service-now \
      --instance-id <your-servicenow-instance-id> \
-     --username <your-servicenow-username> \
-     --password <your-servicenow-password> \
+     --client-id <your-oauth-client-id> \
+     --client-secret <your-oauth-client-secret> \
+     --user-id <your-servicenow-user-id> \
+     --private-key-path <path-to-private-key-file> \
      --integration-module <itsm|ir> \
      --log-level info
    ```
    
    **Required Parameters:**
+   - `--client-id`: OAuth client ID from ServiceNow OAuth application
+   - `--client-secret`: OAuth client secret from ServiceNow OAuth application
+   - `--user-id`: ServiceNow user ID for JWT authentication
+   - `--private-key-path`: Path to RSA private key file for JWT signing
    - `--integration-module`: Choose `itsm` for IT Service Management or `ir` for Incident Response module
    
    **Optional Parameters:**
@@ -132,12 +138,42 @@ To validate the resources created in ServiceNow:
    - Look for script includes related to the AWS integration
    - Verify they contain the correct formatting logic for incident data
 
+## JWT OAuth Authentication
+
+The ServiceNow integration uses JWT OAuth authentication for secure API access. This section covers JWT-specific setup and troubleshooting.
+
+### JWT Authentication Flow
+
+1. **JWT Generation**: Lambda functions generate signed JWT tokens using the RSA private key
+2. **OAuth Token Exchange**: JWT tokens are exchanged for OAuth access tokens from ServiceNow
+3. **API Access**: OAuth access tokens are used for ServiceNow API calls
+4. **Token Refresh**: Access tokens are automatically refreshed when expired
+
+### JWT Token Structure
+
+The JWT tokens include:
+- **Issuer (iss)**: OAuth client ID
+- **Subject (sub)**: ServiceNow user ID  
+- **Audience (aud)**: OAuth client ID
+- **Issued At (iat)**: Token generation timestamp
+- **Expiration (exp)**: Token expiration (1 hour from generation)
+- **JWT ID (jti)**: Unique token identifier
+
+### RSA Key Management
+
+- **Private Key**: Stored as S3 asset, referenced via SSM parameters
+- **Public Key**: Configured in ServiceNow OAuth application
+- **Key Format**: RSA 2048-bit keys in PEM format
+- **Security**: Private key never exposed in logs or environment variables
+
 ## Security Considerations
 
-- All credentials are stored securely in SSM Parameter Store
+- OAuth credentials are stored securely in SSM Parameter Store
+- RSA private key is stored as encrypted S3 asset
+- JWT tokens have short expiration times (1 hour)
 - IAM roles follow the principle of least privilege
 - API Gateway is configured with CORS to control access
-- CloudWatch logging is enabled for all Lambda functions
+- CloudWatch logging is enabled for all Lambda functions (sensitive data excluded)
 
 ## Troubleshooting
 
@@ -145,10 +181,12 @@ To validate the resources created in ServiceNow:
 
 1. **ServiceNow Resource Setup Fails**:
    - Check CloudWatch Logs for the ServiceNow Resource Setup Lambda
-   - Verify the ServiceNow credentials are correct
+   - Verify the ServiceNow OAuth credentials (client ID and client secret) are correct
    - Ensure the ServiceNow user has sufficient permissions to create business rules and REST messages
+   - Verify the OAuth application is properly configured in ServiceNow with the correct public key
    - Check that the ServiceNow instance is accessible from AWS Lambda
    - Verify the API Gateway webhook URL is properly formatted
+   - Ensure the RSA private key is valid and matches the public key in ServiceNow
 
 2. **Integration Module Configuration Issues**:
    - Verify the correct `--integration-module` parameter was used during deployment (`itsm` or `ir`)
@@ -168,6 +206,9 @@ To validate the resources created in ServiceNow:
    - Check AWS Secrets Manager for correct token value
    - Ensure API Gateway authorizer is functioning correctly
    - Test webhook authentication manually using curl or Postman
+   - Verify JWT token generation is working correctly
+   - Check that the OAuth application public key matches the private key used for signing
+   - Ensure the ServiceNow user ID exists and has proper permissions
 
 5. **Events Not Flowing from ServiceNow to AWS**:
    - Verify the business rules were created in ServiceNow
@@ -181,7 +222,9 @@ To validate the resources created in ServiceNow:
 6. **Events Not Flowing from AWS to ServiceNow**:
    - Check CloudWatch Logs for the ServiceNow Client Lambda
    - Verify the ServiceNow API is accessible from AWS
-   - Ensure the ServiceNow credentials are still valid
+   - Ensure the ServiceNow OAuth credentials are still valid
+   - Check JWT token generation and OAuth access token retrieval
+   - Verify the RSA private key is accessible from S3 and properly formatted
    - Check EventBridge for event delivery status
    - Review DynamoDB table for proper incident mapping
    - Verify attachment upload permissions and file size limits
@@ -217,6 +260,15 @@ To validate the resources created in ServiceNow:
 4. Test the webhook endpoint directly using the correct authentication
 5. Check API Gateway logs for authentication-related errors
 
+#### JWT OAuth Authentication Issues
+1. Verify the OAuth application is properly configured in ServiceNow
+2. Check that the public key in ServiceNow matches the private key used for signing
+3. Ensure the ServiceNow user ID exists and has proper permissions
+4. Verify JWT token generation in CloudWatch logs
+5. Check OAuth access token retrieval from ServiceNow
+6. Ensure the RSA private key is properly formatted and accessible from S3
+7. Verify the client ID and client secret are correct in SSM parameters
+
 #### Attachment Upload Failures
 1. Check file size limits (5MB maximum)
 2. Verify ServiceNow API permissions for attachment operations
@@ -231,6 +283,50 @@ To validate the resources created in ServiceNow:
 4. Ensure ServiceNow incident fields are properly mapped
 5. Verify incident mapping entries in DynamoDB
 6. Check that the correct integration module is being used for field mappings
+
+### JWT OAuth Troubleshooting
+
+#### Common JWT Issues
+
+1. **Invalid JWT Signature**:
+   - Verify the private key matches the public key in ServiceNow
+   - Check that the private key is properly formatted (PEM format)
+   - Ensure the OAuth application public key is correctly configured
+
+2. **JWT Token Expired**:
+   - JWT tokens expire after 1 hour - this is normal behavior
+   - Check that token refresh logic is working correctly
+   - Verify system clocks are synchronized
+
+3. **OAuth Client Authentication Failed**:
+   - Verify client ID and client secret are correct
+   - Check that the OAuth application is active in ServiceNow
+   - Ensure the user ID exists and has proper permissions
+
+4. **Private Key Access Issues**:
+   - Verify S3 bucket and object key parameters are correct
+   - Check IAM permissions for S3 access
+   - Ensure the private key file is properly formatted
+
+#### JWT Debugging Steps
+
+1. **Check JWT Generation**:
+   ```bash
+   # Look for JWT generation logs
+   aws logs filter-log-events --log-group-name "/aws/lambda/SecurityIncidentResponseServiceNowClient" --filter-pattern "JWT"
+   ```
+
+2. **Verify OAuth Token Exchange**:
+   ```bash
+   # Check OAuth access token retrieval
+   aws logs filter-log-events --log-group-name "/aws/lambda/SecurityIncidentResponseServiceNowClient" --filter-pattern "OAuth"
+   ```
+
+3. **Validate Private Key Access**:
+   ```bash
+   # Check S3 private key access logs
+   aws logs filter-log-events --log-group-name "/aws/lambda/SecurityIncidentResponseServiceNowClient" --filter-pattern "private key"
+   ```
 
 ### Enhanced Monitoring and Logging
 
@@ -251,3 +347,12 @@ To validate the resources created in ServiceNow:
 - Check ServiceNow event logs for webhook delivery status
 - Verify attachment business rule execution for incident attachments
 - Ensure business rules are targeting the correct table based on integration module selection
+- Monitor OAuth token generation and refresh cycles
+- Check ServiceNow OAuth application logs for authentication issues
+
+#### JWT-Specific Monitoring
+- Monitor JWT token generation frequency and success rates
+- Track OAuth access token refresh cycles
+- Verify RSA key access patterns from S3
+- Check for JWT signature validation errors in ServiceNow
+- Monitor OAuth application usage statistics in ServiceNow

@@ -61,9 +61,7 @@ lambda_client = boto3.client("lambda")
 
 # Domain events
 class CaseCreatedEvent:
-    """
-    Domain event for case creation
-    """
+    """Domain event for case creation."""
 
     event_type = "CaseCreated"
     event_source = EVENT_SOURCE
@@ -109,9 +107,7 @@ class CaseCreatedEvent:
 
 
 class CaseUpdatedEvent:
-    """
-    Domain event for case update
-    """
+    """Domain event for case update."""
 
     event_type = "CaseUpdated"
     event_source = EVENT_SOURCE
@@ -159,9 +155,7 @@ class CaseUpdatedEvent:
 
 
 class CaseDeletedEvent:
-    """
-    Domain event for case deletion
-    """
+    """Domain event for case deletion."""
 
     event_type = "CaseDeleted"
     event_source = EVENT_SOURCE
@@ -188,9 +182,7 @@ class CaseDeletedEvent:
 
 
 class EventPublisher:
-    """
-    Service for publishing events to EventBridge
-    """
+    """Service for publishing events to EventBridge."""
 
     def __init__(self, event_bus_name):
         """Initialize an EventPublisher.
@@ -236,21 +228,21 @@ class EventPublisher:
             logger.error(traceback.format_exc())
             raise
 
-    def _convert_event_to_dict(self, event):
+    def _convert_event_to_dict(self, event) -> dict:
         """Convert an event object to a dictionary.
 
         Args:
             event: The event to convert
 
         Returns:
-            Dict[str, Any]: Dictionary representation of the event
+            dict: Dictionary representation of the event
         """
         return event.to_dict()
 
 
 # Utility functions
 class DateTimeEncoder(json.JSONEncoder):
-    """Custom JSON encoder for datetime objects"""
+    """Custom JSON encoder for datetime objects."""
 
     def default(self, obj):
         """Convert datetime objects to ISO format strings.
@@ -285,8 +277,7 @@ def json_datetime_encoder(obj: Any) -> str:
 
 
 def get_incidents_from_security_ir() -> Optional[List[Dict[str, Any]]]:
-    """
-    Fetch all incidents from Security Incident Response with pagination support.
+    """Fetch all incidents from Security Incident Response with pagination support.
 
     Returns:
         Optional[List[Dict[str, Any]]]: List of incidents or None if error occurs

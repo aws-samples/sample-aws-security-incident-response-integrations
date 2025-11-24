@@ -417,7 +417,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             True,
         )
 
-    def update_security_ir_client_env(self, service_now_params):
+    def update_security_ir_client_env(self, service_now_params: dict) -> None:
         """Update security_ir_client environment variables with ServiceNow parameters.
 
         Args:

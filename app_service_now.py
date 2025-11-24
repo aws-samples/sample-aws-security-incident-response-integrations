@@ -18,8 +18,11 @@ app = cdk.App()
 # ServiceNow parameters for common stack
 service_now_params = {
     "instance_id_param_name": "/SecurityIncidentResponse/serviceNowInstanceId",
-    "username_param_name": "/SecurityIncidentResponse/serviceNowUser",
-    "password_param_name": "/SecurityIncidentResponse/serviceNowPassword",
+    "client_id_param_name": "/SecurityIncidentResponse/serviceNowClientId",
+    "client_secret_param_name": "/SecurityIncidentResponse/serviceNowClientSecret",
+    "user_id_param_name": "/SecurityIncidentResponse/serviceNowUserId",
+    "private_key_asset_bucket_param_name": "/SecurityIncidentResponse/privateKeyAssetBucket",
+    "private_key_asset_key_param_name": "/SecurityIncidentResponse/privateKeyAssetKey",
 }
 
 # Create common stack with ServiceNow parameters

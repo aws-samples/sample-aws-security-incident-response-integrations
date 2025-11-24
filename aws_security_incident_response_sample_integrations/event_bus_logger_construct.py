@@ -19,10 +19,7 @@ from constructs import Construct
 
 
 class EventBusLoggerConstruct(Construct):
-    """
-    CDK construct that creates a CloudWatch LogGroup and configures it as a target
-    for an EventBridge Rule that matches events from a specified EventBus.
-    """
+    """CDK construct that creates a CloudWatch LogGroup and configures it as a target for an EventBridge Rule."""
 
     def __init__(
         self,
@@ -33,8 +30,7 @@ class EventBusLoggerConstruct(Construct):
         log_retention: aws_logs.RetentionDays = aws_logs.RetentionDays.ONE_MONTH,
         **kwargs,
     ) -> None:
-        """
-        Initialize the EventBusLoggerConstruct.
+        """Initialize the EventBusLoggerConstruct.
 
         Creates a CloudWatch LogGroup and configures it as a target for an EventBridge Rule
         that matches events from the specified EventBus. Includes DLQ, alarms, and dashboard.

@@ -54,7 +54,7 @@ except ImportError:
 
 
 class DatabaseService:
-    """Class to handle database operations"""
+    """Class to handle database operations."""
 
     def __init__(self):
         """Initialize the database service."""
@@ -142,7 +142,7 @@ class DatabaseService:
 
 
 class AttachmentService:
-    """Class to handle attachment operations"""
+    """Class to handle attachment operations."""
 
     def __init__(self, jira_client: JiraClient):
         """Initialize the attachment service.
@@ -250,7 +250,7 @@ class AttachmentService:
 
 
 class CommentService:
-    """Class to handle comment operations"""
+    """Class to handle comment operations."""
 
     def __init__(self, jira_client: JiraClient):
         """Initialize the comment service.
@@ -296,7 +296,7 @@ class CommentService:
 
 
 class IncidentService:
-    """Class to handle incident operations"""
+    """Class to handle incident operations."""
 
     def __init__(self):
         """Initialize the incident service."""

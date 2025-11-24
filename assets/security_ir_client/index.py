@@ -466,7 +466,7 @@ def process_jira_event(jira_issue: dict, event_source: str) -> None:
 
 
 class ParameterService:
-    """Class to handle parameter operations"""
+    """Class to handle parameter operations."""
 
     def __init__(self):
         """Initialize the parameter service."""
@@ -494,7 +494,7 @@ class ParameterService:
 
 
 class DatabaseService:
-    """Class to handle database operations"""
+    """Class to handle database operations."""
 
     __dynamodb = boto3.resource("dynamodb")
     __table_name = os.environ["INCIDENTS_TABLE_NAME"]
@@ -645,7 +645,7 @@ class DatabaseService:
 
 
 class ServiceNowService:
-    """Class to handle ServiceNow operations for Security IR integration"""
+    """Class to handle ServiceNow operations for Security IR integration."""
 
     def __init__(self, instance_id, username, password_param_name):
         """Initialize the ServiceNow service.
@@ -698,7 +698,7 @@ class ServiceNowService:
 
 
 class IncidentService:
-    """Class to handle security IR incident operations"""
+    """Class to handle security IR incident operations."""
 
     __database_service = DatabaseService()
     __security_ir_client = boto3.client("security-ir")

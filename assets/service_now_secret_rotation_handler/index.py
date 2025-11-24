@@ -98,9 +98,8 @@ class ServiceNowApiService:
         self.password_param_name = password_param_name
         self.secrets_manager_service = SecretsManagerService()
 
-    def __get_password(self, password_param_name) -> Optional[str]:
-        """
-        Fetch the ServiceNow password from SSM Parameter Store.
+    def __get_password(self, password_param_name: str) -> Optional[str]:
+        """Fetch the ServiceNow password from SSM Parameter Store.
 
         Args:
             password_param_name (str): SSM parameter name containing the password
@@ -121,11 +120,11 @@ class ServiceNowApiService:
             logger.error(f"Error retrieving ServiceNow password from SSM: {str(e)}")
             return None
 
-    def __get_request_headers(self):
+    def __get_request_headers(self) -> Optional[dict]:
         """Get headers for ServiceNow API requests.
 
         Returns:
-            Optional[Dict[str, str]]: HTTP headers with Basic authentication or None if error
+            Optional[dict]: HTTP headers with Basic authentication or None if error
         """
         try:
             password = self.__get_password(self.password_param_name)
@@ -139,7 +138,7 @@ class ServiceNowApiService:
             logger.error(f"Error getting request headers: {str(e)}")
             return None
 
-    def __get_request_base_url(self):
+    def __get_request_base_url(self) -> Optional[str]:
         """Get base URL for ServiceNow API requests.
 
         Returns:
@@ -153,9 +152,9 @@ class ServiceNowApiService:
 
     def _update_outbound_rest_message_request_function_headers(
         self,
-        resource_prefix,
-        api_auth_token,
-    ):
+        resource_prefix: str,
+        api_auth_token: str,
+    ) -> Optional[str]:
         """Create/Update HTTP request headers for the Outbound REST Message function in ServiceNow.
 
         Args:

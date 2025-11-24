@@ -28,6 +28,8 @@ from .aws_security_incident_response_sample_integrations_common_stack import (
 
 
 class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
+    """AWS CDK Stack for Jira integration with Security Incident Response."""
+    
     def __init__(
         self,
         scope: Construct,
@@ -35,6 +37,14 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
         common_stack: AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
         **kwargs,
     ) -> None:
+        """Initialize the Jira integration stack.
+
+        Args:
+            scope (Construct): The scope in which to define this construct
+            construct_id (str): The scoped construct ID
+            common_stack (AwsSecurityIncidentResponseSampleIntegrationsCommonStack): Common stack instance
+            **kwargs: Additional keyword arguments passed to Stack
+        """
         super().__init__(scope, construct_id, **kwargs)
 
         # Reference common resources

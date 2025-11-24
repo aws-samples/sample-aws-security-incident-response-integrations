@@ -7,8 +7,12 @@ import logging
 import boto3
 from typing import Dict, Optional, Any, List
 from pysnc import ServiceNowClient as SnowClient, GlideRecord
+import jwt
 import mimetypes
 import requests
+import time
+import uuid
+from requests.auth import AuthBase
 from base64 import b64encode
 
 # Configure logging
@@ -18,71 +22,254 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 ssm_client = boto3.client("ssm")
 
+# Static variables
+CONTENT_TYPE = 'application/x-www-form-urlencoded; charset=UTF-8'
+JWT_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:jwt-bearer'
+JWT_HEADER = {
+            'alg': 'RS256',  # Or RS256 if using certificate-based signing
+            'typ': 'JWT'
+            # 'kid': 'key_id_if_applicable' # If you have a specific key ID
+        }
+ATTACHMENT_CONTENT_TYPE = 'application/octet-stream'
 
-# TODO: Consider refactoring the micro-service implementation in the solution to use the Singleton or Factory method design pattern. See https://refactoring.guru/design-patterns/python
-class ServiceNowClient:
-    """Class to handle ServiceNow API interactions"""
-
-    def __init__(self, instance_id, username, password_param_name):
-        """
-        Initialize the ServiceNow client.
+class ServiceNowJWTAuth(AuthBase):
+    """ServiceNow JWT authentication handler."""
+    def __init__(self, instance_id, client_id, client_secret, jwt):
+        """Initialize ServiceNow JWT authentication.
 
         Args:
             instance_id (str): ServiceNow instance ID
-            username (str): ServiceNow username
-            password_param_name (str): SSM parameter name containing ServiceNow password
+            client_id (str): OAuth client ID
+            client_secret (str): OAuth client secret
+            jwt (str): Signed JWT token from OIDC provider
         """
         self.instance_id = instance_id
-        self.username = username
-        self.password_param_name = password_param_name
+        self.client_id = client_id
+        self.__secret = client_secret
+        self.__jwt = jwt
+        self.__token = None
+        self.__expires_at = None
+
+    def _get_access_token(self, request):
+        """Get OAuth access token using JWT assertion.
+
+        Args:
+            request: HTTP request object
+
+        Returns:
+            tuple: Tuple containing (access_token, expires_at)
+        """
+        token_url = f"https://{self.instance_id}.service-now.com/oauth_token.do"
+        headers = {
+            'Content-Type': CONTENT_TYPE,
+            'Authentication': f"Bearer {self.__jwt}"
+        }
+        data = {
+            'grant_type': JWT_GRANT_TYPE,
+            'assertion': self.__jwt,
+            'client_id': self.client_id,
+            'client_secret': self.__secret
+        }
+        r = requests.post(token_url, headers=headers, data=data)
+        assert r.status_code == 200, f"Failed to auth, see syslogs {r.text}"
+        data = r.json()
+        print(data)
+        expires = int(time.time()+data['expires_in'])
+        return data['access_token'], expires
+
+    def __call__(self, request):
+        """Add authorization header to request.
+
+        Args:
+            request: HTTP request object to authorize
+
+        Returns:
+            request: Modified request with authorization header
+        """
+        if not self.__token or time.time() > self.__expires_at:
+            print("Getting access token")
+            self.__token, self.__expires_at = self._get_access_token(request)
+        print("Token: " + self.__token)
+        request.headers['Authorization'] = f"Bearer {self.__token}"
+        print("Logging the request details:")
+        print(request.url)
+        print(request.headers)
+        print(request.body)
+        return request
+
+
+# TODO: Consider refactoring the micro-service implementation in the solution to use the Singleton or Factory method design pattern. See https://refactoring.guru/design-patterns/python
+class ServiceNowClient:
+    """Class to handle ServiceNow API interactions."""
+
+    def __init__(self, instance_id, client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name):
+        """
+        Initialize the ServiceNow client with OAuth2 authentication.
+
+        Args:
+            instance_id (str): ServiceNow instance ID
+            client_id_param_name (str): SSM parameter name containing OAuth client ID
+            client_secret_param_name (str): SSM parameter name containing OAuth client secret
+            user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+            private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
+            private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
+        """
+        self.instance_id = instance_id
+        self.client_id_param_name = client_id_param_name
+        self.client_secret_param_name = client_secret_param_name
+        self.user_id_param_name = user_id_param_name
+        self.private_key_asset_bucket_param_name = private_key_asset_bucket_param_name
+        self.private_key_asset_key_param_name = private_key_asset_key_param_name
+        self.s3_resource = boto3.resource('s3')
         self.client = self.__create_client()
 
+    def __get_parameter(self, param_name: str) -> Optional[str]:
+        """Fetch a parameter from SSM Parameter Store.
+
+        Args:
+            param_name (str): Parameter name
+            
+        Returns:
+            Optional[str]: Parameter value or None if retrieval fails
+        """
+        try:
+            if not param_name:
+                logger.error("No parameter name provided")
+                return None
+
+            response = ssm_client.get_parameter(
+                Name=param_name, WithDecryption=True
+            )
+            return response["Parameter"]["Value"]
+        except Exception as e:
+            logger.error(f"Error retrieving parameter {param_name} from SSM: {str(e)}")
+            return None
+
+    def __get_encoded_jwt(self, client_id: str, user_id: str) -> Optional[str]:
+        """Generate encoded JWT using private key from S3 asset.
+
+        Args:
+            client_id (str): OAuth client ID for JWT issuer
+            user_id (str): ServiceNow user ID for JWT subject
+
+        Returns:
+            Optional[str]: Encoded JWT or None if generation fails
+        """
+        try:
+            # Get S3 bucket and key from parameters
+            bucket = self.__get_parameter(self.private_key_asset_bucket_param_name)
+            key = self.__get_parameter(self.private_key_asset_key_param_name)
+            
+            if not bucket or not key:
+                logger.error("Missing S3 bucket or key for private key asset")
+                return None
+            
+            # Read private key using S3 resource
+            s3_object = self.s3_resource.Object(bucket, key)
+            private_key = s3_object.get()['Body'].read().decode('utf-8')
+            
+            if not user_id or not client_id:
+                logger.error("Missing user ID or client ID for JWT")
+                return None
+            
+            # Create JWT payload
+            payload = {
+                "iss": client_id,
+                "sub": user_id,
+                "aud": client_id,
+                "iat": int(time.time()),
+                "exp": int(time.time()) + 3600,
+                "jti": str(uuid.uuid4())
+            }
+            
+            # Encode JWT
+            encoded_jwt = jwt.encode(payload, private_key, algorithm="RS256", headers=JWT_HEADER)
+            return encoded_jwt
+            
+        except Exception as e:
+            logger.error(f"Error generating JWT: {str(e)}")
+            return None
+        
+    def __get_jwt_oauth_access_token(self) -> Optional[str]:
+        """Get OAuth access token using JWT authentication.
+
+        Returns:
+            Optional[str]: OAuth access token or None if retrieval fails
+        """
+        try:
+            if not self.instance_id:
+                logger.error("No ServiceNow instance id provided")
+                return None
+            
+            # Get parameters for JWT OAuth
+            client_secret = self.__get_parameter(self.client_secret_param_name)
+            client_id = self.__get_parameter(self.client_id_param_name)
+            user_id = self.__get_parameter(self.user_id_param_name)
+            
+            # Get encoded JWT
+            encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
+
+            # Prepare request headers, data to get OAuth access token using encoded_jwt
+            token_url = f"https://{self.instance_id}.service-now.com/oauth_token.do"
+            headers = {
+                        'Content-Type': CONTENT_TYPE,
+                        'Authentication': f"Bearer {encoded_jwt}"
+                    }
+            data = {
+                'grant_type': JWT_GRANT_TYPE,
+                'assertion': encoded_jwt,
+                'client_id': client_id,
+                'client_secret': client_secret
+            }
+            response = requests.post(token_url, headers=headers, data=data)
+            return (response.json())['access_token']
+        except Exception as e:
+            logger.error(f"Error getting OAuth access token from JWT: {str(e)}")
+            return None
+        
     def __create_client(self) -> Optional[SnowClient]:
-        """Create a ServiceNow client instance.
+        """Create a ServiceNow client instance with OAuth2 authentication.
 
         Returns:
             Optional[SnowClient]: PySNC ServiceNow client or None if creation fails
         """
         try:
-            # Use provided parameters or fetch from SSM
-            instance = self.instance_id
-            username = self.username
-            password = self.__get_password()
-
-            if not instance:
+            if not self.instance_id:
                 logger.error("No ServiceNow instance id provided")
                 return None
-            elif not username:
-                logger.error("No ServiceNow username provided")
-                return None
+            
+            instance_url = f"https://{self.instance_id}.service-now.com"
 
-            return SnowClient(instance, (username, password))
+            # OAuth2 authentication
+            client_id = self.__get_parameter(self.client_id_param_name)
+            client_secret = self.__get_parameter(self.client_secret_param_name)
+            user_id = self.__get_parameter(self.user_id_param_name)
+            
+            if not all([client_id, client_secret, user_id]):
+                logger.error("Missing OAuth2 credentials")
+                return None
+            
+            # Preparing JWT token
+            encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
+            
+            # Preparing ServiceNowJWTAuth for ServiceNowClient
+            auth = ServiceNowJWTAuth(client_id, client_secret, encoded_jwt)
+            
+            return SnowClient(instance_url, auth)
 
         except Exception as e:
             logger.error(f"Error creating ServiceNow client: {str(e)}")
             return None
 
-    def __get_password(self) -> Optional[str]:
-        """Fetch the ServiceNow password from SSM Parameter Store.
+    def __get_glide_record(self, record_type: str) -> Optional[GlideRecord]:
+        """Prepare a Glide Record using ServiceNowClient for querying.
+
+        Args:
+            record_type (str): Type of ServiceNow record (e.g., 'incident')
 
         Returns:
-            Optional[str]: Password or None if retrieval fails
+            Optional[GlideRecord]: GlideRecord instance or None if retrieval fails
         """
-        try:
-            if not self.password_param_name:
-                logger.error("No ServiceNow password param name provided")
-                return None
-
-            password_param_name = self.password_param_name
-            response = ssm_client.get_parameter(
-                Name=password_param_name, WithDecryption=True
-            )
-            return response["Parameter"]["Value"]
-        except Exception as e:
-            logger.error(f"Error retrieving ServiceNow password from SSM: {str(e)}")
-            return None
-
-    def __get_glide_record(self, record_type: str) -> Optional[GlideRecord]:
         """Prepare a Glide Record using ServiceNowClient for querying.
 
         Args:
@@ -105,6 +292,7 @@ class ServiceNowClient:
 
         Args:
             glide_record (GlideRecord): ServiceNow Glide Record
+            integration_module (str): Integration module type ('itsm' or 'ir')
             fields (Dict[str, Any]): ServiceNow mapped fields
 
         Returns:
@@ -192,7 +380,7 @@ class ServiceNowClient:
             integration_module (str): Integration module type ('itsm' or 'ir')
 
         Returns:
-            Optional[Dict[str, Any]]: Incident record dictionary or None if retrieval fails
+            Optional[GlideRecord]: GlideRecord instance or None if retrieval fails
         """
         try:
             if integration_module == "itsm":
@@ -469,18 +657,19 @@ class ServiceNowClient:
             glide_record.add_query("number", incident_number)
             glide_record.query()
             if glide_record.next():
-                # Use REST API instead of AttachmentAPI to avoid 414 errors
-                password = self.__get_password()
-                auth = b64encode(f"{self.username}:{password}".encode()).decode()
+            # Use REST API instead of AttachmentAPI GlideRecord to avoid 414 errors
+                
+                # Get OAuth access token
+                oauth_access_token = self.__get_jwt_oauth_access_token()
 
                 # Determine content type
                 content_type = (
                     mimetypes.guess_type(attachment_name)[0]
-                    or "application/octet-stream"
+                    or ATTACHMENT_CONTENT_TYPE
                 )
 
                 headers = {
-                    "Authorization": f"Basic {auth}",
+                    "Authorization": f"Bearer {oauth_access_token}",
                     "Content-Type": content_type,
                 }
 

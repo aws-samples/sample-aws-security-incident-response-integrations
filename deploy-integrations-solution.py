@@ -85,9 +85,13 @@ def deploy_servicenow(args):
             "--parameters",
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowInstanceId={args.instance_id}",
             "--parameters",
-            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowUser={args.username}",
+            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowClientId={args.client_id}",
             "--parameters",
-            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowPassword={args.password}",
+            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowClientSecret={args.client_secret}",
+            "--parameters",
+            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowUserId={args.user_id}",
+            "--parameters",
+            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:privateKeyAssetPath={args.private_key_path}",
             "--parameters",
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:integrationModule={args.integration_module}",
         ]
@@ -138,10 +142,16 @@ def main():
         "--instance-id", required=True, help="ServiceNow instance ID"
     )
     servicenow_parser.add_argument(
-        "--username", required=True, help="ServiceNow username"
+        "--client-id", required=True, help="ServiceNow OAuth client ID"
     )
     servicenow_parser.add_argument(
-        "--password", required=True, help="ServiceNow password"
+        "--client-secret", required=True, help="ServiceNow OAuth client secret"
+    )
+    servicenow_parser.add_argument(
+        "--user-id", required=True, help="ServiceNow user ID for JWT authentication"
+    )
+    servicenow_parser.add_argument(
+        "--private-key-path", required=True, help="Local path to private key file (e.g., ./private.key)"
     )
     servicenow_parser.add_argument(
         "--integration-module",
@@ -161,7 +171,7 @@ def main():
                 textwrap.dedent("""
                 Please specify either 'jira' or 'service-now' as the integration type.
                 Example: deploy-integrations-solution jira --email user@example.com --url https://example.atlassian.net --token YOUR_TOKEN --project-key PROJ
-                Example: deploy-integrations-solution service-now --instance-id example --username admin --password YOUR_PASSWORD --integration-module itsm
+                Example: deploy-integrations-solution service-now --instance-id example --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET --user-id YOUR_USER_ID --private-key-path ./private.key --integration-module itsm
             """)
             )
             parser.print_help()

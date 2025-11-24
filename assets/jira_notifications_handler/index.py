@@ -46,28 +46,39 @@ dynamodb = resource("dynamodb")
 
 
 class DateTimeEncoder(json.JSONEncoder):
-    """Custom JSON encoder for datetime objects"""
+    """Custom JSON encoder for datetime objects."""
 
     def default(self, obj):
-        """Convert datetime objects to ISO format strings"""
+        """Convert datetime objects to ISO format strings.
+
+        Args:
+            obj: Object to encode
+
+        Returns:
+            str: ISO formatted datetime string or default encoding
+        """
         if isinstance(obj, (datetime.date, datetime.datetime)):
             return obj.isoformat()
         return super().default(obj)
 
 
 class BaseEvent:
-    """Base class for domain events"""
+    """Base class for domain events."""
 
     event_type = None
     event_source = EVENT_SOURCE
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert the event to a dictionary"""
+        """Convert the event to a dictionary.
+
+        Returns:
+            Dict[str, Any]: Dictionary representation of the event
+        """
         raise NotImplementedError("Subclasses must implement to_dict()")
 
 
 class IssueCreatedEvent(BaseEvent):
-    """Domain event for issue creation"""
+    """Domain event for issue creation."""
 
     event_type = "IssueCreated"
 
@@ -109,7 +120,7 @@ class IssueCreatedEvent(BaseEvent):
 
 
 class IssueUpdatedEvent(BaseEvent):
-    """Domain event for issue update"""
+    """Domain event for issue update."""
 
     event_type = "IssueUpdated"
 
@@ -151,7 +162,7 @@ class IssueUpdatedEvent(BaseEvent):
 
 
 class IssueDeletedEvent(BaseEvent):
-    """Domain event for issue deletion"""
+    """Domain event for issue deletion."""
 
     event_type = "IssueDeleted"
 
@@ -178,7 +189,7 @@ class IssueDeletedEvent(BaseEvent):
 
 
 class EventPublisherService:
-    """Service for publishing events to EventBridge"""
+    """Service for publishing events to EventBridge."""
 
     def __init__(self, event_bus_name: str):
         """Initialize an EventPublisherService.
@@ -228,7 +239,7 @@ class EventPublisherService:
 
 
 class DatabaseService:
-    """Service for database operations"""
+    """Service for database operations."""
 
     def __init__(self):
         """Initialize the database service"""
@@ -334,7 +345,7 @@ class DatabaseService:
 
 
 class JiraService:
-    """Service for Jira operations"""
+    """Service for Jira operations."""
 
     def __init__(self):
         """Initialize the Jira service"""
@@ -445,7 +456,7 @@ class JiraService:
 
 
 class SNSMessageProcessorService:
-    """Class to handle SNS message processing"""
+    """Class to handle SNS message processing."""
 
     def __init__(self):
         """Initialize the SNS message processor"""
@@ -556,7 +567,7 @@ class SNSMessageProcessorService:
 
 
 class ResponseBuilderService:
-    """Class to handle response building"""
+    """Class to handle response building."""
 
     @staticmethod
     def build_success_response(message: str) -> Dict[str, Any]:

@@ -6,6 +6,18 @@ import os
 from base64 import b64encode
 import logging
 from botocore.exceptions import ClientError
+import requests
+from requests.auth import AuthBase
+import time
+import uuid
+import jwt
+
+try:
+    # This import works for lambda function and imports the lambda layer at runtime
+    from service_now_wrapper import ServiceNowJWTAuth
+except ImportError:
+    # This import works for local development and imports locally from the file system
+    from ..wrappers.python.service_now_wrapper import ServiceNowJWTAuth
 
 # Configure logging
 logger = logging.getLogger()
@@ -24,9 +36,17 @@ ssm_client = boto3.client("ssm")
 secrets_client = boto3.client("secretsmanager")
 request_content = "application/json"
 
+# Static variables
+JWT_CONTENT_TYPE = 'application/x-www-form-urlencoded; charset=UTF-8'
+JWT_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:jwt-bearer'
+JWT_HEADER = {
+            'alg': 'RS256',  # Or RS256 if using certificate-based signing
+            'typ': 'JWT'
+            # 'kid': 'key_id_if_applicable' # If you have a specific key ID
+        }
 
 class ParameterService:
-    """Class to handle parameter operations"""
+    """Class to handle parameter operations."""
 
     def __init__(self):
         """Initialize the parameter service."""
@@ -52,7 +72,7 @@ class ParameterService:
 
 
 class SecretsManagerService:
-    """Class to handle Secrets Manager operations"""
+    """Class to handle Secrets Manager operations."""
 
     def __init__(self):
         """Initialize the secrets manager service."""
@@ -80,64 +100,52 @@ class SecretsManagerService:
 
 
 class ServiceNowApiService:
-    """Class to manage ServiceNow API operations"""
+    """Class to manage ServiceNow API operations."""
 
-    def __init__(self, instance_id, username, password_param_name):
+    def __init__(self, instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name):
         """
         Initialize the ServiceNow API service.
 
         Args:
             instance_id (str): ServiceNow instance ID
-            username (str): ServiceNow username
-            password_param_name (str): SSM parameter name containing ServiceNow password
+            client_id_param_name (str): SSM parameter name containing OAuth client ID
+            client_password_param_name (str): SSM parameter name containing OAuth client password
+            user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+            private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
+            private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
         self.instance_id = instance_id
-        self.username = username
-        self.password_param_name = password_param_name
+        self.client_id_param_name = client_id_param_name
+        self.client_password_param_name = client_password_param_name
+        self.user_id_param_name = user_id_param_name
+        self.private_key_asset_bucket_param_name = private_key_asset_bucket_param_name
+        self.private_key_asset_key_param_name = private_key_asset_key_param_name
         self.secrets_manager_service = SecretsManagerService()
 
-    def __get_password(self, password_param_name) -> Optional[str]:
+    def __get_parameter(self, param_name: str) -> Optional[str]:
         """
-        Fetch the ServiceNow password from SSM Parameter Store.
+        Fetch a parameter from SSM Parameter Store.
 
         Args:
-            password_param_name (str): SSM parameter name containing the password
+            param_name (str): SSM parameter name
 
         Returns:
-            Optional[str]: Password or None if retrieval fails
+            Optional[str]: Parameter value or None if retrieval fails
         """
         try:
-            if not password_param_name:
-                logger.error("No ServiceNow password param name provided")
+            if not param_name:
+                logger.error("No parameter name provided")
                 return None
 
             response = ssm_client.get_parameter(
-                Name=password_param_name, WithDecryption=True
+                Name=param_name, WithDecryption=True
             )
             return response["Parameter"]["Value"]
         except Exception as e:
-            logger.error(f"Error retrieving ServiceNow password from SSM: {str(e)}")
+            logger.error(f"Error retrieving parameter {param_name} from SSM: {str(e)}")
             return None
-
-    def __get_request_headers(self):
-        """Get headers for ServiceNow API requests.
-
-        Returns:
-            Optional[Dict[str, str]]: HTTP headers with Basic authentication or None if error
-        """
-        try:
-            password = self.__get_password(self.password_param_name)
-            auth = b64encode(f"{self.username}:{password}".encode()).decode()
-            return {
-                "Authorization": f"Basic {auth}",
-                "Content-Type": request_content,
-                "Accept": request_content,
-            }
-        except Exception as e:
-            logger.error(f"Error getting request headers: {str(e)}")
-            return None
-
-    def __get_request_base_url(self):
+        
+    def __get_request_base_url(self) -> Optional[str]:
         """Get base URL for ServiceNow API requests.
 
         Returns:
@@ -148,15 +156,126 @@ class ServiceNowApiService:
         except Exception as e:
             logger.error(f"Error getting base url: {str(e)}")
             return None
+        
+    def __get_jwt_oauth_token_url(self) -> Optional[str]:
+        """Get JWT OAuth token URL for ServiceNow.
 
-    def __get_json_keys_list(self, json_string):
+        Returns:
+            Optional[str]: OAuth token URL or None if error
+        """
+        try:
+            return f"https://{self.instance_id}.service-now.com/oauth_token.do"
+        except Exception as e:
+            logger.error(f"Error getting token url: {str(e)}")
+            return None
+
+    def __get_encoded_jwt(self, client_id: str, user_id: str) -> Optional[str]:
+        """Generate encoded JWT using private key from S3 asset.
+
+        Args:
+            client_id (str): OAuth client ID for JWT issuer
+            user_id (str): ServiceNow user ID for JWT subject
+
+        Returns:
+            Optional[str]: Encoded JWT or None if generation fails
+        """
+        try:
+            # Get S3 bucket and key from parameters
+            bucket = self.__get_parameter(self.private_key_asset_bucket_param_name)
+            key = self.__get_parameter(self.private_key_asset_key_param_name)
+            
+            if not bucket or not key:
+                logger.error("Missing S3 bucket or key for private key asset")
+                return None
+            
+            # Read private key using S3 resource
+            s3_object = self.s3_resource.Object(bucket, key)
+            private_key = s3_object.get()['Body'].read().decode('utf-8')
+            
+            if not user_id or not client_id:
+                logger.error("Missing user ID or client ID for JWT")
+                return None
+            
+            # Create JWT payload
+            payload = {
+                "iss": client_id,
+                "sub": user_id,
+                "aud": client_id,
+                "iat": int(time.time()),
+                "exp": int(time.time()) + 3600,
+                "jti": str(uuid.uuid4())
+            }
+            
+            # Encode JWT
+            encoded_jwt = jwt.encode(payload, private_key, algorithm="RS256", headers=JWT_HEADER)
+            return encoded_jwt
+            
+        except Exception as e:
+            logger.error(f"Error generating JWT: {str(e)}")
+            return None
+        
+    def __get_jwt_oauth_access_token(self) -> Optional[str]:
+        """Get OAuth access token using JWT authentication.
+
+        Returns:
+            Optional[str]: OAuth access token or None if retrieval fails
+        """
+        try:
+            if not self.instance_id:
+                logger.error("No ServiceNow instance id provided")
+                return None
+            
+            # Get parameters for JWT OAuth
+            client_secret = self.__get_parameter(self.client_secret_param_name)
+            client_id = self.__get_parameter(self.client_id_param_name)
+            user_id = self.__get_parameter(self.user_id_param_name)
+            
+            # Get encoded JWT
+            encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
+
+            # Prepare request headers, data to get OAuth access token using encoded_jwt
+            token_url = self.__get_jwt_oauth_token_url()
+            headers = {
+                        'Content-Type': JWT_CONTENT_TYPE,
+                        'Authentication': f"Bearer {encoded_jwt}"
+                    }
+            data = {
+                'grant_type': JWT_GRANT_TYPE,
+                'assertion': encoded_jwt,
+                'client_id': client_id,
+                'client_secret': client_secret
+            }
+            response = requests.post(token_url, headers=headers, data=data)
+            return (response.json())['access_token']
+        except Exception as e:
+            logger.error(f"Error getting OAuth access token from JWT: {str(e)}")
+            return None
+        
+    def __get_request_headers(self) -> Optional[dict]:
+        """Get headers for ServiceNow API requests.
+
+        Returns:
+            Optional[dict]: HTTP headers with Bearer authentication or None if error
+        """
+        try:
+            oauth_access_token = self.__get_jwt_oauth_access_token()
+            return {
+                "Authorization": f"Bearer {oauth_access_token}",
+                "Content-Type": request_content,
+                "Accept": request_content,
+            }
+        except Exception as e:
+            logger.error(f"Error getting request headers: {str(e)}")
+            return None
+
+    def __get_json_keys_list(self, json_string: str) -> Optional[list]:
         """Get list of keys from a JSON string.
 
         Args:
             json_string (str): JSON string to parse
 
         Returns:
-            Optional[List[str]]: List of keys from JSON object or None if error
+            Optional[list]: List of keys from JSON object or None if error
         """
         try:
             json_object = json.loads(json_string)
@@ -814,11 +933,14 @@ def handler(event, context):
         instance_id = parameter_service.get_parameter(
             os.environ.get("SERVICE_NOW_INSTANCE_ID")
         )
-        username = parameter_service.get_parameter(os.environ.get("SERVICE_NOW_USER"))
-        password_param_name = os.environ.get("SERVICE_NOW_PASSWORD_PARAM")
+        client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
+        client_secret_param_name = os.environ.get("SERVICE_NOW_CLIENT_SECRET_PARAM")
+        user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+        private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
+        private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
         service_now_api_service = ServiceNowApiService(
-            instance_id, username, password_param_name
+            instance_id, client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name
         )
 
         outbound_rest_message_result = (

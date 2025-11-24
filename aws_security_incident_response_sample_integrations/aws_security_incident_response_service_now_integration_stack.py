@@ -15,6 +15,7 @@ from aws_cdk import (
     aws_logs,
     aws_secretsmanager,
     aws_ssm,
+    aws_s3_assets,
     CustomResource,
     custom_resources as cr,
 )
@@ -30,6 +31,8 @@ from .aws_security_incident_response_sample_integrations_common_stack import (
 
 
 class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
+    """AWS CDK Stack for ServiceNow integration with Security Incident Response."""
+    
     def __init__(
         self,
         scope: Construct,
@@ -37,6 +40,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         common_stack: AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
         **kwargs,
     ) -> None:
+        """Initialize the ServiceNow integration stack.
+
+        Args:
+            scope (Construct): The scope in which to define this construct
+            construct_id (str): The scoped construct ID
+            common_stack (AwsSecurityIncidentResponseSampleIntegrationsCommonStack): Common stack instance
+            **kwargs: Additional keyword arguments passed to Stack
+        """
         super().__init__(scope, construct_id, **kwargs)
 
         # Reference common resources
@@ -60,21 +71,37 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             no_echo=True,
         )
 
-        # Store Service Now User parameter
-        service_now_user_param = CfnParameter(
+        # Store Service Now Client ID parameter
+        service_now_client_id_param = CfnParameter(
             self,
-            "serviceNowUser",
+            "serviceNowClientId",
             type="String",
-            description="The user for the ServiceNow API.",
+            description="The OAuth client ID for the ServiceNow API.",
         )
 
-        # Store Service Now User Password parameter
-        service_now_password_param = CfnParameter(
+        # Store Service Now Client Secret parameter
+        service_now_client_secret_param = CfnParameter(
             self,
-            "serviceNowPassword",
+            "serviceNowClientSecret",
             type="String",
-            description="The user password that will be used with the Service Now API.",
+            description="The OAuth client secret that will be used with the Service Now API.",
             no_echo=True,
+        )
+
+        # Store Service Now User ID parameter
+        service_now_user_id_param = CfnParameter(
+            self,
+            "serviceNowUserId",
+            type="String",
+            description="The ServiceNow user ID for JWT authentication.",
+        )
+
+        # Store Private Key Asset Path parameter
+        private_key_asset_path_param = CfnParameter(
+            self,
+            "privateKeyAssetPath",
+            type="String",
+            description="Local path to the private key file (e.g., ./private.key).",
         )
 
         # Integration module parameter
@@ -88,23 +115,57 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
 
         # Create SSM parameters
-        service_now_password_ssm_param = aws_ssm.StringParameter(
+        service_now_client_secret_ssm_param = aws_ssm.StringParameter(
             self,
-            "serviceNowPasswordSSM",
-            parameter_name="/SecurityIncidentResponse/serviceNowPassword",
-            string_value=service_now_password_param.value_as_string,
-            description="Service Now password",
+            "serviceNowClientSecretSSM",
+            parameter_name="/SecurityIncidentResponse/serviceNowClientSecret",
+            string_value=service_now_client_secret_param.value_as_string,
+            description="Service Now OAuth client secret",
         )
-        service_now_password_ssm_param.apply_removal_policy(RemovalPolicy.DESTROY)
+        service_now_client_secret_ssm_param.apply_removal_policy(RemovalPolicy.DESTROY)
 
-        service_now_user_ssm = aws_ssm.StringParameter(
+        service_now_client_id_ssm = aws_ssm.StringParameter(
             self,
-            "serviceNowUserSSM",
-            parameter_name="/SecurityIncidentResponse/serviceNowUser",
-            string_value=service_now_user_param.value_as_string,
-            description="Service Now user",
+            "serviceNowClientIdSSM",
+            parameter_name="/SecurityIncidentResponse/serviceNowClientId",
+            string_value=service_now_client_id_param.value_as_string,
+            description="Service Now OAuth client ID",
         )
-        service_now_user_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
+        service_now_client_id_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
+
+        service_now_user_id_ssm = aws_ssm.StringParameter(
+            self,
+            "serviceNowUserIdSSM",
+            parameter_name="/SecurityIncidentResponse/serviceNowUserId",
+            string_value=service_now_user_id_param.value_as_string,
+            description="Service Now user ID",
+        )
+        service_now_user_id_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
+
+        # Create S3 asset for private key
+        private_key_asset = aws_s3_assets.Asset(
+            self,
+            "PrivateKeyAsset",
+            path=private_key_asset_path_param.value_as_string,
+        )
+
+        private_key_asset_bucket_ssm = aws_ssm.StringParameter(
+            self,
+            "PrivateKeyAssetBucketSSM",
+            parameter_name="/SecurityIncidentResponse/privateKeyAssetBucket",
+            string_value=private_key_asset.s3_bucket_name,
+            description="S3 bucket for private key asset",
+        )
+        private_key_asset_bucket_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
+
+        private_key_asset_key_ssm = aws_ssm.StringParameter(
+            self,
+            "PrivateKeyAssetKeySSM",
+            parameter_name="/SecurityIncidentResponse/privateKeyAssetKey",
+            string_value=private_key_asset.s3_object_key,
+            description="S3 object key for private key asset",
+        )
+        private_key_asset_key_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
 
         service_now_instance_id_ssm = aws_ssm.StringParameter(
             self,
@@ -151,9 +212,12 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             layers=[domain_layer, mappers_layer, wrappers_layer],
             environment={
                 "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
-                "SERVICE_NOW_USER": service_now_user_ssm.parameter_name,
+                "SERVICE_NOW_CLIENT_ID": service_now_client_id_ssm.parameter_name,
+                "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
                 "INCIDENTS_TABLE_NAME": table.table_name,
-                "SERVICE_NOW_PASSWORD_PARAM": service_now_password_ssm_param.parameter_name,
+                "SERVICE_NOW_CLIENT_SECRET_PARAM": service_now_client_secret_ssm_param.parameter_name,
                 "EVENT_SOURCE": SECURITY_IR_EVENT_SOURCE,
                 "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
                 "LOG_LEVEL": log_level_param.value_as_string,
@@ -458,8 +522,11 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             environment={
                 "EVENT_BUS_NAME": event_bus.event_bus_name,
                 "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
-                "SERVICE_NOW_USER": service_now_user_ssm.parameter_name,
-                "SERVICE_NOW_PASSWORD_PARAM": service_now_password_ssm_param.parameter_name,
+                "SERVICE_NOW_CLIENT_ID": service_now_client_id_ssm.parameter_name,
+                "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
+                "SERVICE_NOW_CLIENT_SECRET_PARAM": service_now_client_secret_ssm_param.parameter_name,
                 "INCIDENTS_TABLE_NAME": table.table_name,
                 "EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
                 "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
@@ -679,12 +746,16 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "..",
                 "assets/service_now_resource_setup_handler",
             ),
+            layers=[domain_layer, mappers_layer, wrappers_layer],
             runtime=aws_lambda.Runtime.PYTHON_3_13,
             timeout=Duration.minutes(5),
             environment={
                 "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
-                "SERVICE_NOW_USER": service_now_user_ssm.parameter_name,
-                "SERVICE_NOW_PASSWORD_PARAM": service_now_password_ssm_param.parameter_name,
+                "SERVICE_NOW_CLIENT_ID": service_now_client_id_ssm.parameter_name,
+                "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
+                "SERVICE_NOW_CLIENT_SECRET_PARAM": service_now_client_secret_ssm_param.parameter_name,
                 "SERVICE_NOW_RESOURCE_PREFIX": service_now_api_gateway.rest_api_id,
                 "WEBHOOK_URL": f"{service_now_api_gateway.url.rstrip('/')}/webhook",
                 "API_AUTH_SECRET": api_auth_secret.secret_arn,

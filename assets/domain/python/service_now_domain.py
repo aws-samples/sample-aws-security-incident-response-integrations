@@ -11,13 +11,10 @@ logger = logging.getLogger()
 # TODO: update the models/fields during the mapping implementation of Security Incident Response to Service Now fields
 # TODO: see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210466353172377?focus=true
 class Incident:
-    """
-    Domain model for a Service Now incident
-    """
+    """Domain model for a Service Now incident."""
 
     def __init__(self, incident_id, title, description, status):
-        """
-        Initialize a Incident
+        """Initialize an Incident.
 
         Args:
             incident_id (str): Incident ID
@@ -31,11 +28,10 @@ class Incident:
         self.status = status
 
     def to_dict(self):
-        """
-        Convert the case to a dictionary
+        """Convert the incident to a dictionary.
 
         Returns:
-            dict: Dictionary representation of the case
+            dict: Dictionary representation of the incident
         """
         return {
             "incidentId": self.incident_id,
