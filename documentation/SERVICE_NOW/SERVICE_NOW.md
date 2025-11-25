@@ -57,7 +57,7 @@ See the Prerequisites section below for instructions on how to obtain your Servi
    - `sn_si.manager` (for performing operations on Security Incidents)
    - `sn_si.read` (for performing operations on Security Incidents)
 
-**Note:** With JWT OAuth authentication, you no longer need to manage passwords for the integration user.
+**Note:** With JWT OAuth authentication, you no longer need to manage passwords for the integration user. Creating a non-person entity (NPE) orphaned from a User enables the NPE to not be tied to a person that may leave the organization.
 
 ### Configure Authentication Keys and X.509 certificate for JWT Signing
 

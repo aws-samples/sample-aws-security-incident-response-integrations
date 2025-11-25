@@ -71,9 +71,9 @@ class ServiceNowJWTAuth(AuthBase):
             'client_secret': self.__secret
         }
         r = requests.post(token_url, headers=headers, data=data)
-        assert r.status_code == 200, f"Failed to auth, see syslogs {r.text}"
+        if r.status_code != 200:
+            raise Exception("Failed to perform auth, see System Logs in ServiceNow")
         data = r.json()
-        print(data)
         expires = int(time.time()+data['expires_in'])
         return data['access_token'], expires
 
@@ -87,14 +87,9 @@ class ServiceNowJWTAuth(AuthBase):
             request: Modified request with authorization header
         """
         if not self.__token or time.time() > self.__expires_at:
-            print("Getting access token")
+            logger.info("Getting access token")
             self.__token, self.__expires_at = self._get_access_token(request)
-        print("Token: " + self.__token)
         request.headers['Authorization'] = f"Bearer {self.__token}"
-        print("Logging the request details:")
-        print(request.url)
-        print(request.headers)
-        print(request.body)
         return request
 
 
@@ -102,24 +97,25 @@ class ServiceNowJWTAuth(AuthBase):
 class ServiceNowClient:
     """Class to handle ServiceNow API interactions."""
 
-    def __init__(self, instance_id, client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name):
+    def __init__(self, instance_id, **kwargs):
         """
         Initialize the ServiceNow client with OAuth2 authentication.
 
         Args:
             instance_id (str): ServiceNow instance ID
-            client_id_param_name (str): SSM parameter name containing OAuth client ID
-            client_secret_param_name (str): SSM parameter name containing OAuth client secret
-            user_id_param_name (str): SSM parameter name containing ServiceNow user ID
-            private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
-            private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
+            **kwargs: OAuth configuration parameters including:
+                - client_id_param_name (str): SSM parameter name containing OAuth client ID
+                - client_secret_param_name (str): SSM parameter name containing OAuth client secret
+                - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+                - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
+                - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
         self.instance_id = instance_id
-        self.client_id_param_name = client_id_param_name
-        self.client_secret_param_name = client_secret_param_name
-        self.user_id_param_name = user_id_param_name
-        self.private_key_asset_bucket_param_name = private_key_asset_bucket_param_name
-        self.private_key_asset_key_param_name = private_key_asset_key_param_name
+        self.client_id_param_name = kwargs.get('client_id_param_name')
+        self.client_secret_param_name = kwargs.get('client_secret_param_name')
+        self.user_id_param_name = kwargs.get('user_id_param_name')
+        self.private_key_asset_bucket_param_name = kwargs.get('private_key_asset_bucket_param_name')
+        self.private_key_asset_key_param_name = kwargs.get('private_key_asset_key_param_name')
         self.s3_resource = boto3.resource('s3')
         self.client = self.__create_client()
 
@@ -173,17 +169,17 @@ class ServiceNowClient:
                 return None
             
             # Create JWT payload
-            payload = {
-                "iss": client_id,
-                "sub": user_id,
-                "aud": client_id,
-                "iat": int(time.time()),
-                "exp": int(time.time()) + 3600,
-                "jti": str(uuid.uuid4())
+            payload = {                
+                "iss": client_id,  # Issuer - OAuth client ID
+                "sub": user_id,    # Subject - ServiceNow user ID
+                "aud": client_id,  # Audience - OAuth client ID
+                "iat": int(time.time()),  # Issued at - current timestamp
+                "exp": int(time.time()) + 3600,  # Expiration - 1 hour from now
+                "jti": str(uuid.uuid4())  # JWT ID - unique identifier
             }
             
             # Encode JWT
-            encoded_jwt = jwt.encode(payload, private_key, algorithm="RS256", headers=JWT_HEADER)
+            encoded_jwt = jwt.encode(payload, private_key, algorithm=JWT_HEADER["alg"], headers=JWT_HEADER)
             return encoded_jwt
             
         except Exception as e:
@@ -223,8 +219,11 @@ class ServiceNowClient:
             }
             response = requests.post(token_url, headers=headers, data=data)
             return (response.json())['access_token']
-        except Exception as e:
-            logger.error(f"Error getting OAuth access token from JWT: {str(e)}")
+        except requests.exceptions.RequestException as e:
+            logger.error("HTTP request failed during OAuth token retrieval")
+            return None
+        except (KeyError, ValueError) as e:
+            logger.error("Invalid response format from OAuth endpoint")
             return None
         
     def __create_client(self) -> Optional[SnowClient]:

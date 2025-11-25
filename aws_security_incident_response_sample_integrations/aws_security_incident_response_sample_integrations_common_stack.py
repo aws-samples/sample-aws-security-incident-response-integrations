@@ -257,10 +257,11 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                     "SERVICE_NOW_INSTANCE_ID": service_now_params[
                         "instance_id_param_name"
                     ],
-                    "SERVICE_NOW_USERNAME": service_now_params["username_param_name"],
-                    "SERVICE_NOW_PASSWORD_PARAM_NAME": service_now_params[
-                        "password_param_name"
-                    ],
+                    "SERVICE_NOW_CLIENT_ID": service_now_params.get("client_id_param_name", ""),
+                    "SERVICE_NOW_CLIENT_SECRET_PARAM": service_now_params.get("client_secret_param_name", ""),
+                    "SERVICE_NOW_USER_ID": service_now_params.get("user_id_param_name", ""),
+                    "PRIVATE_KEY_ASSET_BUCKET": service_now_params.get("private_key_asset_bucket_param_name", ""),
+                    "PRIVATE_KEY_ASSET_KEY": service_now_params.get("private_key_asset_key_param_name", ""),
                 }
             )
 
@@ -429,11 +430,20 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 "SERVICE_NOW_INSTANCE_ID", service_now_params["instance_id_param_name"]
             )
             self.security_ir_client.add_environment(
-                "SERVICE_NOW_USERNAME", service_now_params["username_param_name"]
+                "SERVICE_NOW_CLIENT_ID", service_now_params.get("client_id_param_name", "")
             )
             self.security_ir_client.add_environment(
-                "SERVICE_NOW_PASSWORD_PARAM_NAME",
-                service_now_params["password_param_name"],
+                "SERVICE_NOW_CLIENT_SECRET_PARAM",
+                service_now_params.get("client_secret_param_name", ""),
+            )
+            self.security_ir_client.add_environment(
+                "SERVICE_NOW_USER_ID", service_now_params.get("user_id_param_name", "")
+            )
+            self.security_ir_client.add_environment(
+                "PRIVATE_KEY_ASSET_BUCKET", service_now_params.get("private_key_asset_bucket_param_name", "")
+            )
+            self.security_ir_client.add_environment(
+                "PRIVATE_KEY_ASSET_KEY", service_now_params.get("private_key_asset_key_param_name", "")
             )
             self.security_ir_client.add_environment(
                 "INTEGRATION_MODULE",

@@ -187,21 +187,20 @@ class DatabaseService:
 class ServiceNowService:
     """Service for ServiceNow operations."""
 
-    def __init__(self, instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name):
+    def __init__(self, instance_id, **kwargs):
         """
         Initialize the ServiceNow service.
 
         Args:
             instance_id (str): ServiceNow instance ID
-            client_id_param_name (str): SSM parameter name containing OAuth client ID
-            client_password_param_name (str): SSM parameter name containing OAuth client password
-            user_id_param_name (str): SSM parameter name containing ServiceNow user ID
-            private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
-            private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
+            **kwargs: OAuth configuration parameters including:
+                - client_id_param_name (str): SSM parameter name containing OAuth client ID
+                - client_secret_param_name (str): SSM parameter name containing OAuth client secret
+                - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+                - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
+                - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
-        self.service_now_client = ServiceNowClient(
-            instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name
-        )
+        self.service_now_client = ServiceNowClient(instance_id, **kwargs)
 
     def get_incident(
         self, service_now_incident_id: str, integration_module: str = "itsm"
@@ -285,6 +284,7 @@ class ServiceNowService:
             Optional[Any]: Updated ServiceNow incident or None if update fails
         """
         try:
+            service_now_fields_state = service_now_fields["state"]
             # Default status if no mapping exists
             if integration_module == "ir":
                 service_now_incident = self.get_incident(
@@ -296,13 +296,13 @@ class ServiceNowService:
                     (
                         service_now_incident_state
                         in ["Contain", "Eradicate", "Recover", "18", "19", "20"]
-                        and service_now_fields["state"] == "18"
+                        and service_now_fields_state == "18"
                     )
                     # If mapped service_now_fields contains the state as 10/Draft, check if the existing state of the ServiceNow incident is also 10/Draft. If not, it means that map_case_status performed the default mapping to 10/Draft for ServiceNow incident since there was no mapping found for the respective AWS SIR case. In such a case, keep the ServiceNow incident status as-is, instead of mapping to the default status, as that will be incorrect
                     or (
                         service_now_incident_state
                         not in ["Draft", "10"]
-                        and service_now_fields["state"] == "10"
+                        and service_now_fields_state == "10"
                     )
                 ):
                     service_now_fields["state"] = service_now_incident_state
@@ -316,7 +316,7 @@ class ServiceNowService:
                 if (
                     service_now_incident_state
                     not in ["New", "1"]
-                    and service_now_fields["state"] == "1"
+                    and service_now_fields_state == "1"
                 ):
                     service_now_fields["state"] = service_now_incident_state
 
@@ -377,22 +377,16 @@ class ServiceNowService:
 class IncidentService:
     """Class to handle incident operations."""
 
-    def __init__(self, instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name, table_name):
+    def __init__(self, instance_id, table_name, **kwargs):
         """Initialize the incident service.
 
         Args:
             instance_id (str): ServiceNow instance ID
-            client_id_param_name (str): SSM parameter name containing OAuth client ID
-            client_password_param_name (str): SSM parameter name containing OAuth client password
-            user_id_param_name (str): SSM parameter name containing ServiceNow user ID
-            private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
-            private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
             table_name (str): Name of the DynamoDB table
+            **kwargs: OAuth configuration parameters
         """
         self.db_service = DatabaseService(table_name)
-        self.service_now_service = ServiceNowService(
-            instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name
-        )
+        self.service_now_service = ServiceNowService(instance_id, **kwargs)
 
     def extract_case_details(
         self, ir_case: Dict[str, Any]
@@ -847,7 +841,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             table_name = os.environ["INCIDENTS_TABLE_NAME"]
 
             incident_service = IncidentService(
-                instance_id, client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name, table_name
+                instance_id,
+                table_name,
+                client_id_param_name=client_id_param_name,
+                client_secret_param_name=client_secret_param_name,
+                user_id_param_name=user_id_param_name,
+                private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
+                private_key_asset_key_param_name=private_key_asset_key_param_name
             )
             # Process event
             incident_id = incident_service.process_security_incident(

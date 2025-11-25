@@ -102,25 +102,27 @@ class SecretsManagerService:
 class ServiceNowApiService:
     """Class to manage ServiceNow API operations."""
 
-    def __init__(self, instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name):
+    def __init__(self, instance_id, **kwargs):
         """
         Initialize the ServiceNow API service.
 
         Args:
             instance_id (str): ServiceNow instance ID
-            client_id_param_name (str): SSM parameter name containing OAuth client ID
-            client_password_param_name (str): SSM parameter name containing OAuth client password
-            user_id_param_name (str): SSM parameter name containing ServiceNow user ID
-            private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
-            private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
+            **kwargs: OAuth configuration parameters including:
+                - client_id_param_name (str): SSM parameter name containing OAuth client ID
+                - client_secret_param_name (str): SSM parameter name containing OAuth client secret
+                - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+                - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
+                - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
         self.instance_id = instance_id
-        self.client_id_param_name = client_id_param_name
-        self.client_password_param_name = client_password_param_name
-        self.user_id_param_name = user_id_param_name
-        self.private_key_asset_bucket_param_name = private_key_asset_bucket_param_name
-        self.private_key_asset_key_param_name = private_key_asset_key_param_name
+        self.client_id_param_name = kwargs.get('client_id_param_name')
+        self.client_secret_param_name = kwargs.get('client_secret_param_name')
+        self.user_id_param_name = kwargs.get('user_id_param_name')
+        self.private_key_asset_bucket_param_name = kwargs.get('private_key_asset_bucket_param_name')
+        self.private_key_asset_key_param_name = kwargs.get('private_key_asset_key_param_name')
         self.secrets_manager_service = SecretsManagerService()
+        self.s3_resource = boto3.resource('s3')
 
     def __get_parameter(self, param_name: str) -> Optional[str]:
         """
@@ -198,20 +200,29 @@ class ServiceNowApiService:
             
             # Create JWT payload
             payload = {
-                "iss": client_id,
-                "sub": user_id,
-                "aud": client_id,
-                "iat": int(time.time()),
-                "exp": int(time.time()) + 3600,
-                "jti": str(uuid.uuid4())
+                "iss": client_id,  # Issuer - OAuth client ID
+                "sub": user_id,    # Subject - ServiceNow user ID
+                "aud": client_id,  # Audience - OAuth client ID
+                "iat": int(time.time()),  # Issued at - current timestamp
+                "exp": int(time.time()) + 3600,  # Expiration - 1 hour from now
+                "jti": str(uuid.uuid4())  # JWT ID - unique identifier
             }
             
             # Encode JWT
-            encoded_jwt = jwt.encode(payload, private_key, algorithm="RS256", headers=JWT_HEADER)
+            encoded_jwt = jwt.encode(payload, private_key, algorithm=JWT_HEADER["alg"], headers=JWT_HEADER)
             return encoded_jwt
             
-        except Exception as e:
-            logger.error(f"Error generating JWT: {str(e)}")
+        except jwt.ExpiredSignatureError:  
+            logger.error("Token has expired")  
+            return None
+        except jwt.InvalidIssuerError:  
+            logger.error("Invalid issuer")
+            return None
+        except jwt.InvalidAudienceError:  
+            logger.error("Invalid audience")
+            return None
+        except jwt.InvalidTokenError:  
+            logger.error("Invalid token")
             return None
         
     def __get_jwt_oauth_access_token(self) -> Optional[str]:
@@ -247,8 +258,11 @@ class ServiceNowApiService:
             }
             response = requests.post(token_url, headers=headers, data=data)
             return (response.json())['access_token']
-        except Exception as e:
-            logger.error(f"Error getting OAuth access token from JWT: {str(e)}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"HTTP request failed: {str(e)}")
+            return None
+        except (KeyError, ValueError) as e:
+            logger.error(f"Invalid response format: {str(e)}")
             return None
         
     def __get_request_headers(self) -> Optional[dict]:
@@ -940,7 +954,12 @@ def handler(event, context):
         private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
         service_now_api_service = ServiceNowApiService(
-            instance_id, client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name
+            instance_id,
+            client_id_param_name=client_id_param_name,
+            client_secret_param_name=client_secret_param_name,
+            user_id_param_name=user_id_param_name,
+            private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
+            private_key_asset_key_param_name=private_key_asset_key_param_name
         )
 
         outbound_rest_message_result = (

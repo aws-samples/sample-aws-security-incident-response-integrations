@@ -527,11 +527,14 @@ class DatabaseService:
 class ServiceNowService:
     """Service for ServiceNow operations."""
 
-    def __init__(self, instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name):
-        """Initialize the ServiceNow service"""
-        self.service_now_client = ServiceNowClient(
-            instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name
-        )
+    def __init__(self, instance_id, **kwargs):
+        """Initialize the ServiceNow service
+        
+        Args:
+            instance_id (str): ServiceNow instance ID
+            **kwargs: OAuth configuration parameters
+        """
+        self.service_now_client = ServiceNowClient(instance_id, **kwargs)
 
     def _get_incident_details(
         self, service_now_incident_id: str
@@ -575,14 +578,17 @@ class ServiceNowService:
 class ServiceNowMessageProcessorService:
     """Class to handle ServiceNow message processing."""
 
-    def __init__(
-        self, instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name, table_name, event_bus_name
-    ):
-        """Initialize the message processor"""
+    def __init__(self, instance_id, table_name, event_bus_name, **kwargs):
+        """Initialize the message processor
+        
+        Args:
+            instance_id (str): ServiceNow instance ID
+            table_name (str): DynamoDB table name
+            event_bus_name (str): EventBridge event bus name
+            **kwargs: OAuth configuration parameters
+        """
         self.db_service = DatabaseService(table_name)
-        self.service_now_service = ServiceNowService(
-            instance_id, client_id_param_name, client_password_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name
-        )
+        self.service_now_service = ServiceNowService(instance_id, **kwargs)
         self.event_publisher_service = EventPublisherService(event_bus_name)
 
     def _extract_event_body(self, event):
@@ -961,12 +967,12 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
             private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
             logger.info(
-                f"Getting parameters: {instance_id_param}, {client_id_param_name}, {client_password_param_name}, {user_id_param_name}, {private_key_asset_bucket_param_name}, {private_key_asset_key_param_name}"
+                f"Getting parameters: {instance_id_param}, {client_id_param_name}, {client_secret_param_name}, {user_id_param_name}, {private_key_asset_bucket_param_name}, {private_key_asset_key_param_name}"
             )
 
             instance_id = parameter_service._get_parameter(instance_id_param)
 
-            if not instance_id or not client_id_param_name or not client_password_param_name or not user_id_param_name or not private_key_asset_bucket_param_name or not private_key_asset_key_param_name:
+            if not all([instance_id, client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
                 logger.error("Failed to retrieve ServiceNow credentials from SSM")
                 return ResponseBuilderService._build_error_response(
                     "Failed to retrieve ServiceNow credentials"
@@ -979,7 +985,14 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
 
         # Create processor
         processor = ServiceNowMessageProcessorService(
-            instance_id, client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name, table_name, event_bus_name
+            instance_id,
+            table_name,
+            event_bus_name,
+            client_id_param_name=client_id_param_name,
+            client_secret_param_name=client_secret_param_name,
+            user_id_param_name=user_id_param_name,
+            private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
+            private_key_asset_key_param_name=private_key_asset_key_param_name
         )
         processed_count = 0
 
