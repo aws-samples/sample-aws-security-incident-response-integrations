@@ -323,15 +323,18 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
 
         # Add SSM permissions for ServiceNow parameters if provided
         if service_now_params:
+            ssm_resources = [f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params['instance_id_param_name']}"]
+            
+            # Add OAuth parameters if they exist
+            for param_key in ['client_id_param_name', 'client_secret_param_name', 'user_id_param_name', 'private_key_asset_bucket_param_name', 'private_key_asset_key_param_name']:
+                if param_key in service_now_params and service_now_params[param_key]:
+                    ssm_resources.append(f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params[param_key]}")
+            
             self.security_ir_client.add_to_role_policy(
                 aws_iam.PolicyStatement(
                     effect=aws_iam.Effect.ALLOW,
                     actions=["ssm:GetParameter"],
-                    resources=[
-                        f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params['instance_id_param_name']}",
-                        f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params['username_param_name']}",
-                        f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params['password_param_name']}",
-                    ],
+                    resources=ssm_resources,
                 )
             )
 
