@@ -142,19 +142,21 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
         service_now_user_id_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
 
-        # Create S3 asset from parameter value (resolved at synthesis)
-        private_key_asset = aws_s3_assets.Asset(
+        # Create S3 bucket for private key storage
+        from aws_cdk import aws_s3 as s3
+        private_key_bucket = s3.Bucket(
             self,
-            "PrivateKeyAsset",
-            path=private_key_path_param.value_as_string,
+            "ServiceNowPrivateKeyBucket",
+            removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True,
         )
 
-        # Create SSM parameters for S3 asset location
+        # Create SSM parameters for S3 bucket location
         private_key_asset_bucket_ssm = aws_ssm.StringParameter(
             self,
             "PrivateKeyAssetBucketSSM",
             parameter_name="/SecurityIncidentResponse/privateKeyAssetBucket",
-            string_value=private_key_asset.s3_bucket_name,
+            string_value=private_key_bucket.bucket_name,
             description="S3 bucket for private key asset",
         )
         private_key_asset_bucket_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
@@ -163,7 +165,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             self,
             "PrivateKeyAssetKeySSM",
             parameter_name="/SecurityIncidentResponse/privateKeyAssetKey",
-            string_value=private_key_asset.s3_object_key,
+            string_value="private.key",
             description="S3 object key for private key asset",
         )
         private_key_asset_key_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
@@ -261,6 +263,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 resources=["*"],
             )
         )
+
+        # Grant S3 permissions to read private key
+        private_key_bucket.grant_read(service_now_client_role)
 
         # Grant specific DynamoDB permissions instead of full access
         table.grant_read_write_data(service_now_client_role)
@@ -551,6 +556,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
         service_now_notifications_rule.add_target(service_now_notifications_target)
 
+        # Grant S3 permissions to read private key
+        private_key_bucket.grant_read(service_now_notifications_handler_role)
+
         # Grant specific DynamoDB permissions instead of full access
         table.grant_read_write_data(service_now_notifications_handler_role)
 
@@ -722,6 +730,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             )
         )
 
+        # Grant S3 permissions to read private key
+        private_key_bucket.grant_read(service_now_resource_setup_role)
+
         # Add suppression for wildcard resource in SSM and Secrets Manager policies
         NagSuppressions.add_resource_suppressions(
             service_now_resource_setup_role,
@@ -821,4 +832,12 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             "ServiceNowWebhookUrl",
             value=f"{service_now_api_gateway.url.rstrip('/')}/webhook",
             description="ServiceNow Webhook API Gateway URL",
+        )
+
+        # Output S3 bucket for private key
+        CfnOutput(
+            self,
+            "PrivateKeyBucket",
+            value=private_key_bucket.bucket_name,
+            description="S3 bucket where private key should be uploaded as 'private.key'",
         )
