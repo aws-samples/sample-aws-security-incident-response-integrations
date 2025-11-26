@@ -96,6 +96,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="The ServiceNow user ID for JWT authentication.",
         )
 
+        # Private key file path parameter
+        private_key_path_param = CfnParameter(
+            self,
+            "privateKeyPath",
+            type="String",
+            description="Local file path to private key file.",
+        )
+
         # Integration module parameter
         self.integration_module_param = CfnParameter(
             self,
@@ -134,15 +142,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
         service_now_user_id_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
 
-        # Create S3 asset for private key using environment variable or default path
-        import os
-        private_key_path = os.environ.get('PRIVATE_KEY_PATH', './private.key')
+        # Create S3 asset from parameter value (resolved at synthesis)
         private_key_asset = aws_s3_assets.Asset(
             self,
             "PrivateKeyAsset",
-            path=private_key_path,
+            path=private_key_path_param.value_as_string,
         )
 
+        # Create SSM parameters for S3 asset location
         private_key_asset_bucket_ssm = aws_ssm.StringParameter(
             self,
             "PrivateKeyAssetBucketSSM",
