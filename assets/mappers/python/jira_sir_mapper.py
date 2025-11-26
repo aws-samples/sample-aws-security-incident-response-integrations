@@ -49,8 +49,7 @@ CLOSURE_CODE_MAPPING = {
 
 
 def map_case_status(sir_case_status: str) -> Tuple[str, Optional[str]]:
-    """
-    Maps AWS Security Incident Response case status to JIRA workflow status
+    """Map AWS Security Incident Response case status to JIRA workflow status.
 
     Args:
         sir_case_status (str): Status from AWS Security Incident Response case
@@ -73,8 +72,7 @@ def map_case_status(sir_case_status: str) -> Tuple[str, Optional[str]]:
 
 
 def map_fields_to_jira(sir_case: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Maps AWS Security Incident Response case fields to JIRA fields.
+    """Map AWS Security Incident Response case fields to JIRA fields.
 
     Args:
         sir_case (Dict[str, Any]): Dictionary containing AWS Security Incident Response case data
@@ -153,8 +151,7 @@ def map_fields_to_jira(sir_case: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def map_fields_to_sir(jira_issue: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Maps JIRA fields to AWS Security Incident Response case fields.
+    """Map JIRA fields to AWS Security Incident Response case fields.
 
     Args:
         jira_issue (Dict[str, Any]): Dictionary containing JIRA issue data
@@ -186,8 +183,7 @@ def map_fields_to_sir(jira_issue: Dict[str, Any]) -> Dict[str, Any]:
 def map_watchers(
     sir_watchers: List[Any], jira_watchers: List[str]
 ) -> Tuple[List[Any], List[str]]:
-    """
-    Maps watchers between AWS Security Incident Response and JIRA.
+    """Map watchers between AWS Security Incident Response and JIRA.
 
     Args:
         sir_watchers (List[Any]): List of watcher objects from AWS Security Incident Response (can be strings or dicts with email field)
@@ -233,8 +229,7 @@ def map_watchers(
 
 
 def map_closure_code(sir_closure_code: str) -> str:
-    """
-    Maps AWS Security Incident Response closure code to JIRA field value.
+    """Map AWS Security Incident Response closure code to JIRA field value.
 
     Args:
         sir_closure_code (str): Closure code from AWS Security Incident Response
@@ -246,8 +241,7 @@ def map_closure_code(sir_closure_code: str) -> str:
 
 
 def reverse_map_closure_code(jira_closure_code: str) -> Optional[str]:
-    """
-    Maps JIRA closure code back to AWS Security Incident Response closure code.
+    """Map JIRA closure code back to AWS Security Incident Response closure code.
 
     Args:
         jira_closure_code (str): Closure code from JIRA

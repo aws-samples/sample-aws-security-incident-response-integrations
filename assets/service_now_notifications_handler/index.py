@@ -48,7 +48,7 @@ dynamodb = boto3.resource("dynamodb")
 
 
 class DateTimeEncoder(json.JSONEncoder):
-    """Custom JSON encoder for datetime objects"""
+    """Custom JSON encoder for datetime objects."""
 
     def default(self, obj):
         """Convert datetime objects to ISO format strings.
@@ -65,7 +65,7 @@ class DateTimeEncoder(json.JSONEncoder):
 
 
 class BaseEvent:
-    """Base class for domain events"""
+    """Base class for domain events."""
 
     event_type = None
     event_source = EVENT_SOURCE
@@ -80,7 +80,7 @@ class BaseEvent:
 
 
 class IncidentCreatedEvent(BaseEvent):
-    """Domain event for incident creation"""
+    """Domain event for incident creation."""
 
     event_type = "IncidentCreated"
 
@@ -136,7 +136,7 @@ class IncidentCreatedEvent(BaseEvent):
 
 
 class IncidentUpdatedEvent(BaseEvent):
-    """Domain event for incident update"""
+    """Domain event for incident update."""
 
     event_type = "IncidentUpdated"
 
@@ -190,7 +190,7 @@ class IncidentUpdatedEvent(BaseEvent):
 
 
 class IncidentDeletedEvent(BaseEvent):
-    """Domain event for incident deletion"""
+    """Domain event for incident deletion."""
 
     event_type = "IncidentDeleted"
 
@@ -217,7 +217,7 @@ class IncidentDeletedEvent(BaseEvent):
 
 
 class ParameterService:
-    """Class to handle parameter operations"""
+    """Class to handle parameter operations."""
 
     def __init__(self):
         """Initialize the parameter service."""
@@ -266,7 +266,7 @@ class ParameterService:
 
 
 class EventPublisherService:
-    """Service for publishing events to EventBridge"""
+    """Service for publishing events to EventBridge."""
 
     def __init__(self, event_bus_name: str):
         """
@@ -318,7 +318,7 @@ class EventPublisherService:
 
 
 class DatabaseService:
-    """Service for database operations"""
+    """Service for database operations."""
 
     def __init__(self, table_name):
         """Initialize the database service"""
@@ -525,13 +525,16 @@ class DatabaseService:
 
 
 class ServiceNowService:
-    """Service for ServiceNow operations"""
+    """Service for ServiceNow operations."""
 
-    def __init__(self, instance_id, username, password_param_name):
-        """Initialize the ServiceNow service"""
-        self.service_now_client = ServiceNowClient(
-            instance_id, username, password_param_name
-        )
+    def __init__(self, instance_id, **kwargs):
+        """Initialize the ServiceNow service
+        
+        Args:
+            instance_id (str): ServiceNow instance ID
+            **kwargs: OAuth configuration parameters
+        """
+        self.service_now_client = ServiceNowClient(instance_id, **kwargs)
 
     def _get_incident_details(
         self, service_now_incident_id: str
@@ -573,16 +576,19 @@ class ServiceNowService:
 
 
 class ServiceNowMessageProcessorService:
-    """Class to handle ServiceNow message processing"""
+    """Class to handle ServiceNow message processing."""
 
-    def __init__(
-        self, instance_id, username, password_param_name, table_name, event_bus_name
-    ):
-        """Initialize the message processor"""
+    def __init__(self, instance_id, table_name, event_bus_name, **kwargs):
+        """Initialize the message processor
+        
+        Args:
+            instance_id (str): ServiceNow instance ID
+            table_name (str): DynamoDB table name
+            event_bus_name (str): EventBridge event bus name
+            **kwargs: OAuth configuration parameters
+        """
         self.db_service = DatabaseService(table_name)
-        self.service_now_service = ServiceNowService(
-            instance_id, username, password_param_name
-        )
+        self.service_now_service = ServiceNowService(instance_id, **kwargs)
         self.event_publisher_service = EventPublisherService(event_bus_name)
 
     def _extract_event_body(self, event):
@@ -859,7 +865,7 @@ class ServiceNowMessageProcessorService:
 
 
 class ResponseBuilderService:
-    """Class to handle response building"""
+    """Class to handle response building."""
 
     @staticmethod
     def _build_success_response(message: str) -> Dict[str, Any]:
@@ -954,17 +960,19 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         try:
             parameter_service = ParameterService()
             instance_id_param = os.environ.get("SERVICE_NOW_INSTANCE_ID")
-            username_param = os.environ.get("SERVICE_NOW_USER")
-            password_param_name = os.environ.get("SERVICE_NOW_PASSWORD_PARAM")
+            client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
+            client_secret_param_name = os.environ.get("SERVICE_NOW_CLIENT_SECRET_PARAM")
+            user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+            private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
+            private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
             logger.info(
-                f"Getting parameters: {instance_id_param}, {username_param}, {password_param_name}"
+                f"Getting parameters: {instance_id_param}, {client_id_param_name}, {client_secret_param_name}, {user_id_param_name}, {private_key_asset_bucket_param_name}, {private_key_asset_key_param_name}"
             )
 
             instance_id = parameter_service._get_parameter(instance_id_param)
-            username = parameter_service._get_parameter(username_param)
 
-            if not instance_id or not username or not password_param_name:
+            if not all([instance_id, client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
                 logger.error("Failed to retrieve ServiceNow credentials from SSM")
                 return ResponseBuilderService._build_error_response(
                     "Failed to retrieve ServiceNow credentials"
@@ -977,7 +985,14 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
 
         # Create processor
         processor = ServiceNowMessageProcessorService(
-            instance_id, username, password_param_name, table_name, event_bus_name
+            instance_id,
+            table_name,
+            event_bus_name,
+            client_id_param_name=client_id_param_name,
+            client_secret_param_name=client_secret_param_name,
+            user_id_param_name=user_id_param_name,
+            private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
+            private_key_asset_key_param_name=private_key_asset_key_param_name
         )
         processed_count = 0
 

@@ -9,9 +9,7 @@ logger = logging.getLogger()
 
 
 class Case:
-    """
-    Domain model for a security incident case
-    """
+    """Domain model for a security incident case."""
 
     def __init__(
         self,

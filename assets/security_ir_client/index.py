@@ -14,24 +14,6 @@ from botocore.exceptions import ClientError
 from boto3.dynamodb.conditions import Attr
 import requests
 
-# Configure logging
-logger = logging.getLogger()
-
-# Get log level from environment variable
-log_level = os.environ.get("LOG_LEVEL", "error").lower()
-if log_level == "debug":
-    logger.setLevel(logging.DEBUG)
-elif log_level == "info":
-    logger.setLevel(logging.INFO)
-else:
-    # Default to ERROR level
-    logger.setLevel(logging.ERROR)
-
-# Constants
-JIRA_EVENT_SOURCE = os.environ.get("JIRA_EVENT_SOURCE", "jira")
-SERVICE_NOW_EVENT_SOURCE = os.environ.get("SERVICE_NOW_EVENT_SOURCE", "service-now")
-UPDATE_TAG_TO_SKIP = "[AWS Security Incident Response Update]"
-
 try:
     # This import works for lambda function and imports the lambda layer at runtime
     from service_now_wrapper import ServiceNowClient
@@ -52,6 +34,24 @@ except ImportError:
     from ..mappers.python.jira_sir_mapper import (
         map_fields_to_sir,
     )
+    
+# Configure logging
+logger = logging.getLogger()
+
+# Get log level from environment variable
+log_level = os.environ.get("LOG_LEVEL", "error").lower()
+if log_level == "debug":
+    logger.setLevel(logging.DEBUG)
+elif log_level == "info":
+    logger.setLevel(logging.INFO)
+else:
+    # Default to ERROR level
+    logger.setLevel(logging.ERROR)
+
+# Constants
+JIRA_EVENT_SOURCE = os.environ.get("JIRA_EVENT_SOURCE", "jira")
+SERVICE_NOW_EVENT_SOURCE = os.environ.get("SERVICE_NOW_EVENT_SOURCE", "service-now")
+UPDATE_TAG_TO_SKIP = "[AWS Security Incident Response Update]"
 
 # Initialize AWS clients
 security_ir_client = boto3.client("security-ir")
@@ -466,7 +466,7 @@ def process_jira_event(jira_issue: dict, event_source: str) -> None:
 
 
 class ParameterService:
-    """Class to handle parameter operations"""
+    """Class to handle parameter operations."""
 
     def __init__(self):
         """Initialize the parameter service."""
@@ -494,7 +494,7 @@ class ParameterService:
 
 
 class DatabaseService:
-    """Class to handle database operations"""
+    """Class to handle database operations."""
 
     __dynamodb = boto3.resource("dynamodb")
     __table_name = os.environ["INCIDENTS_TABLE_NAME"]
@@ -645,20 +645,17 @@ class DatabaseService:
 
 
 class ServiceNowService:
-    """Class to handle ServiceNow operations for Security IR integration"""
+    """Class to handle ServiceNow operations for Security IR integration."""
 
-    def __init__(self, instance_id, username, password_param_name):
+    def __init__(self, instance_id, **kwargs):
         """Initialize the ServiceNow service.
 
         Args:
             instance_id (str): ServiceNow instance ID
-            username (str): ServiceNow username
-            password_param_name (str): SSM parameter name containing password
+            **kwargs: OAuth configuration parameters
         """
 
-        self.service_now_client = ServiceNowClient(
-            instance_id, username, password_param_name
-        )
+        self.service_now_client = ServiceNowClient(instance_id, **kwargs)
 
     def get_incident_attachment_data(
         self, incident_number: str, attachment_filename: str
@@ -698,7 +695,7 @@ class ServiceNowService:
 
 
 class IncidentService:
-    """Class to handle security IR incident operations"""
+    """Class to handle security IR incident operations."""
 
     __database_service = DatabaseService()
     __security_ir_client = boto3.client("security-ir")
@@ -970,13 +967,19 @@ class IncidentService:
                     os.environ.get("SERVICE_NOW_INSTANCE_ID")
                 )
                 logger.info(f"instance: {instance_id}")
-                username = parameter_service.get_parameter(
-                    os.environ.get("SERVICE_NOW_USERNAME")
-                )
-                password_param_name = os.environ.get("SERVICE_NOW_PASSWORD_PARAM_NAME")
+                client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
+                client_secret_param_name = os.environ.get("SERVICE_NOW_CLIENT_SECRET_PARAM")
+                user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+                private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
+                private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
                 service_now_service = ServiceNowService(
-                    instance_id, username, password_param_name
+                    instance_id,
+                    client_id_param_name=client_id_param_name,
+                    client_secret_param_name=client_secret_param_name,
+                    user_id_param_name=user_id_param_name,
+                    private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
+                    private_key_asset_key_param_name=private_key_asset_key_param_name
                 )
 
                 # Get attachment data from ServiceNow
