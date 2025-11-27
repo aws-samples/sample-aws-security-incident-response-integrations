@@ -1,2 +1,4 @@
 boto3>=1.37.7
 pysnc
+PyJWT==2.8.0
+cryptography==41.0.7

@@ -14,6 +14,8 @@ import argparse
 import subprocess  # nosec B404
 import sys
 import textwrap
+import boto3
+import os
 
 
 def deploy_jira(args):
@@ -69,7 +71,32 @@ def deploy_servicenow(args):
         int: Exit code (0 for success, non-zero for failure)
     """
     try:
-        # print("Service Now integration is under development/maintenance...Please wait for its release")
+        # Upload private key to S3 before deployment
+        if not os.path.exists(args.private_key_path):
+            print(f"\n❌ Error: Private key file not found: {args.private_key_path}")
+            return 1
+            
+        # Create S3 client and upload private key
+        s3_client = boto3.client('s3')
+        account = boto3.client('sts').get_caller_identity()['Account']
+        bucket_name = f"snow-key-{account}"
+        
+        try:
+            s3_client.create_bucket(Bucket=bucket_name)
+            print(f"\n📦 Created S3 bucket: {bucket_name}")
+        except s3_client.exceptions.BucketAlreadyOwnedByYou:
+            print(f"\n📦 Using existing S3 bucket: {bucket_name}")
+        except Exception as e:
+            print(f"\n❌ Error creating S3 bucket: {e}")
+            return 1
+            
+        # Upload private key file
+        try:
+            s3_client.upload_file(args.private_key_path, bucket_name, 'private.key')
+            print(f"\n🔑 Uploaded private key to s3://{bucket_name}/private.key")
+        except Exception as e:
+            print(f"\n❌ Error uploading private key: {e}")
+            return 1
         cmd = [
             "npx",
             "cdk",
@@ -91,7 +118,7 @@ def deploy_servicenow(args):
             "--parameters",
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowUserId={args.user_id}",
             "--parameters",
-            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:privateKeyAssetPath={args.private_key_path}",
+            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:privateKeyBucket={bucket_name}",
             "--parameters",
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:integrationModule={args.integration_module}",
         ]

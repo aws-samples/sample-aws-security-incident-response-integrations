@@ -12,12 +12,7 @@ import time
 import uuid
 import jwt
 
-try:
-    # This import works for lambda function and imports the lambda layer at runtime
-    from service_now_wrapper import ServiceNowJWTAuth
-except ImportError:
-    # This import works for local development and imports locally from the file system
-    from ..wrappers.python.service_now_wrapper import ServiceNowJWTAuth
+# ServiceNowJWTAuth is not used in this file, removing the import
 
 # Configure logging
 logger = logging.getLogger()
