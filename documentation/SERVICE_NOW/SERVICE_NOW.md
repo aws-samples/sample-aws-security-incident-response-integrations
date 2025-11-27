@@ -13,6 +13,19 @@ This document provides an overview of the AWS Security Incident Response Service
   --user-id <your-servicenow-user-id> \
   --private-key-path <path-to-private-key-file> \
   --integration-module <itsm|ir> \
+  --log-level <info|error|debug>
+```
+
+Eg.
+```bash
+# Deploy the integration with JWT OAuth authentication
+./deploy-integrations-solution.py service-now \
+  --instance-id dev1234 \
+  --client-id test-1234 \
+  --client-secret "XXXXXXXXXXXXXXXXXXXX" \
+  --user-id abcd.1234 \
+  --private-key-path private.key \
+  --integration-module ir \
   --log-level info
 ```
 
