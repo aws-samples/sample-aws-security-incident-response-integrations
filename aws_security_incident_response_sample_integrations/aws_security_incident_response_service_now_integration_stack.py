@@ -96,12 +96,12 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="The ServiceNow user ID for JWT authentication.",
         )
 
-        # Private key file path parameter
-        private_key_path_param = CfnParameter(
+        # Private key bucket parameter (from deploy script)
+        private_key_bucket_param = CfnParameter(
             self,
-            "privateKeyPath",
+            "privateKeyBucket",
             type="String",
-            description="Local file path to private key file.",
+            description="S3 bucket name containing the private key file.",
         )
 
         # Integration module parameter
@@ -142,13 +142,12 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
         service_now_user_id_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
 
-        # Create S3 bucket for private key storage
+        # Use existing S3 bucket from deploy script
         from aws_cdk import aws_s3 as s3
-        private_key_bucket = s3.Bucket(
+        private_key_bucket = s3.Bucket.from_bucket_name(
             self,
             "ServiceNowPrivateKeyBucket",
-            removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
+            private_key_bucket_param.value_as_string
         )
 
         # Create SSM parameters for S3 bucket location
@@ -834,10 +833,4 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="ServiceNow Webhook API Gateway URL",
         )
 
-        # Output S3 bucket for private key
-        CfnOutput(
-            self,
-            "PrivateKeyBucket",
-            value=private_key_bucket.bucket_name,
-            description="S3 bucket where private key should be uploaded as 'private.key'",
-        )
+

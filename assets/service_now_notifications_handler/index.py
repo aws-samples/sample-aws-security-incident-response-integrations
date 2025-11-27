@@ -30,7 +30,7 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)  # Set to INFO first
 
 # Get log level from environment variable
-log_level = os.environ.get("LOG_LEVEL", "error").lower()
+log_level = os.environ.get("LOG_LEVEL", "info").lower()
 print(f"LOG_LEVEL environment variable: {log_level}")  # Debug print
 if log_level == "debug":
     logger.setLevel(logging.DEBUG)

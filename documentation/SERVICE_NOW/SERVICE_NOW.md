@@ -13,6 +13,19 @@ This document provides an overview of the AWS Security Incident Response Service
   --user-id <your-servicenow-user-id> \
   --private-key-path <path-to-private-key-file> \
   --integration-module <itsm|ir> \
+  --log-level <info|error|debug>
+```
+
+Eg.
+```bash
+# Deploy the integration with JWT OAuth authentication
+./deploy-integrations-solution.py service-now \
+  --instance-id dev1234 \
+  --client-id test-1234 \
+  --client-secret "XXXXXXXXXXXXXXXXXXXX" \
+  --user-id abcd.1234 \
+  --private-key-path private.key \
+  --integration-module ir \
   --log-level info
 ```
 
@@ -22,6 +35,28 @@ This document provides an overview of the AWS Security Incident Response Service
 - **`ir`**: Incident Response module - Uses ServiceNow Security Incident Response table (`sn_si_incident`)
 
 See the Prerequisites section below for instructions on how to obtain your ServiceNow instance id, username and password, configure aws profile, and install necessary tools required to deploy the integration.
+
+## Authentication Methods
+
+The ServiceNow integration now uses **JWT OAuth authentication** for enhanced security. This method eliminates the need for password management and provides better security through RSA key-based authentication.
+
+### JWT OAuth Authentication (Recommended)
+
+JWT (JSON Web Token) OAuth authentication uses RSA key pairs to generate signed tokens for ServiceNow API access. This method provides:
+
+- **Enhanced Security**: No password storage or transmission
+- **Token-based Access**: Short-lived access tokens (1 hour expiration)
+- **Key-based Signing**: RSA private/public key pair authentication
+- **Automatic Token Refresh**: Tokens are regenerated as needed
+
+#### Benefits of JWT OAuth:
+- Eliminates password management overhead
+- Provides audit trail through OAuth application logs
+- Supports automatic token rotation
+- Follows ServiceNow security best practices
+- Reduces credential exposure risk
+
+**Note:** With JWT OAuth authentication, you no longer need to manage passwords for the integration user. Creating a non-person entity (NPE) orphaned from a User enables the NPE to not be tied to a person that may leave the organization.
 
 ## Prerequisites
 
@@ -46,8 +81,9 @@ See the Prerequisites section below for instructions on how to obtain your Servi
       - Last Name: `Integration`
 4. If you have a user, search with user-id and open the record
 5. Assign the following roles under the `Roles` tab by clicking on `Edit`:
-   - `rest_api_explorer` (or a custom role with permissions to create `Business Rules` and `Outbound REST Message`)
-   - `web_service_admin` (or a custom role with permissions to create `Business Rules` and `Outbound REST Message`)
+   - `rest_api_explorer` (or a custom role with permissions to create `Outbound REST Message`)
+   - `web_service_admin` (or a custom role with permissions to create `Outbound REST Message`)
+   - `business_rule_admin` (for performing operations on `Business Rules`)
    - `incident_manager` (for performing operations on Incidents)
    - `snc_internal`
    - `sn_si.analyst` (for performing operations on Security Incidents)
@@ -57,22 +93,115 @@ See the Prerequisites section below for instructions on how to obtain your Servi
    - `sn_si.manager` (for performing operations on Security Incidents)
    - `sn_si.read` (for performing operations on Security Incidents)
 
-**Note:** With JWT OAuth authentication, you no longer need to manage passwords for the integration user. Creating a non-person entity (NPE) orphaned from a User enables the NPE to not be tied to a person that may leave the organization.
+### Retrieve aws credentials for configuring profile
 
-### Configure Authentication Keys and X.509 certificate for JWT Signing
+1. `AWS Access Key ID`
+2. `AWS Secret Access Key`
+3. `AWS Session Token`
 
-#### Generate X.509 Public Certificate and Private Key using `openssl`
-1. Generate a private key using RSA 2048 algorithm to be used for ServiceNow cdk deployment and OAuth:
-   ```bash
-   openssl genrsa -out private.key 2048
+### Install the necessary tools
+
+#### Using AWS Console (EC2 instance)
+
+1. Navigate to EC2 in AWS Console
+2. Launch a new instance
+   1. Provide any `Name`
+   2. Keep the **default** settings for `Application and OS images`:
+      1. Keep the **default** `Amazon Linux` OS
+      2. Keep the **default**, Free tier eligible AMI - `Amazon Linux 2023 kernel-6.1 AMI`
+         ![EC2-OS](../images/ec2-os.png)
+   3. In `Instance type`:
+      1. Select `t2.xlarge`
+         ![EC2-Instance-type](../images/ec2-instance-type.png)
+   4. In `Key pair`, either select an existing key pair from the drop down or create a new one:
+         ![EC2-key-pair](../images/ec2-key-pair.png)
+   5. Keep everything else as **default**
+   6. Click on `Launch Instance`
+3. Once the instance is up and running, select the instance and click on `Connect`. Then, connect using `EC2 Instance Connect`:
+      ![EC2-instance-connect](../images/ec2-instance-connect.png)
+4. Once connected, simply copy and paste the following set of commands:
    ```
-2. Generate a self-signed x509 certificate:
-   ```bash
-   openssl req -new -x509 -key private.key -out publickey.cer -days 3650
+   sudo yum install git -y
+   sudo yum install docker
+   sudo yum install openssl
+   sudo yum install -y nodejs
+   sudo npm install -g aws-cdk
+   node -v
+   npm -v
+   npx -v
+   sudo yum install python3 python3-pip -y
+   git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git
+   cd sample-aws-security-incident-response-integrations/
+   pip install -r requirements.txt
+   chmod +x deploy-integrations-solution.py
+   sudo systemctl start docker.service
+   sudo chmod 666 /var/run/docker.sock
    ```
-3. Open the `publickey.cer` and copy the contents of the certificate
+5. Generate X.509 Public Certificate and Private Key using `openssl`
+   1. Generate a private key using RSA 2048 algorithm to be used for ServiceNow cdk deployment and OAuth:
+      ```bash
+      openssl genrsa -out private.key 2048
+      ```
+   2. Generate a self-signed x509 certificate:
+      ```bash
+      openssl req -new -x509 -key private.key -out publickey.cer -days 3650
+      ```
+6. Open `publickey.cer` using the command `vi publickey.cer`, and copy the contents of the certificate
+7. Follow the steps in [Upload/Add the X.509 Certificate in ServiceNow](#uploadadd-the-x509-certificate-in-servicenow) section to create a new certificate in ServiceNow using the copied contents from the previous step
+8. Follow the steps in [Configure OAuth Client Application in ServiceNow](#configure-oauth-client-application-in-servicenow) to create a new client application that will be used to perform the JWT OAuth.
+9. In the EC2 instance, configure aws credentials. Provide the `AWS Access Key ID`, `AWS Secret Access Key` and `AWS Session Token` when prompted:
+   ```
+   export AWS_ACCESS_KEY_ID=<AWS Access Key ID>
+   export AWS_SECRET_ACCESS_KEY=<AWS Secret Access Key>
+   export AWS_SESSION_TOKEN=<AWS Session Token>
+   ```
+10. Now, run the `deploy` command from the [Deployment](#deployment) section
 
-#### Upload/Add the X.509 Certificate in ServiceNow
+#### Using local terminal instance
+
+1. Open a new Terminal session
+2. Copy and paste the following set of commands:
+   ```
+   sudo yum install git -y
+   sudo yum install docker
+   sudo yum install openssl
+   sudo yum install -y nodejs
+   sudo npm install -g aws-cdk
+   node -v
+   npm -v
+   npx -v
+   sudo yum install python3 python3-pip -y
+   git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git
+   cd sample-aws-security-incident-response-integrations/
+   pip install -r requirements.txt
+   chmod +x deploy-integrations-solution.py
+   sudo systemctl start docker.service
+   sudo chmod 666 /var/run/docker.sock
+   ```
+3. Generate X.509 Public Certificate and Private Key using `openssl`
+   1. Generate a private key using RSA 2048 algorithm to be used for ServiceNow cdk deployment and OAuth:
+      ```bash
+      openssl genrsa -out private.key 2048
+      ```
+   2. Generate a self-signed x509 certificate:
+      ```bash
+      openssl req -new -x509 -key private.key -out publickey.cer -days 3650
+      ```
+4. Open `publickey.cer` using the command `vi publickey.cer`, and copy the contents of the certificate
+5. Follow the steps in [Upload/Add the X.509 Certificate in ServiceNow](#uploadadd-the-x509-certificate-in-servicenow) section to create a new certificate in ServiceNow using the copied contents from the previous step
+6. Follow the steps in [Configure OAuth Client Application in ServiceNow](#configure-oauth-client-application-in-servicenow) to create a new client application that will be used to perform the JWT OAuth.
+7. In the local instance, configure aws credentials. Provide the `AWS Access Key ID`, `AWS Secret Access Key` and `AWS Session Token` when prompted:
+   ```
+   export AWS_ACCESS_KEY_ID=<AWS Access Key ID>
+   export AWS_SECRET_ACCESS_KEY=<AWS Secret Access Key>
+   export AWS_SESSION_TOKEN=<AWS Session Token>
+   ```
+8. Now, run the `deploy` command from the [Deployment](#deployment) section
+
+## Configure OAuth in ServiceNow
+
+### Upload/Add the X.509 Certificate in ServiceNow
+
 1. Navigate to **System Definition > Certificates**
 2. Click **New** to create a new certificate record
 3. Fill in the required fields:
@@ -83,7 +212,7 @@ See the Prerequisites section below for instructions on how to obtain your Servi
 5. Save the certificate record and note the **Sys ID**
 ![X.509 Certificate](../images/image-13.png)
 
-### Configure OAuth Application in ServiceNow
+### Configure OAuth Client Application in ServiceNow
 
 1. Navigate to **System OAuth > Application Registry**
 2. Click **New** and select **Create an OAuth API endpoint for external clients**
@@ -114,109 +243,10 @@ See the Prerequisites section below for instructions on how to obtain your Servi
    ![](../images/image-17.png)
    ![](../images/image-18.png)
 6. Save the application and note the **Client ID** and **Client Secret**
-   
+
 **Security Note:** Keep the private key secure and never commit it to version control.
 
 **Best Practice:** Create a dedicated service account rather than using a personal account.
-
-## Authentication Methods
-
-The ServiceNow integration now uses **JWT OAuth authentication** for enhanced security. This method eliminates the need for password management and provides better security through RSA key-based authentication.
-
-### JWT OAuth Authentication (Recommended)
-
-JWT (JSON Web Token) OAuth authentication uses RSA key pairs to generate signed tokens for ServiceNow API access. This method provides:
-
-- **Enhanced Security**: No password storage or transmission
-- **Token-based Access**: Short-lived access tokens (1 hour expiration)
-- **Key-based Signing**: RSA private/public key pair authentication
-- **Automatic Token Refresh**: Tokens are regenerated as needed
-
-#### Benefits of JWT OAuth:
-- Eliminates password management overhead
-- Provides audit trail through OAuth application logs
-- Supports automatic token rotation
-- Follows ServiceNow security best practices
-- Reduces credential exposure risk
-
-### Retrieve aws credentials for configuring profile
-
-1. `AWS Access Key ID`
-2. `AWS Secret Access Key`
-3. `AWS Session Token`
-
-### Install the necessary tools
-
-#### Using AWS Console (EC2 instance)
-
-1. Navigate to EC2 in AWS Console
-2. Launch a new instance
-   1. Provide any `Name`
-   2. Keep the **default** settings for `Application and OS images`:
-      1. Keep the **default** `Amazon Linux` OS
-      2. Keep the **default**, Free tier eligible AMI - `Amazon Linux 2023 kernel-6.1 AMI`
-         ![EC2-OS](../images/ec2-os.png)
-   3. In `Instance type`:
-      1. Select `t2.large`
-         ![EC2-Instance-type](../images/ec2-instance-type.png)
-   4. In `Key pair`, either select an existing key pair from the drop down or create a new one:
-         ![EC2-key-pair](../images/ec2-key-pair.png)
-   5. Keep everything else as **default**
-   6. Click on `Launch Instance`
-3. Once the instance is up and running, select the instance and click on `Connect`. Then, connect using `EC2 Instance Connect`:
-      ![EC2-instance-connect](../images/ec2-instance-connect.png)
-4. Once connected, simply copy and paste the following set of commands:
-   ```
-   sudo yum install git -y
-   sudo yum install docker
-   sudo yum install -y nodejs
-   sudo npm install -g aws-cdk
-   node -v
-   npm -v
-   npx -v
-   sudo yum install python3 python3-pip -y
-   git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git
-   cd sample-aws-security-incident-response-integrations/
-   pip install -r requirements.txt
-   chmod +x deploy-integrations-solution.py
-   sudo systemctl start docker.service
-   sudo chmod 666 /var/run/docker.sock
-   ```
-5. Configure aws credentials. Provide the `AWS Access Key ID`, `AWS Secret Access Key` and `AWS Session Token` when prompted:
-   ```
-   export AWS_ACCESS_KEY_ID=<AWS Access Key ID>
-   export AWS_SECRET_ACCESS_KEY=<AWS Secret Access Key>
-   export AWS_SESSION_TOKEN=<AWS Session Token>
-   ```
-6. Now, run the `deploy` command from the [Deployment](#deployment) section
-
-#### Using local terminal instance
-
-1. Open a new Terminal session
-2. Copy and paste the following set of commands:
-   ```
-   sudo yum install git -y
-   sudo yum install docker
-   sudo yum install -y nodejs
-   sudo npm install -g aws-cdk
-   node -v
-   npm -v
-   npx -v
-   sudo yum install python3 python3-pip -y
-   git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git
-   cd sample-aws-security-incident-response-integrations/
-   pip install -r requirements.txt
-   chmod +x deploy-integrations-solution.py
-   sudo systemctl start docker.service
-   sudo chmod 666 /var/run/docker.sock
-   ```
-3. Configure aws credentials. Provide the `AWS Access Key ID`, `AWS Secret Access Key` and `AWS Session Token` when prompted:
-   ```
-   export AWS_ACCESS_KEY_ID=<AWS Access Key ID>
-   export AWS_SECRET_ACCESS_KEY=<AWS Secret Access Key>
-   export AWS_SESSION_TOKEN=<AWS Session Token>
-   ```
-4. Now, run the `deploy` command from the [Deployment](#deployment) section
 
 ### Secure Your Credentials (Optional)
 

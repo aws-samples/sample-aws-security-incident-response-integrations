@@ -11,5 +11,4 @@ types-requests
 moto
 bandit
 semgrep
-syft
 detect-secrets

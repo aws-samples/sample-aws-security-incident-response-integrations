@@ -252,7 +252,7 @@ class ServiceNowClient:
             encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
             
             # Preparing ServiceNowJWTAuth for ServiceNowClient
-            auth = ServiceNowJWTAuth(client_id, client_secret, encoded_jwt)
+            auth = ServiceNowJWTAuth(self.instance_id, client_id, client_secret, encoded_jwt)
             
             return SnowClient(instance_url, auth)
 
