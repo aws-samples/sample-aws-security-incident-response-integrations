@@ -630,7 +630,7 @@ A: Yes, you can deploy the stack multiple times with different parameters to con
 
 ## Related Resources
 
-- [AWS Security Incident Response Documentation](https://docs.aws.amazon.com/security-incident-response/)
+- [AWS Security Incident Response Documentation](https://docs.aws.amazon.com/security-ir/)
 - [ServiceNow API Documentation](https://developer.servicenow.com/dev.do)
 - [ServiceNow Business Rules Documentation](https://docs.servicenow.com/bundle/tokyo-application-development/page/script/business-rules/concept/c_BusinessRules.html)
 - [AWS EventBridge Documentation](https://docs.aws.amazon.com/eventbridge/)
