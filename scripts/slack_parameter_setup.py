@@ -21,13 +21,13 @@ class SlackParameterManager:
     """Manages SSM parameters for Slack integration with validation and rotation."""
 
     # Parameter paths from constants.py
-    SLACK_BOT_TOKEN_PARAMETER = "/SecurityIncidentResponse/slackBotToken"
-    SLACK_SIGNING_SECRET_PARAMETER = "/SecurityIncidentResponse/slackSigningSecret"
-    SLACK_WORKSPACE_ID_PARAMETER = "/SecurityIncidentResponse/slackWorkspaceId"
+    SLACK_BOT_TOKEN_PARAMETER = "/SecurityIncidentResponse/slackBotToken"  # nosec B105
+    SLACK_SIGNING_SECRET_PARAMETER = "/SecurityIncidentResponse/slackSigningSecret"  # nosec B105
+    SLACK_WORKSPACE_ID_PARAMETER = "/SecurityIncidentResponse/slackWorkspaceId"  # nosec B105
 
     # Validation patterns
     BOT_TOKEN_PATTERN = re.compile(r"^xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+$")
-    SIGNING_SECRET_PATTERN = re.compile(r"^[a-f0-9]{64}$")
+    SIGNING_SECRET_PATTERN = re.compile(r"^[a-f0-9]{32}$")
     WORKSPACE_ID_PATTERN = re.compile(r"^[A-Z0-9]{9,11}$")
 
     def __init__(self, region: Optional[str] = None):
@@ -70,7 +70,7 @@ class SlackParameterManager:
             return False, "Signing secret cannot be empty"
 
         if not self.SIGNING_SECRET_PATTERN.match(secret):
-            return False, "Signing secret must be a 64-character hexadecimal string"
+            return False, "Signing secret must be a 32-character hexadecimal string"
 
         return True, ""
 

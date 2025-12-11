@@ -20,7 +20,7 @@ All Slack credentials are stored in SSM Parameter Store with the following chara
 | Parameter Name | Type | Description | Format |
 |---------------|------|-------------|--------|
 | `/SecurityIncidentResponse/slackBotToken` | SecureString | Slack Bot User OAuth Token | `xoxb-XXXXXXXXX-XXXXXXXXX-XXXXXXXXXXXXXXXX` |
-| `/SecurityIncidentResponse/slackSigningSecret` | SecureString | Slack App Signing Secret | 64-character hexadecimal string |
+| `/SecurityIncidentResponse/slackSigningSecret` | SecureString | Slack App Signing Secret | 32-character hexadecimal string |
 | `/SecurityIncidentResponse/slackWorkspaceId` | String | Slack Workspace ID | `T1234567890` (9-11 chars) |
 
 ## Setup Methods
@@ -78,9 +78,9 @@ The CDK stack includes CloudFormation parameter constraints that validate:
    - Example: `xoxb-NUMBERS-NUMBERS-ALPHANUMERIC`
 
 2. **Signing Secret Format**:
-   - Must be exactly 64 hexadecimal characters
-   - Pattern: `[a-f0-9]{64}`
-   - Example: `64-CHARACTER-HEXADECIMAL-STRING`
+   - Must be exactly 32 hexadecimal characters
+   - Pattern: `[a-f0-9]{32}`
+   - Example: `32-CHARACTER-HEXADECIMAL-STRING`
 
 3. **Workspace ID Format**:
    - Must be 9-11 uppercase alphanumeric characters
@@ -273,7 +273,7 @@ python scripts/slack_parameter_setup.py setup \
 
 **Solution**:
 - Verify bot token starts with `xoxb-`
-- Verify signing secret is 64 hexadecimal characters
+- Verify signing secret is 32 hexadecimal characters
 - Verify workspace ID is 9-11 uppercase alphanumeric characters
 
 #### 3. Access Denied

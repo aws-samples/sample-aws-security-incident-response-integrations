@@ -44,7 +44,7 @@ This guide provides step-by-step instructions for deploying the AWS Security Inc
 1. **Slack Workspace**: Admin access to a Slack workspace
 2. **Slack App**: Created and configured (see [Creating a Slack App](#creating-a-slack-app))
 3. **Bot Token**: Slack Bot User OAuth Token (starts with `xoxb-`)
-4. **Signing Secret**: Slack App Signing Secret (64 hex characters)
+4. **Signing Secret**: Slack App Signing Secret (32 hex characters)
 5. **Workspace ID**: Slack Workspace ID (starts with `T`)
 
 ### Development Environment
@@ -146,8 +146,8 @@ Before deployment, validate your Slack credentials:
 # Validate bot token format (should start with xoxb-)
 echo "xoxb-YOUR-BOT-TOKEN" | grep -E '^xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+$'
 
-# Validate signing secret format (should be 64 hex characters)
-echo "YOUR-64-CHARACTER-SIGNING-SECRET" | grep -E '^[a-f0-9]{64}$'
+# Validate signing secret format (should be 32 hex characters)
+echo "YOUR-32-CHARACTER-SIGNING-SECRET" | grep -E '^[a-f0-9]{32}$'
 
 # Validate workspace ID format (should be 9-11 uppercase alphanumeric)
 echo "T1234567890" | grep -E '^[A-Z0-9]{9,11}$'
@@ -450,7 +450,7 @@ aws security-ir create-case \
 
 **Solutions**:
 1. Verify bot token format: `xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+`
-2. Verify signing secret: 64 hexadecimal characters
+2. Verify signing secret: 32 hexadecimal characters
 3. Verify workspace ID: 9-11 uppercase alphanumeric characters
 
 ### Issue: Lambda Deployment Fails

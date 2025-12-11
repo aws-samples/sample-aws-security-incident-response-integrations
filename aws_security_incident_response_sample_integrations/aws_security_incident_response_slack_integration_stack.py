@@ -68,8 +68,8 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
             type="String",
             description="The Slack App Signing Secret for webhook verification.",
             no_echo=True,
-            allowed_pattern=r"^[a-f0-9]{64}$",
-            constraint_description="Signing secret must be a 64-character hexadecimal string",
+            allowed_pattern=r"^[a-f0-9]{32}$",
+            constraint_description="Signing secret must be a 32-character hexadecimal string",
         )
 
         slack_workspace_id_param = CfnParameter(

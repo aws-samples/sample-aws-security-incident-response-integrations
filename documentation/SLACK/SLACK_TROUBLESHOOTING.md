@@ -232,8 +232,8 @@ This output provides the CloudWatch Logs group name for the Slack Command Handle
    # Bot token should start with xoxb-
    echo "xoxb-YOUR-BOT-TOKEN" | grep -E '^xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+$'
    
-   # Signing secret should be 64 hex characters
-   echo "a1b2c3d4..." | grep -E '^[a-f0-9]{64}$'
+   # Signing secret should be 32 hex characters
+   echo "a1b2c3d4..." | grep -E '^[a-f0-9]{32}$'
    
    # Workspace ID should be 9-11 uppercase alphanumeric
    echo "T1234567890" | grep -E '^[A-Z0-9]{9,11}$'
