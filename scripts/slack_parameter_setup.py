@@ -21,9 +21,9 @@ class SlackParameterManager:
     """Manages SSM parameters for Slack integration with validation and rotation."""
 
     # Parameter paths from constants.py
-    SLACK_BOT_TOKEN_PARAMETER = "/SecurityIncidentResponse/slackBotToken"
-    SLACK_SIGNING_SECRET_PARAMETER = "/SecurityIncidentResponse/slackSigningSecret"
-    SLACK_WORKSPACE_ID_PARAMETER = "/SecurityIncidentResponse/slackWorkspaceId"
+    SLACK_BOT_TOKEN_PARAMETER = "/SecurityIncidentResponse/slackBotToken"  # nosec B105
+    SLACK_SIGNING_SECRET_PARAMETER = "/SecurityIncidentResponse/slackSigningSecret"  # nosec B105
+    SLACK_WORKSPACE_ID_PARAMETER = "/SecurityIncidentResponse/slackWorkspaceId"  # nosec B105
 
     # Validation patterns
     BOT_TOKEN_PATTERN = re.compile(r"^xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+$")
