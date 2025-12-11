@@ -27,7 +27,7 @@ class SlackParameterManager:
 
     # Validation patterns
     BOT_TOKEN_PATTERN = re.compile(r"^xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+$")
-    SIGNING_SECRET_PATTERN = re.compile(r"^[a-f0-9]{64}$")
+    SIGNING_SECRET_PATTERN = re.compile(r"^[a-f0-9]{32}$")
     WORKSPACE_ID_PATTERN = re.compile(r"^[A-Z0-9]{9,11}$")
 
     def __init__(self, region: Optional[str] = None):
@@ -70,7 +70,7 @@ class SlackParameterManager:
             return False, "Signing secret cannot be empty"
 
         if not self.SIGNING_SECRET_PATTERN.match(secret):
-            return False, "Signing secret must be a 64-character hexadecimal string"
+            return False, "Signing secret must be a 32-character hexadecimal string"
 
         return True, ""
 

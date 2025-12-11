@@ -107,7 +107,7 @@ The Slack integration stack requires the following parameters during deployment:
 | Parameter | Description | Type | Required | Format | Example |
 |-----------|-------------|------|----------|--------|---------|
 | `slackBotToken` | Slack Bot User OAuth Token | String | Yes | `xoxb-[0-9]+-[0-9]+-[a-zA-Z0-9]+` | `xoxb-NUMBERS-NUMBERS-ALPHANUMERIC` |
-| `slackSigningSecret` | Slack App Signing Secret for webhook verification | String | Yes | 64 hexadecimal characters | `a1b2c3d4e5f6...` |
+| `slackSigningSecret` | Slack App Signing Secret for webhook verification | String | Yes | 32 hexadecimal characters | `a1b2c3d4e5f6...` |
 | `slackWorkspaceId` | Slack Workspace ID | String | Yes | `[A-Z0-9]{9,11}` | `T1234567890` |
 | `logLevel` | Log level for Lambda functions | String | No | `info`, `debug`, or `error` | `error` (default) |
 

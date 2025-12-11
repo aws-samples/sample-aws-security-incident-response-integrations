@@ -77,7 +77,7 @@ python scripts/slack_parameter_setup.py validate \
 
 ### Slack Signing Secret (`/SecurityIncidentResponse/slackSigningSecret`)
 
-- **Format**: 64-character hexadecimal string
+- **Format**: 32-character hexadecimal string
 - **Type**: SecureString (encrypted)
 - **Purpose**: Verify webhook requests from Slack
 - **Location**: Found in Slack App settings under "Basic Information"
@@ -120,7 +120,7 @@ If you see "Parameter already exists" during setup:
 Common validation errors:
 
 - **Bot Token**: Must start with `xoxb-` and follow the correct format
-- **Signing Secret**: Must be exactly 64 hexadecimal characters
+- **Signing Secret**: Must be exactly 32 hexadecimal characters
 - **Workspace ID**: Must be 9-11 uppercase alphanumeric characters
 
 ### Permission Errors
