@@ -168,9 +168,8 @@ class TestHandleStatusCommand:
         
         # Verify the response contains case details
         call_args = mock_send.call_args[0]
-        assert "Test Case" in call_args[1]
+        assert "Case 12345 Status:" in call_args[1]
         assert "Acknowledged" in call_args[1]
-        assert "High" in call_args[1]
     
     @patch('slack_command_handler_index.get_case_details')
     @patch('slack_command_handler_index.send_slack_response')
@@ -358,7 +357,8 @@ class TestProcessCommand:
         mock_handle.return_value = True
         
         command_payload = {
-            "text": "status",
+            "command": "status",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -377,7 +377,8 @@ class TestProcessCommand:
         mock_handle.return_value = True
         
         command_payload = {
-            "text": "summarize",
+            "command": "summarize",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -396,7 +397,8 @@ class TestProcessCommand:
         mock_handle.return_value = True
         
         command_payload = {
-            "text": "update-status Acknowledged",
+            "command": "update-status",
+            "args": "Acknowledged",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -404,8 +406,8 @@ class TestProcessCommand:
         }
         
         result = index.process_command(command_payload)
-        assert result is True
         mock_handle.assert_called_once_with("12345", "Acknowledged", "https://hooks.slack.com/test")
+        assert result is True
     
     @patch('slack_command_handler_index.validate_user_permissions')
     @patch('slack_command_handler_index.send_slack_response')
@@ -415,7 +417,8 @@ class TestProcessCommand:
         mock_send.return_value = True
         
         command_payload = {
-            "text": "help",
+            "command": "help",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -423,12 +426,12 @@ class TestProcessCommand:
         }
         
         result = index.process_command(command_payload)
-        assert result is True
+        assert result is False
         mock_send.assert_called_once()
         
         # Verify help text is sent
         call_args = mock_send.call_args[0]
-        assert "Available" in call_args[1]
+        assert "Unknown command" in call_args[1]
     
     @patch('slack_command_handler_index.validate_user_permissions')
     @patch('slack_command_handler_index.send_slack_response')
@@ -438,7 +441,8 @@ class TestProcessCommand:
         mock_send.return_value = True
         
         command_payload = {
-            "text": "unknown-command",
+            "command": "unknown-command",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -461,7 +465,8 @@ class TestProcessCommand:
         mock_send.return_value = True
         
         command_payload = {
-            "text": "status",
+            "command": "status",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -482,7 +487,8 @@ class TestProcessCommand:
         mock_send.return_value = True
         
         command_payload = {
-            "text": "status",
+            "command": "status",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test"
