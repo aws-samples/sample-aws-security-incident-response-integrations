@@ -25,6 +25,7 @@ eventbridge_client = boto3.client("events")
 dynamodb = boto3.resource("dynamodb")
 ssm_client = boto3.client("ssm")
 lambda_client = boto3.client("lambda")
+security_incident_response_client = boto3.client("security-ir")
 
 # Environment variables
 EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "security-incident-event-bus")
@@ -39,6 +40,26 @@ MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024  # 100MB limit for AWS SIR attachments
 SLACK_MAX_RETRIES = 5
 SLACK_INITIAL_RETRY_DELAY = 1
 SLACK_MAX_RETRY_DELAY = 60
+
+# Command help text
+COMMAND_HELP = """
+*Available /security-ir commands:*
+
+• `/security-ir status` - Get current case status and details
+• `/security-ir summarize` - Get a summary of the case
+• `/security-ir update-status <status>` - Update case status
+• `/security-ir update-description <description>` - Update case description
+• `/security-ir update-title <title>` - Update case title
+• `/security-ir close` - Close the case
+
+*Valid statuses:*
+• Submitted
+• Acknowledged
+• Detection and Analysis
+• Containment, Eradication and Recovery
+• Post-incident Activities
+• Resolved
+"""
 
 # Initialize DynamoDB table
 incidents_table = dynamodb.Table(INCIDENTS_TABLE_NAME) if INCIDENTS_TABLE_NAME else None
@@ -286,7 +307,7 @@ def invoke_command_handler(command_payload: Dict[str, Any]) -> bool:
 
 if app:
     # Message handler for incident channels
-    @app.message(re.compile(rf"{SLACK_CHANNEL_PREFIX}.*"))
+    @app.message()
     def handle_incident_message(message, say, client, logger):
         """Handle messages in incident channels.
         
@@ -308,6 +329,18 @@ if app:
                 return
             
             channel_id = message["channel"]
+            
+            # Check if this is an incident channel by getting channel info
+            try:
+                channel_response = client.conversations_info(channel=channel_id)
+                channel_name = channel_response["channel"]["name"]
+                if not is_incident_channel(channel_name):
+                    logger.debug(f"Ignoring message from non-incident channel: {channel_name}")
+                    return
+            except Exception as e:
+                logger.warning(f"Could not get channel info for {channel_id}: {e}")
+                return
+            
             case_id = get_case_id_from_channel(channel_id)
             
             if not case_id:
@@ -322,7 +355,49 @@ if app:
             except SlackApiError as e:
                 logger.warning(f"Could not get user info: {e}")
             
-            # Publish message sync event to EventBridge
+            # Check if message already processed to prevent duplicates
+            message_ts = message.get("ts", "")
+            if message_ts and incidents_table:
+                try:
+                    # Check if this message timestamp already exists
+                    response = incidents_table.get_item(
+                        Key={"PK": f"Case#{case_id}", "SK": f"SlackMsg#{message_ts}"}
+                    )
+                    if "Item" in response:
+                        logger.info(f"Skipping duplicate Slack message {message_ts} for case {case_id}")
+                        return
+                except Exception as e:
+                    logger.warning(f"Could not check message duplicate: {str(e)}")
+            
+            # Add comment directly to Security IR case
+            try:
+                user_name = user_info.get("real_name") if user_info else message["user"]
+                sir_comment = f"[Slack Update] {user_name}: {message['text']}"
+                
+                security_incident_response_client.create_case_comment(
+                    caseId=case_id,
+                    body=sir_comment
+                )
+                
+                # Track this message to prevent duplicates
+                if message_ts and incidents_table:
+                    try:
+                        incidents_table.put_item(
+                            Item={
+                                "PK": f"Case#{case_id}",
+                                "SK": f"SlackMsg#{message_ts}",
+                                "processed": True,
+                                "ttl": int(time.time()) + 86400  # Expire after 24 hours
+                            }
+                        )
+                    except Exception as e:
+                        logger.warning(f"Could not track message: {str(e)}")
+                
+                logger.info(f"Added Slack message as comment to Security IR case {case_id}")
+            except Exception as e:
+                logger.error(f"Failed to add comment to Security IR case {case_id}: {str(e)}")
+            
+            # Publish message sync event to EventBridge for logging
             event_detail = {
                 "caseId": case_id,
                 "channelId": channel_id,
@@ -641,9 +716,6 @@ if app:
             logger: Logger instance
         """
         try:
-            # Acknowledge the command immediately (required within 3 seconds)
-            ack()
-            
             # Validate that command is in an incident channel
             channel_id = command["channel_id"]
             
@@ -653,66 +725,67 @@ if app:
                 channel_name = channel_response["channel"]["name"]
             except SlackApiError as e:
                 logger.error(f"Could not get channel info: {e}")
-                client.chat_postEphemeral(
-                    channel=channel_id,
-                    user=command["user_id"],
-                    text="❌ Error: Could not verify channel information."
-                )
+                ack("❌ Error: Could not verify channel information.")
                 return
             
             if not is_incident_channel(channel_name):
-                client.chat_postEphemeral(
-                    channel=channel_id,
-                    user=command["user_id"],
-                    text="❌ Error: Security IR commands can only be used in incident channels."
-                )
+                ack("❌ Error: Security IR commands can only be used in incident channels.")
                 return
             
             case_id = get_case_id_from_channel(channel_id)
             if not case_id:
-                client.chat_postEphemeral(
-                    channel=channel_id,
-                    user=command["user_id"],
-                    text="❌ Error: Could not find associated case for this channel."
-                )
+                ack("❌ Error: Could not find associated case for this channel.")
                 return
             
-            # Prepare command payload for the command handler
-            command_payload = {
-                "command": command["command"],
-                "text": command["text"],
-                "user_id": command["user_id"],
-                "user_name": command["user_name"],
-                "channel_id": channel_id,
-                "channel_name": channel_name,
-                "team_id": command["team_id"],
-                "response_url": command["response_url"],
-                "trigger_id": command["trigger_id"],
-                "case_id": case_id
-            }
+            # Parse command
+            command_text = command["text"].strip()
+            parts = command_text.split(" ", 1) if command_text else []
+            subcommand = parts[0].lower() if parts else ""
+            args = parts[1].strip() if len(parts) > 1 else ""
             
-            # Route to dedicated command handler
-            if invoke_command_handler(command_payload):
-                logger.info(f"Routed command '{command['text']}' to handler for case {case_id}")
+            # Handle commands directly for faster response
+            if not subcommand or subcommand == "help":
+                ack(COMMAND_HELP)
+                return
+            
+            elif subcommand == "status":
+                # Acknowledge immediately and process
+                ack("🔍 Retrieving case status...")
+                
+                # Process status command asynchronously
+                command_payload = {
+                    "command": "status",
+                    "case_id": case_id,
+                    "channel_id": channel_id,
+                    "user_id": command["user_id"],
+                    "response_url": command["response_url"]
+                }
+                invoke_command_handler(command_payload)
+                return
+            
+            elif subcommand in ["summarize", "update-status", "update-description", "update-title", "close"]:
+                # Acknowledge immediately and process
+                ack(f"⏳ Processing {subcommand} command...")
+                
+                # Process command asynchronously
+                command_payload = {
+                    "command": subcommand,
+                    "args": args,
+                    "case_id": case_id,
+                    "channel_id": channel_id,
+                    "user_id": command["user_id"],
+                    "response_url": command["response_url"]
+                }
+                invoke_command_handler(command_payload)
+                return
+            
             else:
-                client.chat_postEphemeral(
-                    channel=channel_id,
-                    user=command["user_id"],
-                    text="❌ Error: Could not process command. Please try again later."
-                )
+                ack(f"❌ Error: Unknown command '{subcommand}'.\n\n{COMMAND_HELP}")
+                return
             
         except Exception as e:
             logger.error(f"Error handling slash command: {str(e)}")
-            try:
-                client.chat_postEphemeral(
-                    channel=command["channel_id"],
-                    user=command["user_id"],
-                    text="❌ Error: An unexpected error occurred while processing your command."
-                )
-            except Exception as e:
-                logger.error(f"Failed to send error message to Slack: {str(e)}")
-            except Exception as e:
-                logger.warning(f"Failed to send error message: {str(e)}")  # Avoid cascading errors
+            ack("❌ Error: An unexpected error occurred while processing your command.")
     
     
     # URL verification handler (required for Slack Events API)
@@ -728,11 +801,56 @@ if app:
         return {"challenge": event["challenge"]}
 
 
-# Lambda request handler
-slack_handler = SlackRequestHandler(app=app) if app else None
+# Lambda request handler - only initialize if not handling URL verification
+slack_handler = None
+
+def get_slack_handler():
+    global slack_handler
+    if slack_handler is None and app:
+        slack_handler = SlackRequestHandler(app=app)
+    return slack_handler
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def verify_slack_signature(signing_secret: str, timestamp: str, body: str, signature: str) -> bool:
+    """Verify Slack request signature.
+    
+    Args:
+        signing_secret: Slack app signing secret
+        timestamp: Request timestamp
+        body: Raw request body
+        signature: Signature from header
+        
+    Returns:
+        True if signature is valid, False otherwise
+    """
+    import hmac
+    import hashlib
+    import time
+    
+    # Prevent replay attacks - reject requests older than 5 minutes
+    current_timestamp = int(time.time())
+    request_timestamp = int(timestamp)
+    
+    if abs(current_timestamp - request_timestamp) > 300:
+        logger.warning(f"Request timestamp too old: {request_timestamp} vs {current_timestamp}")
+        return False
+    
+    # Compute expected signature
+    sig_basestring = f"v0:{timestamp}:{body}"
+    expected_signature = (
+        "v0="
+        + hmac.new(
+            signing_secret.encode(),
+            sig_basestring.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+    )
+    
+    # Compare signatures using constant-time comparison
+    return hmac.compare_digest(expected_signature, signature)
+
+
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Lambda handler for processing Slack events using Bolt framework.
     
@@ -744,7 +862,28 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         Dict containing status and response information
     """
     try:
-        if not slack_handler:
+        logger.info(f"Received event: {json.dumps(event, default=str)[:500]}...")
+        
+        # Handle URL verification challenge directly (required for Slack Events API setup)
+        body_str = event.get("body", "")
+        if body_str:
+            try:
+                body = json.loads(body_str)
+                if body.get("type") == "url_verification" and "challenge" in body:
+                    challenge = body["challenge"]
+                    logger.info(f"Handling URL verification challenge: {challenge}")
+                    return {
+                        "statusCode": 200,
+                        "headers": {"Content-Type": "text/plain"},
+                        "body": challenge
+                    }
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error: {e}")
+                pass  # Continue with normal processing
+        
+        # Get or initialize Slack handler
+        handler = get_slack_handler()
+        if not handler:
             logger.error("Slack handler not initialized - check credentials")
             return {
                 "statusCode": 500,
@@ -754,7 +893,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info("Processing Slack event with Bolt framework")
         
         # Use Slack Bolt framework to handle the request
-        return slack_handler.handle(event, context)
+        return handler.handle(event, context)
         
     except Exception as e:
         logger.error(f"Error processing Slack event: {str(e)}")
