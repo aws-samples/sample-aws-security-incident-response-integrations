@@ -493,12 +493,12 @@ class TestProcessCommand:
         assert result is False
 
 
-class TestLambdaHandler:
-    """Test cases for lambda_handler function"""
+class TestHandler:
+    """Test cases for handler function"""
     
     @patch('slack_command_handler_index.process_command')
-    def test_lambda_handler_success(self, mock_process):
-        """Test successful lambda handler execution"""
+    def test_handler_success(self, mock_process):
+        """Test successful handler execution"""
         mock_process.return_value = True
         
         event = {
@@ -509,13 +509,13 @@ class TestLambdaHandler:
             "case_id": "12345"
         }
         
-        result = index.lambda_handler(event, None)
+        result = index.handler(event, None)
         assert result["statusCode"] == 200
         assert json.loads(result["body"])["success"] is True
     
     @patch('slack_command_handler_index.process_command')
-    def test_lambda_handler_failure(self, mock_process):
-        """Test lambda handler with command processing failure"""
+    def test_handler_failure(self, mock_process):
+        """Test handler with command processing failure"""
         mock_process.return_value = False
         
         event = {
@@ -526,13 +526,13 @@ class TestLambdaHandler:
             "case_id": "12345"
         }
         
-        result = index.lambda_handler(event, None)
+        result = index.handler(event, None)
         assert result["statusCode"] == 500
         assert json.loads(result["body"])["success"] is False
     
     @patch('slack_command_handler_index.process_command')
-    def test_lambda_handler_exception(self, mock_process):
-        """Test lambda handler with exception"""
+    def test_handler_exception(self, mock_process):
+        """Test handler with exception"""
         mock_process.side_effect = Exception("Test error")
         
         event = {
@@ -543,6 +543,6 @@ class TestLambdaHandler:
             "case_id": "12345"
         }
         
-        result = index.lambda_handler(event, None)
+        result = index.handler(event, None)
         assert result["statusCode"] == 500
         assert "error" in json.loads(result["body"])
