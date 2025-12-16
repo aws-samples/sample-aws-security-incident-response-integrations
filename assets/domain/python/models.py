@@ -2,7 +2,6 @@
 Domain models for security incident response.
 """
 
-import datetime
 import logging
 
 # Configure logging
@@ -10,9 +9,7 @@ logger = logging.getLogger()
 
 
 class Case:
-    """
-    Domain model for a security incident case
-    """
+    """Domain model for a security incident case."""
 
     def __init__(
         self,

@@ -1,3 +1,17 @@
+"""Security IR Poller Lambda function for AWS Security Incident Response integration.
+
+This module polls AWS Security Incident Response for case updates and publishes
+events to EventBridge. It implements adaptive polling based on the number of
+active incidents and stores case data in DynamoDB for tracking changes.
+
+Key Features:
+- Polls Security IR API for case updates
+- Publishes CaseCreated/CaseUpdated events to EventBridge
+- Adaptive polling frequency based on active incident count
+- Stores case data in DynamoDB for change detection
+- Handles pagination for large case lists
+"""
+
 import datetime
 import json
 import boto3
@@ -7,29 +21,17 @@ import traceback
 
 # Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
 
-# # Configure logging
-# logger = logging.getLogger()
+# Get log level from environment variable
+log_level = os.environ.get("LOG_LEVEL", "error").lower()
+if log_level == "debug":
+    logger.setLevel(logging.DEBUG)
+elif log_level == "info":
+    logger.setLevel(logging.INFO)
+else:
+    # Default to ERROR level
+    logger.setLevel(logging.ERROR)
 
-# # Get log level from environment variable
-# log_level = os.environ.get("LOG_LEVEL", "error").lower()
-# if log_level == "debug":
-#     logger.setLevel(logging.DEBUG)
-# elif log_level == "info":
-#     logger.setLevel(logging.INFO)
-# else:
-#     # Default to ERROR level
-#     logger.setLevel(logging.ERROR)
-
-# Add a stream handler if not already added
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 # Import types
 from typing import List, Dict, Optional, Any
@@ -39,7 +41,7 @@ try:
     from models import Case, create_case_from_api_response
 except ImportError:
     # This import works for local development and imports locally from the file system
-    from ..domain.python.models import Case, create_case_from_api_response
+    from ..domain.python.models import create_case_from_api_response
 
 # Constants
 DEFAULT_MAX_RESULTS = 25
@@ -59,9 +61,7 @@ lambda_client = boto3.client("lambda")
 
 # Domain events
 class CaseCreatedEvent:
-    """
-    Domain event for case creation
-    """
+    """Domain event for case creation."""
 
     event_type = "CaseCreated"
     event_source = EVENT_SOURCE
@@ -107,9 +107,7 @@ class CaseCreatedEvent:
 
 
 class CaseUpdatedEvent:
-    """
-    Domain event for case update
-    """
+    """Domain event for case update."""
 
     event_type = "CaseUpdated"
     event_source = EVENT_SOURCE
@@ -157,9 +155,7 @@ class CaseUpdatedEvent:
 
 
 class CaseDeletedEvent:
-    """
-    Domain event for case deletion
-    """
+    """Domain event for case deletion."""
 
     event_type = "CaseDeleted"
     event_source = EVENT_SOURCE
@@ -186,9 +182,7 @@ class CaseDeletedEvent:
 
 
 class EventPublisher:
-    """
-    Service for publishing events to EventBridge
-    """
+    """Service for publishing events to EventBridge."""
 
     def __init__(self, event_bus_name):
         """Initialize an EventPublisher.
@@ -234,21 +228,21 @@ class EventPublisher:
             logger.error(traceback.format_exc())
             raise
 
-    def _convert_event_to_dict(self, event):
+    def _convert_event_to_dict(self, event) -> dict:
         """Convert an event object to a dictionary.
 
         Args:
             event: The event to convert
 
         Returns:
-            Dict[str, Any]: Dictionary representation of the event
+            dict: Dictionary representation of the event
         """
         return event.to_dict()
 
 
 # Utility functions
 class DateTimeEncoder(json.JSONEncoder):
-    """Custom JSON encoder for datetime objects"""
+    """Custom JSON encoder for datetime objects."""
 
     def default(self, obj):
         """Convert datetime objects to ISO format strings.
@@ -282,12 +276,11 @@ def json_datetime_encoder(obj: Any) -> str:
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
-def get_incidents_from_security_ir() -> Optional[List[Dict]]:
-    """
-    Fetch all incidents from Security Incident Response with pagination support.
+def get_incidents_from_security_ir() -> Optional[List[Dict[str, Any]]]:
+    """Fetch all incidents from Security Incident Response with pagination support.
 
     Returns:
-        Optional[List[Dict]]: List of incidents or None if error occurs
+        Optional[List[Dict[str, Any]]]: List of incidents or None if error occurs
     """
     pagination_token = None
     incidents = []
@@ -313,12 +306,12 @@ def get_incidents_from_security_ir() -> Optional[List[Dict]]:
         return None
 
 
-def get_number_of_active_incidents(incidents: List[Dict]) -> Optional[int]:
+def get_number_of_active_incidents(incidents: List[Dict[str, Any]]) -> Optional[int]:
     """
     Count number of active (non-closed) incidents.
 
     Args:
-        incidents (List[Dict]): List of incidents to check
+        incidents (List[Dict[str, Any]]): List of incidents to check
 
     Returns:
         Optional[int]: Count of active incidents or None if error occurs
@@ -333,7 +326,7 @@ def get_number_of_active_incidents(incidents: List[Dict]) -> Optional[int]:
         return None
 
 
-def update_polling_schedule_rate(rule_name: str, schedule_rate: str) -> Dict:
+def update_polling_schedule_rate(rule_name: str, schedule_rate: str) -> Dict[str, Any]:
     """
     Update EventBridge rule schedule rate.
 
@@ -342,7 +335,7 @@ def update_polling_schedule_rate(rule_name: str, schedule_rate: str) -> Dict:
         schedule_rate (str): New schedule rate expression
 
     Returns:
-        Dict: Response from EventBridge put_rule API
+        Dict[str, Any]: Response from EventBridge put_rule API
     """
     try:
         return events_client.put_rule(
@@ -354,7 +347,7 @@ def update_polling_schedule_rate(rule_name: str, schedule_rate: str) -> Dict:
         raise
 
 
-def get_incident_details(case_id: str) -> Dict:
+def get_incident_details(case_id: str) -> Dict[str, Any]:
     """
     Get detailed information for a specific incident.
 
@@ -362,7 +355,7 @@ def get_incident_details(case_id: str) -> Dict:
         case_id (str): ID of the case to retrieve
 
     Returns:
-        Dict: Dictionary containing case details and comments
+        Dict[str, Any]: Dictionary containing case details and comments
     """
     incident_request_kwargs = {"caseId": case_id}
     case_details = security_ir_client.get_case(**incident_request_kwargs)
@@ -371,15 +364,15 @@ def get_incident_details(case_id: str) -> Dict:
     return {**case_details, "caseComments": case_comments.get("items", [])}
 
 
-def remove_keys(data, keys_to_exclude):
+def remove_keys(data: Any, keys_to_exclude: List[str]) -> Any:
     """Remove specified keys from nested data structures.
 
     Args:
-        data: Data structure to process (dict, list, or other)
-        keys_to_exclude: Keys to exclude from dictionaries
+        data (Any): Data structure to process (dict, list, or other)
+        keys_to_exclude (List[str]): Keys to exclude from dictionaries
 
     Returns:
-        Processed data structure with specified keys removed
+        Any: Processed data structure with specified keys removed
     """
     if isinstance(data, dict):
         return {
@@ -426,13 +419,13 @@ def is_slack_originated_update(case_id: str, table_name: str) -> bool:
 
 
 def store_incidents_in_dynamodb(
-    incidents: List[Dict], table_name: str, event_bus_name="default"
+    incidents: List[Dict[str, Any]], table_name: str, event_bus_name: str = "default"
 ) -> bool:
     """
     Store or update incidents in DynamoDB.
 
     Args:
-        incidents (List[Dict]): List of incidents to store
+        incidents (List[Dict[str, Any]]): List of incidents to store
         table_name (str): Name of the DynamoDB table
         event_bus_name (str): Name of the EventBridge event bus
 
@@ -548,7 +541,7 @@ def store_incidents_in_dynamodb(
         return False
 
 
-def handler(event: Dict, context: Any) -> Dict:
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Lambda handler to process security incidents.
 
@@ -556,11 +549,11 @@ def handler(event: Dict, context: Any) -> Dict:
     Adjusts polling frequency based on number of active incidents.
 
     Args:
-        event (Dict): Lambda event object containing EventBridge rule information
+        event (Dict[str, Any]): Lambda event object containing EventBridge rule information
         context (Any): Lambda context object
 
     Returns:
-        Dict: Dictionary containing response status and details
+        Dict[str, Any]: Dictionary containing response status and details
     """
     # Get configuration
     table_name = os.environ.get("INCIDENTS_TABLE_NAME")

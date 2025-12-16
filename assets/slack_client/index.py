@@ -271,7 +271,7 @@ class SlackService:
         if not slack_bot_token_param:
             raise ValueError("SLACK_BOT_TOKEN environment variable is required")
         
-        logger.info(f"Using Slack bot token parameter: {slack_bot_token_param}")
+        logger.info("Initializing Slack service with bot token parameter")
         
         self.slack_client = SlackBoltClient()
         self.db_service = DatabaseService()

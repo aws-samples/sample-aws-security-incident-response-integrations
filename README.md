@@ -17,74 +17,16 @@ If you are looking to integrate AWS Security Incident Response with JIRA, Servic
   - ServiceNow instance with admin access
 - **For Slack integration**
   - Slack workspace with admin access
-
-### Installation
-
-**Note: Please skip this section if you are using `CloudShell` as your development workspace**
-
-Install the following applications in your local development workstations or EC2 instances (if not installed already):
-
-- **AWS CDK v2.x**: Follow the installation steps in the [CDK documentation](https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html).
-- **Python v3.x**: Download and follow the instructions in the [Python documentation](https://www.python.org/downloads/).
-- **AWS CLI**: Configured with appropriate permissions. To install, follow the setup instructions in the [AWS CLI documentation](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
-- **NVM**: Use the install and update script command `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash` followed by `source ~/.bashrc`. For more details, see the Node Version Manager's README in [NVM's GitHub repo](https://github.com/nvm-sh/nvm?tab=readme-ov-file#installing-and-updating).
-- **Node**: Run `nvm install --lts` and `nvm use --lts` to install and use the latest Long Term Support (LTS) version of Node.js.
-- **PIP**: Should already be included with Python installation (for versions Python 3.4 and above). For more details, see [pip documentation](https://pip.pypa.io/en/stable/installation/)
-- **Docker**: For a complete guide on how to install/setup Docker engine on different OSs, see [Docker Engine documentation](https://docs.docker.com/engine/install/).
-  
-### Setup Solution Repository
-
-1. Clone the repository: `git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git`
-   1. If you had already cloned the repository before, make sure to pull the latest changes: `git pull`
-2. Install solution dependencies
-
-   ```
-   pip install -r requirements.txt
-   ```
-
-3. (Optional - for development purposes) Install development dependencies:
-
-   ```
-   pip install -r requirements-dev.txt
-   ```
+- **Tooling**: AWS CDK, Python, AWS CLI, NVM, Node, PIP, Docker (one step installation instructions are available in the target specific documentations)
 
 ### Deployment
 
-For deployment of an integration pattern, install and use the `deploy-integrations-solution` supplementary python app
-in the command-line using the following steps:
-
-1. Make the `deploy-integrations-solution.py` script executable by using the following command:
-   ```
-   sudo chmod a+x ./deploy-integrations-solution.py
-   ```
-
-2. Verify if the `./deploy-integrations-solution.py` command works in the command-line by running:
-
-   ```
-   ./deploy-integrations-solution.py --help
-   ```
-
-   You should see the following output:
-
-   ```
-   usage: deploy-integrations-solution [-h] [--log-level {info,debug,error}] {jira,service-now,slack} ...
-
-   Deploy AWS Security Incident Response Sample Integrations
-
-   positional arguments:
-   {jira,service-now,slack}    Integration type
-      jira                Deploy Jira integration
-      service-now         Deploy ServiceNow integration
-      slack               Deploy Slack integration
-
-   options:
-   -h, --help            show this help message and exit
-
 #### Integration Target Specific Instructions
 
-**See [JIRA documentation](documentation/JIRA/JIRA.md) for detailed instructions on how to deploy JIRA integration.**
+**See [JIRA documentation](documentation/JIRA/JIRA.md) for instructions on how to deploy JIRA integration.**
 
 **See [ServiceNow documentation](documentation/SERVICE_NOW/SERVICE_NOW.md) for detailed instructions on how to deploy ServiceNow integration.**
+**Note:** ServiceNow integration now supports both ITSM (IT Service Management) and IR (Incident Response) modules. Specify the appropriate module during deployment using the `--integration-module` parameter.
 
 **See [Slack documentation](documentation/SLACK/SLACK.md) for detailed instructions on how to deploy Slack integration.**
 
@@ -114,6 +56,7 @@ This repository contains:
   - [Detailed Jira integration documentation](documentation/JIRA/JIRA.md)
 - **Full-featured ServiceNow Integration**:
   - Create, update, and delete incidents in ServiceNow based on AWS Security Incident Response cases
+  - Support for both ITSM (IT Service Management) and IR (Incident Response) modules
   - Automatic setup of ServiceNow components (Business Rules, REST Messages)
   - [Detailed ServiceNow integration documentation](documentation/SERVICE_NOW/SERVICE_NOW.md)
 - **Real-time Slack Integration**:

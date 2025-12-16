@@ -78,6 +78,85 @@ See the section below for instructions on how to obtain your Jira email, URL, an
 2. Note the project key (e.g., "SEC" or "SECURITY")
 3. Ensure you have appropriate permissions in this project
 
+### Retrieve aws credentials for configuring profile
+
+1. `AWS Access Key ID`
+2. `AWS Secret Access Key`
+3. `AWS Session Token`
+
+### Install the necessary tools
+
+#### Using AWS Console (EC2 instance)
+
+1. Navigate to EC2 in AWS Console
+2. Launch a new instance
+   1. Provide any `Name`
+   2. Keep the **default** settings for `Application and OS images`:
+      1. Keep the **default** `Amazon Linux` OS
+      2. Keep the **default**, Free tier eligible AMI - `Amazon Linux 2023 kernel-6.1 AMI`
+         ![EC2-OS](../images/ec2-os.png)
+   3. In `Instance type`:
+      1. Select `t2.large`
+         ![EC2-Instance-type](../images/ec2-instance-type.png)
+   4. In `Key pair`, either select an existing key pair from the drop down or create a new one:
+         ![EC2-key-pair](../images/ec2-key-pair.png)
+   5. Keep everything else as **default**
+   6. Click on `Launch Instance`
+3. Once the instance is up and running, select the instance and click on `Connect`. Then, connect using `EC2 Instance Connect`:
+      ![EC2-instance-connect](../images/ec2-instance-connect.png)
+4. Once connected, simply copy and paste the following set of commands:
+   ```
+   sudo yum install git -y
+   sudo yum install docker
+   sudo yum install -y nodejs
+   sudo npm install -g aws-cdk
+   node -v
+   npm -v
+   npx -v
+   sudo yum install python3 python3-pip -y
+   git clone https://github.com/sample-aws-security-incident-response-integrations.git
+   cd sample-aws-security-incident-response-integrations/
+   pip install -r requirements.txt
+   chmod +x deploy-integrations-solution.py
+   sudo systemctl start docker.service
+   sudo chmod 666 /var/run/docker.sock
+   ```
+5. Configure aws credentials. Provide the `AWS Access Key ID`, `AWS Secret Access Key` and `AWS Session Token` when prompted:
+   ```
+   export AWS_ACCESS_KEY_ID=<AWS Access Key ID>
+   export AWS_SECRET_ACCESS_KEY=<AWS Secret Access Key>
+   export AWS_SESSION_TOKEN=<AWS Session Token>
+   ```
+6. Now, run the `deploy` command from the [Deployment](#deployment) section
+
+#### Using local terminal instance
+
+1. Open a new Terminal session
+2. Copy and paste the following set of commands:
+   ```
+   sudo yum install git -y
+   sudo yum install docker
+   sudo yum install -y nodejs
+   sudo npm install -g aws-cdk
+   node -v
+   npm -v
+   npx -v
+   sudo yum install python3 python3-pip -y
+   git clone https://github.com/sample-aws-security-incident-response-integrations.git
+   cd sample-aws-security-incident-response-integrations/
+   pip install -r requirements.txt
+   chmod +x deploy-integrations-solution.py
+   sudo systemctl start docker.service
+   sudo chmod 666 /var/run/docker.sock
+   ```
+3. Configure aws credentials. Provide the `AWS Access Key ID`, `AWS Secret Access Key` and `AWS Session Token` when prompted:
+   ```
+   export AWS_ACCESS_KEY_ID=<AWS Access Key ID>
+   export AWS_SECRET_ACCESS_KEY=<AWS Secret Access Key>
+   export AWS_SESSION_TOKEN=<AWS Session Token>
+   ```
+4. Now, run the `deploy` command from the [Deployment](#deployment) section
+
 ## Post Deployment
 
 Once the deployment of the JIRA integration is complete, you will need to configure JIRA automation rules to provision JIRA to AWS Security Incident Response flow. 

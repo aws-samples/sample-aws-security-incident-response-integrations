@@ -1,4 +1,8 @@
-# aws_security_incident_response_sample_integrations/constants.py
+"""Constants for AWS Security Incident Response Sample Integrations.
+
+This module contains all the constants used across the integration components,
+including AWS account IDs, event sources, and integration-specific constants.
+"""
 
 # JIRA Account ID/Service Principal for creating an SNS topic that receives notifications/events from JIRA
 # see the detailed documentation here - https://support.atlassian.com/cloud-automation/docs/configure-aws-sns-for-jira-automation/

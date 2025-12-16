@@ -28,6 +28,8 @@ from .aws_security_incident_response_sample_integrations_common_stack import (
 
 
 class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
+    """AWS CDK Stack for Jira integration with Security Incident Response."""
+    
     def __init__(
         self,
         scope: Construct,
@@ -35,6 +37,14 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
         common_stack: AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
         **kwargs,
     ) -> None:
+        """Initialize the Jira integration stack.
+
+        Args:
+            scope (Construct): The scope in which to define this construct
+            construct_id (str): The scoped construct ID
+            common_stack (AwsSecurityIncidentResponseSampleIntegrationsCommonStack): Common stack instance
+            **kwargs: Additional keyword arguments passed to Stack
+        """
         super().__init__(scope, construct_id, **kwargs)
 
         # Reference common resources
@@ -89,7 +99,7 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
             string_value=jira_token_param.value_as_string,
         )
 
-        jira_email_ssm = aws_ssm.StringParameter(
+        aws_ssm.StringParameter(
             self,
             "jiraEmailSSM",
             parameter_name="/SecurityIncidentResponse/jiraEmail",
@@ -97,7 +107,7 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
             description="Jira email",
         )
 
-        jira_url_ssm = aws_ssm.StringParameter(
+        aws_ssm.StringParameter(
             self,
             "jiraUrlSSM",
             parameter_name="/SecurityIncidentResponse/jiraUrl",
@@ -105,7 +115,7 @@ class AwsSecurityIncidentResponseJiraIntegrationStack(Stack):
             description="Jira URL",
         )
 
-        jira_project_ssm = aws_ssm.StringParameter(
+        aws_ssm.StringParameter(
             self,
             "jiraProjectKeySSM",
             parameter_name="/SecurityIncidentResponse/jiraProjectKey",

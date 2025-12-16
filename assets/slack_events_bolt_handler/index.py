@@ -82,7 +82,7 @@ def get_ssm_parameter(parameter_name: str, with_decryption: bool = True) -> Opti
         )
         return response["Parameter"]["Value"]
     except Exception as e:
-        logger.error(f"Error retrieving SSM parameter {parameter_name}: {str(e)}")
+        logger.error(f"Error retrieving SSM parameter: {str(e)}")
         return None
 
 

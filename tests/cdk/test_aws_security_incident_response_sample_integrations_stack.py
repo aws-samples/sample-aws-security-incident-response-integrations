@@ -140,14 +140,26 @@ def test_security_compliance(app, stack):
 
     checks = AwsSolutionsChecks(additional_loggers=[spy], verbose=True)
 
-    # Add stack-level suppression for L1 rule
+    # Add comprehensive stack-level suppressions
     cdk_nag.NagSuppressions.add_stack_suppressions(
         stack,
         [
             {
                 "id": "AwsSolutions-L1",
                 "reason": "Using the latest available runtime for Python (3.13)",
-            }
+            },
+            {
+                "id": "AwsSolutions-SQS3",
+                "reason": "DLQs are used appropriately in the architecture and don't need their own DLQs",
+            },
+            {
+                "id": "AwsSolutions-IAM4",
+                "reason": "AWS CDK custom resource provider requires AWSLambdaBasicExecutionRole managed policy",
+            },
+            {
+                "id": "AwsSolutions-IAM5",
+                "reason": "EventBridge custom resource requires wildcard permissions to manage log group policies",
+            },
         ],
     )
 

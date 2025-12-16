@@ -8,51 +8,35 @@ import os
 import re
 import logging
 import datetime
-from typing import List, Dict, Optional, Any, Tuple, Union
+from typing import List, Dict, Optional, Any
 import boto3
 from botocore.exceptions import ClientError
-from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.conditions import Attr
+import requests
 
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-# Constants
-JIRA_EVENT_SOURCE = os.environ.get("JIRA_EVENT_SOURCE", "jira")
-SERVICE_NOW_EVENT_SOURCE = os.environ.get("SERVICE_NOW_EVENT_SOURCE", "service-now")
-UPDATE_TAG_TO_SKIP = "[AWS Security Incident Response Update]"
-
-# Try to import from Lambda layer
 try:
     # This import works for lambda function and imports the lambda layer at runtime
-    from jira_sir_mapper import (
-        map_case_status,
-        map_fields_to_sir,
-        map_closure_code,
-    )
-    from security_ir_wrapper import SecurityIRClient
-except ImportError:
-    # This import works for local development and imports locally from the file system
-    from ..mappers.python.jira_sir_mapper import (
-        Case,
-        create_case_from_api_response,
-        map_fields_to_sir as map_jira_fields_to_sir,
-    )
-    from ..wrappers.python.security_ir_wrapper import SecurityIRClient
-
-try:
+    from service_now_wrapper import ServiceNowClient
     from service_now_sir_mapper import (
         map_service_now_fields_to_sir,
-        map_closure_code,
         map_service_now_incident_comments_to_sir_case,
     )
+    from jira_sir_mapper import (
+        map_fields_to_sir,
+    )
 except ImportError:
+    # This import works for local development and imports locally from the file system
+    from ..wrappers.python.service_now_wrapper import ServiceNowClient
     from ..mappers.python.service_now_sir_mapper import (
-        Case,
-        create_case_from_api_response,
         map_service_now_fields_to_sir,
         map_service_now_incident_comments_to_sir_case,
     )
+    from ..mappers.python.jira_sir_mapper import (
+        map_fields_to_sir,
+    )
+    
+# Configure logging
+logger = logging.getLogger()
 
 # Get log level from environment variable
 log_level = os.environ.get("LOG_LEVEL", "error").lower()
@@ -64,37 +48,97 @@ else:
     # Default to ERROR level
     logger.setLevel(logging.ERROR)
 
-# Remove after dev/test
-logger.setLevel(logging.INFO)
+# Constants
+JIRA_EVENT_SOURCE = os.environ.get("JIRA_EVENT_SOURCE", "jira")
+SERVICE_NOW_EVENT_SOURCE = os.environ.get("SERVICE_NOW_EVENT_SOURCE", "service-now")
+UPDATE_TAG_TO_SKIP = "[AWS Security Incident Response Update]"
 
 # Initialize AWS clients
 security_ir_client = boto3.client("security-ir")
 
 
-def process_service_now_event(service_now_incident: dict, event_source: str) -> None:
+def process_service_now_event(
+    service_now_incident: dict, event_source: str, integration_module: str = "itsm"
+) -> None:
     """Process ServiceNow event and create/update Security IR case.
 
     Args:
         service_now_incident (dict): ServiceNow incident details
         event_source (str): Source of the event
+        integration_module (str): Integration module type ('itsm' or 'ir')
     """
-    service_now_event_type = service_now_incident["eventType"]
+    if not service_now_incident:
+        logger.error("ServiceNow incident data is None or empty")
+        return
+
+    service_now_event_type = service_now_incident.get("eventType", "")
     logger.info(f"Processing ServiceNow event {service_now_event_type}")
 
     # map ServiceNow incident to Security Incident Response case
-    service_now_incident_id = service_now_incident["number"]
-    service_now_issue_status = service_now_incident["state"]
+    service_now_incident_id = service_now_incident.get("number", "")
+    service_now_issue_status = service_now_incident.get("state", "")
 
-    # map ServiceNow incident state to Security Incident Response case status
-    if service_now_issue_status in ["Closed", "Resolved", "Canceled", "6", "7", "8"]:
-        ir_case_status = "Closed"
-    elif service_now_issue_status in ["In Progress", "On Hold", "2", "3"]:
-        ir_case_status = "Detection and Analysis"
-    elif service_now_issue_status in ["New", "1"]:
-        ir_case_status = "Submitted"
+    if not service_now_incident_id:
+        logger.error("ServiceNow incident number is missing")
+        return
+
+    # map ServiceNow incident state to Security Incident Response case status based on integration module
+    ir_case_status = "Submitted"  # Default status
+
+    if integration_module == "itsm":
+        # ITSM status mapping
+        if service_now_issue_status in [
+            "Closed",
+            "Resolved",
+            "Canceled",
+            "6",
+            "7",
+            "8",
+        ]:
+            ir_case_status = "Closed"
+        elif service_now_issue_status in ["In Progress", "On Hold", "2", "3"]:
+            ir_case_status = "Detection and Analysis"
+        elif service_now_issue_status in ["New", "1"]:
+            ir_case_status = "Submitted"
+    elif integration_module == "ir":
+        # IR status mapping
+        if service_now_issue_status in ["Closed", "3"]:
+            ir_case_status = "Closed"
+        elif service_now_issue_status in ["Review", "100"]:
+            ir_case_status = "Post-incident Activities"
+        elif service_now_issue_status in [
+            "Contain",
+            "Eradicate",
+            "Recover",
+            "18",
+            "19",
+            "20",
+        ]:
+            ir_case_status = "Containment, Eradication and Recovery"
+        elif service_now_issue_status in ["Analysis", "16"]:
+            ir_case_status = "Detection and Analysis"
+        elif service_now_issue_status in ["Draft", "10"]:
+            ir_case_status = "Submitted"
+    else:
+        # Default to ITSM mapping
+        if service_now_issue_status in [
+            "Closed",
+            "Resolved",
+            "Canceled",
+            "6",
+            "7",
+            "8",
+        ]:
+            ir_case_status = "Closed"
+        elif service_now_issue_status in ["In Progress", "On Hold", "2", "3"]:
+            ir_case_status = "Detection and Analysis"
+        elif service_now_issue_status in ["New", "1"]:
+            ir_case_status = "Submitted"
 
     # map fields from incident to case
-    security_ir_fields = map_service_now_fields_to_sir(service_now_incident)
+    security_ir_fields = map_service_now_fields_to_sir(
+        service_now_incident, integration_module
+    )
     security_ir_fields["caseStatus"] = ir_case_status
     security_ir_fields["key"] = service_now_incident_id
 
@@ -108,16 +152,6 @@ def process_service_now_event(service_now_incident: dict, event_source: str) -> 
         )
         security_ir_fields["caseId"] = security_ir_case_id
         logger.info(f"New Security IR case created: {security_ir_case_id}")
-
-        # get latest security_ir now that all fields have been updated
-        # and store it in the database
-        security_ir_incident = incident_service.get_incident_from_sir(
-            security_ir_case_id
-        )
-
-        if security_ir_incident:
-            security_ir_incident["caseId"] = security_ir_case_id
-            database_service.store_incident_in_dynamodb(security_ir_incident)
 
     elif "updated" in service_now_event_type.lower():
         # if it's an update then an entry for the incident must already exist in the database
@@ -189,13 +223,16 @@ def process_service_now_event(service_now_incident: dict, event_source: str) -> 
             )
             security_ir_fields["caseId"] = security_ir_case_id
 
+    # Add comments as applicable to the SIR case
     # get comments for matching sir case
     sir_case_comments = incident_service.get_incident_comments_from_sir(
         security_ir_case_id=security_ir_case_id
     )
 
     # extract ServiceNow incident comments in a list for validation, comparison and updates to SIR case
-    service_now_incident_comments = service_now_incident["comments_and_work_notes"]
+    service_now_incident_comments = service_now_incident.get(
+        "comments_and_work_notes", ""
+    )
 
     logger.info(
         f"Mapping ServiceNow incident comments to Security IR case : {service_now_incident_comments}"
@@ -214,84 +251,66 @@ def process_service_now_event(service_now_incident: dict, event_source: str) -> 
                 ir_case_comment=comment,
             )
 
-    # service_now_incident_comments_list = convert_service_now_comments_to_list(
-    #     service_now_incident_comments
-    # )
-
-    # sir_comment_bodies = [comment["body"] for comment in sir_comments["items"]]
-
-    # for service_now_incident_comment in service_now_incident_comments_list:
-    #     logger.info(f"Validating ServiceNow incident comment: {service_now_incident_comment}")
-    #     if sir_comment_bodies:
-    #         for sir_comment in sir_comment_bodies:
-    #             add_comment = True
-
-    #             if UPDATE_TAG_TO_SKIP in service_now_incident_comment:
-    #                 add_comment = False
-
-    #             for sir_comment in sir_comment_bodies:
-    #                 logger.info(f"Security IR incident comment: {sir_comment}")
-    #                 if (
-    #                         service_now_incident_comment
-    #                         == str(sir_comment).strip()
-    #                     ):
-    #                     add_comment = False
-
-    #             if add_comment is True:
-    #                 logger.info(
-    #                     f"Adding {service_now_incident_comment} comment to Security IR case {security_ir_case_id}"
-    #                 )
-    #                 _ = incident_service.add_incident_comment_in_sir(
-    #                     security_ir_case_id=security_ir_case_id,
-    #                     ir_case_comment=service_now_incident_comment,
-    #                 )
-    #     else:
-    #         logger.info(
-    #             f"Adding {service_now_incident_comment} comment to Security IR case {security_ir_case_id}"
-    #         )
-    #         _ = incident_service.add_incident_comment_in_sir(
-    #             security_ir_case_id=security_ir_case_id,
-    #             ir_case_comment=service_now_incident_comment,
-    #         )
-
-    # TODO: add missing attachments as files to case (see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210991530761700?focus=true)
-    # security_ir_case = incident_service.get_incident_from_sir(
-    #     security_ir_case_id
-    # )
-    # security_ir_case_attachments = security_ir_case["caseAttachments"]
-    # security_ir_filenames = [
-    #     security_ir_attachment["fileName"]
-    #     for security_ir_attachment in security_ir_case_attachments
-    # ]
+    # Add attachments to the SIR case
+    # get attachments for matching sir case
+    security_ir_case_filenames = []
+    security_ir_incident = incident_service.get_incident_from_sir(security_ir_case_id)
+    if security_ir_incident:
+        security_ir_case_attachments = security_ir_incident.get("caseAttachments")
+        if security_ir_case_attachments:
+            security_ir_case_filenames = [
+                security_ir_attachment["fileName"]
+                for security_ir_attachment in security_ir_case_attachments
+            ]
 
     #  add incoming attachments as comments for now
+    service_now_incident_filenames = []
     service_now_incident_attachments = service_now_incident["attachments"]
-    service_now_incident_filenames = [
-        service_now_incident_attachment["filename"]
-        for service_now_incident_attachment in service_now_incident_attachments
-    ]
-
-    # Extract comment bodies from sir_case_comments for attachment checking
-    sir_comment_bodies = [comment["body"] for comment in sir_case_comments["items"]]
-
-    # determine whether this is a new attachment before adding
-    for service_now_incident_attachment_name in service_now_incident_filenames:
-        add_attachment_comment = True
-        for sir_comment in sir_comment_bodies:
-            if service_now_incident_attachment_name in sir_comment:
-                add_attachment_comment = False
-
-        # only add a comment for new attachments
-        if add_attachment_comment is True:
-            # add attachment to Security IR case
-            _ = incident_service.add_incident_attachment_in_sir(
-                security_ir_case_id=security_ir_case_id,
-                attachment_filename=service_now_incident_attachment_name,
-                event_source=event_source,
+    if service_now_incident_attachments:
+        for service_now_incident_attachment in service_now_incident_attachments:
+            service_now_incident_filenames.append(
+                service_now_incident_attachment["filename"]
             )
-            logger.info(f"Added attachment to Security IR case {security_ir_case_id}")
+        for service_now_incident_attachment_name in service_now_incident_filenames:
+            logger.info(
+                f"ServiceNow incident filenames: {service_now_incident_filenames}"
+            )
+            if security_ir_case_filenames:
+                if service_now_incident_attachment_name in security_ir_case_filenames:
+                    logger.info(
+                        f"Attachment {service_now_incident_attachment_name} already exists in Security IR case"
+                    )
+                    continue
+                # add attachment to Security IR case
+                logger.info(
+                    f"Uploading attachment {service_now_incident_attachment_name} to Security IR case {security_ir_case_id}"
+                )
+                _ = incident_service.add_incident_attachment_in_sir(
+                    security_ir_case_id=security_ir_case_id,
+                    attachment_filename=service_now_incident_attachment_name,
+                    event_source=event_source,
+                    incident_number=service_now_incident_id,
+                )
+                logger.info(
+                    f"Uploaded attachment {service_now_incident_attachment_name} to Security IR case {security_ir_case_id}"
+                )
+            else:
+                # add attachment to Security IR case
+                logger.info(
+                    f"Uploading attachment {service_now_incident_attachment_name} to Security IR case {security_ir_case_id}"
+                )
+                _ = incident_service.add_incident_attachment_in_sir(
+                    security_ir_case_id=security_ir_case_id,
+                    attachment_filename=service_now_incident_attachment_name,
+                    event_source=event_source,
+                    incident_number=service_now_incident_id,
+                )
+                logger.info(
+                    f"Uploaded attachment {service_now_incident_attachment_name} to Security IR case {security_ir_case_id}"
+                )
 
-    # get latest security_ir now that all fields have been updated and store it in the database
+    # get latest security_ir now that all fields have been updated
+    # and store it in the database
     security_ir_incident = incident_service.get_incident_from_sir(security_ir_case_id)
 
     if security_ir_incident:
@@ -446,8 +465,36 @@ def process_jira_event(jira_issue: dict, event_source: str) -> None:
         database_service.store_incident_in_dynamodb(security_ir_incident)
 
 
+class ParameterService:
+    """Class to handle parameter operations."""
+
+    def __init__(self):
+        """Initialize the parameter service."""
+        self.ssm_client = boto3.client("ssm")
+
+    def get_parameter(self, parameter_name: str) -> Optional[str]:
+        """
+        Get a parameter from SSM Parameter Store.
+
+        Args:
+            parameter_name (str): The name of the parameter to retrieve
+
+        Returns:
+            Optional[str]: Parameter value or None if retrieval fails
+        """
+        try:
+            response = self.ssm_client.get_parameter(
+                Name=parameter_name, WithDecryption=True
+            )
+            return response["Parameter"]["Value"]
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            logger.error(f"Error retrieving parameter {parameter_name}: {error_code}")
+            return None
+
+
 class DatabaseService:
-    """Class to handle database operations"""
+    """Class to handle database operations."""
 
     __dynamodb = boto3.resource("dynamodb")
     __table_name = os.environ["INCIDENTS_TABLE_NAME"]
@@ -457,7 +504,9 @@ class DatabaseService:
     def __init__(self):
         """Initialize the database service."""
 
-    def get_incident_id_from_dynamodb(self, record_id: str, event_source: str) -> str:
+    def get_incident_id_from_dynamodb(
+        self, record_id: str, event_source: str
+    ) -> Optional[str]:
         """Fetch Case Id associated with Record Id of the integration target.
 
         Args:
@@ -465,7 +514,7 @@ class DatabaseService:
             event_source (str): Source of the event
 
         Returns:
-            str: Security Incident Response Case Id or None if not found
+            Optional[str]: Security Incident Response Case Id or None if not found
         """
         attr_name = ""
         if event_source == JIRA_EVENT_SOURCE:
@@ -595,8 +644,58 @@ class DatabaseService:
         raise TypeError(f"Type {type(obj)} not serializable")
 
 
+class ServiceNowService:
+    """Class to handle ServiceNow operations for Security IR integration."""
+
+    def __init__(self, instance_id, **kwargs):
+        """Initialize the ServiceNow service.
+
+        Args:
+            instance_id (str): ServiceNow instance ID
+            **kwargs: OAuth configuration parameters
+        """
+
+        self.service_now_client = ServiceNowClient(instance_id, **kwargs)
+
+    def get_incident_attachment_data(
+        self, incident_number: str, attachment_filename: str
+    ):
+        """Get attachment data from ServiceNow incident.
+
+        Args:
+            incident_number (str): ServiceNow incident number
+            attachment_filename (str): Name of the attachment file
+
+        Returns:
+            dict: Dictionary containing attachment data and content type, or None if retrieval fails
+        """
+        if not self.service_now_client:
+            logger.error("ServiceNow client not initialized")
+            return None
+
+        try:
+            # Get the incident record
+            integration_module = os.environ.get("INTEGRATION_MODULE", "itsm")
+            glide_record = self.service_now_client.get_incident(
+                incident_number, integration_module
+            )
+            if not glide_record:
+                logger.error(f"Incident {incident_number} not found in ServiceNow")
+                return None
+
+            # Get attachment data using the wrapper method
+            attachment_data = self.service_now_client.get_incident_attachment_data(
+                glide_record, attachment_filename
+            )
+            return attachment_data
+
+        except Exception as e:
+            logger.error(f"Error getting attachment data from ServiceNow: {str(e)}")
+            return None
+
+
 class IncidentService:
-    """Class to handle security IR incident operations"""
+    """Class to handle security IR incident operations."""
 
     __database_service = DatabaseService()
     __security_ir_client = boto3.client("security-ir")
@@ -747,7 +846,7 @@ class IncidentService:
 
     def create_incident_in_sir(
         self, security_ir_incident: dict, event_source: str
-    ) -> str:
+    ) -> Optional[str]:
         """Create a new case in Security IR based on the integration target.
 
         Args:
@@ -755,7 +854,7 @@ class IncidentService:
             event_source (str): Source of the event
 
         Returns:
-            str: Security IR case ID or None if creation fails
+            Optional[str]: Security IR case ID or None if creation fails
         """
         # create current datetime object
         current_datetime = datetime.datetime
@@ -819,14 +918,14 @@ class IncidentService:
 
         return security_ir_case_id
 
-    def get_incident_from_sir(self, security_ir_case_id: str) -> dict:
+    def get_incident_from_sir(self, security_ir_case_id: str) -> Optional[dict]:
         """Get Security IR case based on case ID.
 
         Args:
             security_ir_case_id (str): Security IR case ID
 
         Returns:
-            dict: Security IR case details or None if retrieval fails
+            Optional[dict]: Security IR case details or None if retrieval fails
         """
         try:
             kwargs = {"caseId": security_ir_case_id}
@@ -844,27 +943,118 @@ class IncidentService:
         security_ir_case_id: str,
         attachment_filename: str,
         event_source: str,
+        incident_number: str = None,
     ) -> bool:
         """Add an attachment to a Security IR case based on the event_source.
 
-        For now we are going to add a comment as we need to get the attachment binary
-        from the event case in order to attach it.
+        For ServiceNow events, attempts to retrieve and upload attachment data.
+        For other events, adds a comment about the attachment.
 
         Args:
             security_ir_case_id (str): Security IR case ID
             attachment_filename (str): Attachment filename
             event_source (str): Source of the event
+            incident_number (str): ServiceNow incident number (required for ServiceNow)
 
         Returns:
             bool: True if add is successful, False otherwise
         """
-        comment = f"[{event_source} Update] {event_source} incident/issue has an attachment: {attachment_filename}. Download the file from the associated {event_source} incident/issue."
-
         try:
-            # TODO: add support to copy binary file attachment from Jira to Security IR
-            _ = self.add_incident_comment_in_sir(security_ir_case_id, comment)
+            if event_source == SERVICE_NOW_EVENT_SOURCE and incident_number:
+                parameter_service = ParameterService()
+                # Get credentials from SSM
+                instance_id = parameter_service.get_parameter(
+                    os.environ.get("SERVICE_NOW_INSTANCE_ID")
+                )
+                logger.info(f"instance: {instance_id}")
+                client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
+                client_secret_param_name = os.environ.get("SERVICE_NOW_CLIENT_SECRET_PARAM")
+                user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+                private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
+                private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
+
+                service_now_service = ServiceNowService(
+                    instance_id,
+                    client_id_param_name=client_id_param_name,
+                    client_secret_param_name=client_secret_param_name,
+                    user_id_param_name=user_id_param_name,
+                    private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
+                    private_key_asset_key_param_name=private_key_asset_key_param_name
+                )
+
+                # Get attachment data from ServiceNow
+                attachment_data = service_now_service.get_incident_attachment_data(
+                    incident_number, attachment_filename
+                )
+
+                if attachment_data:
+                    # get the content length of the attachment for uploading to AWS Security Incident Response case
+                    attachment_content = attachment_data.get("attachment_content")
+                    content_length = attachment_data.get("attachment_content_length")
+
+                    # Get upload URL from Security IR
+                    upload_response = (
+                        self.__security_ir_client.get_case_attachment_upload_url(
+                            caseId=security_ir_case_id,
+                            fileName=attachment_filename,
+                            contentLength=int(content_length),
+                        )
+                    )
+
+                    if upload_response:
+                        attachment_upload_presigned_url = upload_response[
+                            "attachmentPresignedUrl"
+                        ]
+                        logger.info(
+                            f"Successfully retrieved upload URL for attachment {attachment_filename} to Security IR case {security_ir_case_id}: {attachment_upload_presigned_url}"
+                        )
+                        logger.info(
+                            f"Successfully retrieved the attachment content: {attachment_content}"
+                        )
+
+                        # Upload attachment data to Security IR
+                        response = requests.put(
+                            attachment_upload_presigned_url,
+                            data=attachment_content,
+                            headers={
+                                "If-None-Match": "*",
+                                "Content-Length": content_length,
+                                "Content-Type": "application/octet-stream",
+                            },
+                        )
+
+                        if response.status_code == 200:
+                            logger.info(
+                                f"Successfully uploaded attachment {attachment_filename} to Security IR case {security_ir_case_id}"
+                            )
+                            return True
+                        else:
+                            logger.error(
+                                f"Failed to upload attachment: {response.status_code}"
+                            )
+                            # Fall back to comment
+                            comment = f"[{event_source} Update] Failed to upload attachment: {attachment_filename}. Download from ServiceNow incident {incident_number}."
+                            _ = self.add_incident_comment_in_sir(
+                                security_ir_case_id, comment
+                            )
+                    else:
+                        logger.error("Failed to get upload URL from Security IR")
+                        # Fall back to comment
+                        comment = f"[{event_source} Update] {event_source} incident has an attachment: {attachment_filename}. Download from ServiceNow incident {incident_number}."
+                        _ = self.add_incident_comment_in_sir(
+                            security_ir_case_id, comment
+                        )
+                else:
+                    # Fall back to comment if attachment data not found
+                    comment = f"[{event_source} Update] {event_source} incident has an attachment: {attachment_filename}. Download from ServiceNow incident {incident_number}."
+                    _ = self.add_incident_comment_in_sir(security_ir_case_id, comment)
+            else:
+                # For other event sources or missing incident_number, add a comment
+                comment = f"[{event_source} Update] {event_source} incident/issue has an attachment: {attachment_filename}. Download the file from the associated {event_source} incident/issue."
+                _ = self.add_incident_comment_in_sir(security_ir_case_id, comment)
+
         except Exception as e:
-            logger.info(
+            logger.error(
                 f"Error adding attachment to Security IR case {security_ir_case_id}: {str(e)}"
             )
             return False
@@ -873,10 +1063,10 @@ class IncidentService:
 
 
 def handler(event, context) -> dict:
-    """Lambda handler to process jira events/notifications.
+    """Lambda handler to process Jira and ServiceNow events/notifications.
 
     Args:
-        event: Lambda event object
+        event (dict): Lambda event object containing event source and details
         context: Lambda context object
 
     Returns:
@@ -900,7 +1090,9 @@ def handler(event, context) -> dict:
         logger.info(
             "Received ServiceNow event. Security Incident Response Client lambda handler will process this event."
         )
-        process_service_now_event(event.get("detail"), event_source)
+        # Get integration module once
+        integration_module = os.environ.get("INTEGRATION_MODULE", "itsm")
+        process_service_now_event(event.get("detail"), event_source, integration_module)
 
     return {
         "statusCode": 200,
