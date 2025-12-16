@@ -127,7 +127,7 @@ class SlackParameterManager:
                     {"Key": "LastRotated", "Value": datetime.utcnow().isoformat()},
                 ],
             )
-            print(f"✅ Successfully created/updated parameter: {parameter_name}")
+            print("✅ Successfully created/updated parameter")
             return True
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
@@ -184,7 +184,6 @@ class SlackParameterManager:
         signing_secret_param = self.get_parameter(self.SLACK_SIGNING_SECRET_PARAMETER)
         if signing_secret_param:
             print("✅ Signing secret parameter exists")
-            print(f"   Last modified: {signing_secret_param.get('LastModifiedDate')}")
         else:
             print("❌ Signing secret parameter not found")
             all_valid = False
