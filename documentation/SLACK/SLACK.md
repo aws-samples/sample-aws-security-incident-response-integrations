@@ -6,6 +6,8 @@ This document provides an overview of the AWS Security Incident Response Slack i
 
 The Slack integration for AWS Security Incident Response enables bidirectional communication between AWS Security Incident Response and Slack. This allows security incidents to be synchronized between both systems in real-time, with dedicated Slack channels created for each incident.
 
+
+
 ## Deployment
 
 ### Prerequisites
@@ -248,6 +250,233 @@ After successful deployment, you'll see:
 - [ ] Slash commands work and return expected results
 - [ ] File uploads in Slack sync to AWS Security IR
 - [ ] Attachments in AWS Security IR sync to Slack
+
+## User Scenarios and Workflows
+
+The Slack integration provides seamless bidirectional synchronization between AWS Security Incident Response and Slack. Here are the key user scenarios and workflows:
+
+### 1. New Security IR Case → Slack Channel Creation
+
+**Scenario**: When a new AWS Security Incident Response case is created
+
+**Workflow**:
+1. A new case is created in AWS Security Incident Response (via console, API, or automation)
+2. The Security IR Poller Lambda detects the new case within 1 minute
+3. A dedicated Slack channel is automatically created with the naming convention: `aws-security-incident-response-case-<caseId>`
+4. An initial notification is posted to the channel containing:
+   - Case ID and title
+   - Severity and status
+   - Description
+   - Creation timestamp
+   - Direct link to the case in AWS console
+5. Case watchers are automatically added to the Slack channel (if they exist in the workspace)
+6. Channel topic is set with case status and severity for quick reference
+
+### 2. Security IR Comments → Slack Messages
+
+**Scenario**: When a comment is added to an AWS Security IR case
+
+**Workflow**:
+1. A comment is added to the case in AWS Security Incident Response
+2. The Security IR Poller Lambda detects the new comment within 1 minute
+3. The comment is automatically posted as a message in the corresponding Slack channel
+4. The message includes author name, content, timestamp, and `[AWS Security IR Update]` tag
+
+### 3. Security IR Watchers/Permissions → Slack Channel Members
+
+**Scenario**: When new watchers or permissions are added to an AWS Security IR case
+
+**Workflow**:
+1. A new watcher is added to the case in AWS Security Incident Response
+2. The Security IR Poller Lambda detects the permission change
+3. The system attempts to find the user in the Slack workspace by email address
+4. **If user exists in Slack workspace**: User is automatically added to the Slack channel with notification
+5. **If user does not exist in Slack workspace**: A notification alert is posted in the channel with instructions for manual invitation
+
+### 4. Slack Messages → Security IR Comments
+
+**Scenario**: When a message is posted in a Slack incident channel
+
+**Workflow**:
+1. A user posts a message in the incident Slack channel
+2. Slack sends a webhook event to the API Gateway endpoint
+3. The Slack Events Bolt Handler Lambda processes the message
+4. The message is automatically added as a comment to the corresponding AWS Security IR case
+5. The comment includes `[Slack Update]` tag, author's real name, message content, and timestamp
+
+### 5. Slack Attachments → Security IR Attachments
+
+**Scenario**: When files are uploaded to a Slack incident channel
+
+**Workflow**:
+1. A user uploads a file to the Slack incident channel
+2. Slack sends a `file_shared` event to the API Gateway endpoint
+3. The Slack Events Bolt Handler Lambda processes the file event
+4. The file is downloaded from Slack using the bot token
+5. The file is uploaded to the corresponding AWS Security IR case as an attachment
+6. File metadata is preserved (filename, size, MIME type)
+7. A confirmation message is posted in Slack: `📎 File uploaded to AWS Security IR case`
+
+**File Handling**:
+- **Size Limit**: Maximum 100MB per file
+- **Supported Formats**: All file types supported by both platforms
+- **Error Handling**: Large files or upload failures generate warning messages
+- **Duplicate Prevention**: Files are checked against existing attachments
+
+### 6. Slash Commands for Case Management
+
+**Available Commands**: The `/security-ir` command supports the following subcommands in incident channels:
+
+#### `/security-ir status`
+**Purpose**: Get current case status and details
+**Usage**: `/security-ir status`
+**Expected Outcome**:
+```
+📋 Case Status
+ID: case-12345678-abcd-1234-efgh-123456789012
+Status: In Progress
+Severity: High
+Title: Suspicious API Activity Detected
+Description: Unusual API calls detected from unknown IP addresses
+Created: 2024-01-15 14:30:00 UTC
+Last Updated: 2024-01-15 16:30:00 UTC
+Watchers: 3 users
+```
+
+#### `/security-ir update-status <status>`
+**Purpose**: Update case status
+**Usage**: `/security-ir update-status <Open|In Progress|Resolved|Closed>`
+**Examples**:
+- `/security-ir update-status Resolved`
+- `/security-ir update-status "In Progress"`
+**Expected Outcome**:
+```
+✅ Case status updated to "Resolved"
+Updated by: @john.doe
+Timestamp: 2024-01-15 17:00:00 UTC
+```
+**Error Cases**:
+- Invalid status: `❌ Invalid status. Valid options: Open, In Progress, Resolved, Closed`
+- Missing status: `❌ Please specify a status. Usage: /security-ir update-status <status>`
+
+#### `/security-ir update-description <text>`
+**Purpose**: Update case description
+**Usage**: `/security-ir update-description <new description>`
+**Example**: `/security-ir update-description Updated findings after further analysis`
+**Expected Outcome**:
+```
+✅ Case description updated
+New description: "Updated findings after further analysis"
+Updated by: @jane.smith
+Timestamp: 2024-01-15 17:15:00 UTC
+```
+
+#### `/security-ir update-title <text>`
+**Purpose**: Update case title
+**Usage**: `/security-ir update-title <new title>`
+**Example**: `/security-ir update-title Critical Security Breach - Resolved`
+**Expected Outcome**:
+```
+✅ Case title updated
+Old title: "Suspicious API Activity Detected"
+New title: "Critical Security Breach - Resolved"
+Updated by: @security.team
+Timestamp: 2024-01-15 17:30:00 UTC
+```
+
+#### `/security-ir close`
+**Purpose**: Close the case
+**Usage**: `/security-ir close`
+**Expected Outcome**:
+```
+🔒 Case closed successfully
+Case ID: case-12345678-abcd-1234-efgh-123456789012
+Closed by: @incident.manager
+Timestamp: 2024-01-15 18:00:00 UTC
+Channel will remain active for reference
+```
+**Additional Actions**:
+- Case status is set to "Closed" in AWS Security IR
+- Channel topic is updated to reflect closed status
+- System comment added to AWS Security IR case
+
+#### `/security-ir summarize`
+**Purpose**: Get case summary with key events
+**Usage**: `/security-ir summarize`
+**Expected Outcome**:
+```
+📊 Case Summary
+Case ID: case-12345678-abcd-1234-efgh-123456789012
+Title: Suspicious API Activity Detected
+Status: Resolved → Closed
+Severity: High
+Duration: 3 hours 30 minutes
+
+Key Events:
+• 14:30 - Case created
+• 15:45 - Analysis completed (John Doe)
+• 16:30 - Mitigation applied (Jane Smith)
+• 17:00 - Status updated to Resolved
+• 18:00 - Case closed
+
+Comments: 8 total (5 from AWS Security IR, 3 from Slack)
+Attachments: 2 files
+Watchers: 3 users
+```
+
+#### Command Error Handling
+
+**Invalid Channel**: Commands used outside incident channels
+```
+❌ This command can only be used in AWS Security IR incident channels
+Channel name must start with: aws-security-incident-response-case-
+```
+
+**Permission Errors**: User lacks permissions
+```
+❌ You don't have permission to modify this case
+Contact your administrator or case owner for access
+```
+
+**API Errors**: AWS Security IR service issues
+```
+❌ Unable to update case due to service error
+Error ID: api-error-20240115-180500
+Please try again or contact support
+```
+
+**Network Errors**: Connectivity issues
+```
+⚠️ Temporary connectivity issue
+Your request is being processed. Please check case status in a few moments
+Error ID: network-error-20240115-180600
+```
+
+### 7. Security IR Attachments → Slack Files
+
+**Scenario**: When attachments are added to an AWS Security IR case
+
+**Workflow**:
+1. An attachment is added to the AWS Security IR case
+2. The Security IR Poller Lambda detects the new attachment
+3. The file is downloaded from AWS Security IR
+4. The file is uploaded to the corresponding Slack channel
+5. A message is posted with the file and context: `📎 New attachment from AWS Security IR case`
+
+**File Handling**:
+- **Size Limit**: Maximum 100MB per file (Slack limitation)
+- **Large File Handling**: Files over 100MB generate a download link message instead
+- **Metadata Preservation**: Original filename, size, and type are maintained
+- **Error Recovery**: Failed uploads are retried with exponential backoff
+
+### Integration Benefits
+
+- **Real-time Collaboration**: Security teams can collaborate in Slack while maintaining official records in AWS Security IR
+- **Centralized Communication**: All incident-related discussions happen in dedicated channels
+- **Audit Trail**: Complete bidirectional sync ensures no information is lost
+- **Workflow Integration**: Teams can use familiar Slack interface while leveraging AWS Security IR capabilities
+- **Automated Notifications**: Key stakeholders are automatically informed of updates
+- **Mobile Access**: Teams can manage incidents from Slack mobile apps
 
 ## Architecture
 
