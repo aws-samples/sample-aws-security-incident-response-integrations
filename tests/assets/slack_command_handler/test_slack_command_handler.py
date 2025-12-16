@@ -241,7 +241,7 @@ class TestHandleUpdateStatusCommand:
         
         # Verify success message
         call_args = mock_send.call_args[0]
-        assert "✅" in call_args[1]
+        assert "ℹ️" in call_args[1]
         assert "Detection and Analysis" in call_args[1]
     
     @patch('slack_command_handler_index.send_slack_response')
