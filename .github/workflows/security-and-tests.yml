@@ -5,7 +5,7 @@ env:
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ main, v4/slack-integration ]
 
 jobs:
   security-scan:
@@ -33,7 +33,7 @@ jobs:
           uv pip install -r requirements-dev.txt
 
       - name: Run Bandit
-        run: bandit -r . -x ./tests --skip B113,B108,B404
+        run: bandit -r . -x ./tests,./venv --skip B113,B108,B404
           
       - name: Run detect-secrets
         run: detect-secrets scan --baseline .secrets.baseline
@@ -109,4 +109,6 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run pytest
-        run: pytest tests/ -v
+        run: |
+          # Run all tests (tests that need to be skipped use @pytest.mark.skip)
+          pytest tests/ -v

@@ -21,6 +21,7 @@ from .constants import (
     SECURITY_IR_EVENT_SOURCE,
     JIRA_EVENT_SOURCE,
     SERVICE_NOW_EVENT_SOURCE,
+    SLACK_EVENT_SOURCE,
 )
 
 
@@ -272,7 +273,13 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             runtime=aws_lambda.Runtime.PYTHON_3_13,
             timeout=Duration.minutes(15),
             layers=[self.domain_layer, self.mappers_layer, self.wrappers_layer],
-            environment=environment_vars,
+            environment={
+                "JIRA_EVENT_SOURCE": JIRA_EVENT_SOURCE,
+                "SERVICE_NOW_EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
+                "SLACK_EVENT_SOURCE": SLACK_EVENT_SOURCE,
+                "INCIDENTS_TABLE_NAME": self.table.table_name,
+                "LOG_LEVEL": self.log_level_param.value_as_string,
+            },
             role=security_ir_client_role,
         )
 
@@ -282,7 +289,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             "security-ir-client-rule",
             description="Rule to send all events to Security Incident Response Client lambda function",
             event_pattern=aws_events.EventPattern(
-                source=[JIRA_EVENT_SOURCE, SERVICE_NOW_EVENT_SOURCE]
+                source=[JIRA_EVENT_SOURCE, SERVICE_NOW_EVENT_SOURCE, SLACK_EVENT_SOURCE]
             ),
             event_bus=self.event_bus,
         )
