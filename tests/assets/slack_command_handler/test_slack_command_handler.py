@@ -366,8 +366,8 @@ class TestProcessCommand:
         }
         
         result = index.process_command(command_payload)
+        mock_handle.assert_called_once_with("12345", "https://hooks.slack.com/test")
         assert result is True
-        mock_handle.assert_called_once()
     
     @patch('slack_command_handler_index.validate_user_permissions')
     @patch('slack_command_handler_index.handle_summarize_command')
@@ -386,8 +386,8 @@ class TestProcessCommand:
         }
         
         result = index.process_command(command_payload)
+        mock_handle.assert_called_once_with("12345", "https://hooks.slack.com/test")
         assert result is True
-        mock_handle.assert_called_once()
     
     @patch('slack_command_handler_index.validate_user_permissions')
     @patch('slack_command_handler_index.handle_update_status_command')
@@ -406,8 +406,8 @@ class TestProcessCommand:
         }
         
         result = index.process_command(command_payload)
-        mock_handle.assert_called_once_with("12345", "Acknowledged", "https://hooks.slack.com/test")
         assert result is True
+        mock_handle.assert_called_once_with("12345", "Acknowledged", "https://hooks.slack.com/test")
     
     @patch('slack_command_handler_index.validate_user_permissions')
     @patch('slack_command_handler_index.send_slack_response')
