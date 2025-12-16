@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Dict, Any, Optional, Tuple
 import requests
 
@@ -217,21 +218,8 @@ def handle_status_command(case_id: str, response_url: str) -> bool:
             send_slack_response(response_url, "❌ Error: Could not retrieve case details.")
             return False
         
-        # Format case details for Slack
-        title = case_details.get("title", "N/A")
         status = case_details.get("caseStatus", "N/A")
-        severity = case_details.get("severity", "N/A")
-        description = case_details.get("description", "N/A")
-        created_date = case_details.get("createdDate", "N/A")
-        
-        response_text = f"""*Case Status for {case_id}*
-
-*Title:* {title}
-*Status:* {status}
-*Severity:* {severity}
-*Created:* {created_date}
-*Description:* {description}
-"""
+        response_text = f"*Case {case_id} Status:* {status}"
         
         send_slack_response(response_url, response_text)
         return True
@@ -351,6 +339,28 @@ def handle_update_status_command(case_id: str, new_status: str, response_url: st
         return False
 
 
+def mark_slack_update(case_id: str) -> None:
+    """Mark a case update as originating from Slack to prevent notification loops.
+    
+    Args:
+        case_id: AWS SIR case ID
+    """
+    if not incidents_table:
+        return
+    
+    try:
+        incidents_table.put_item(
+            Item={
+                "PK": f"Case#{case_id}",
+                "SK": "slack_update_flag",
+                "timestamp": int(time.time()),
+                "ttl": int(time.time()) + 300  # Expire after 5 minutes
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Could not set Slack update flag for case {case_id}: {str(e)}")
+
+
 def handle_update_description_command(case_id: str, new_description: str, response_url: str) -> bool:
     """Handle the update-description command.
     
@@ -366,6 +376,9 @@ def handle_update_description_command(case_id: str, new_description: str, respon
         if not new_description:
             send_slack_response(response_url, "❌ Error: Description text is required.")
             return False
+        
+        # Mark this as a Slack update to prevent notification loops
+        mark_slack_update(case_id)
         
         # Update case description
         security_incident_response_client.update_case(
@@ -406,6 +419,9 @@ def handle_update_title_command(case_id: str, new_title: str, response_url: str)
         if not new_title:
             send_slack_response(response_url, "❌ Error: Title text is required.")
             return False
+        
+        # Mark this as a Slack update to prevent notification loops
+        mark_slack_update(case_id)
         
         # Update case title
         security_incident_response_client.update_case(
@@ -477,7 +493,8 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
     """
     try:
         # Extract command details
-        command_text = command_payload.get("text", "")
+        subcommand = command_payload.get("command", "")
+        args = command_payload.get("args", "")
         user_id = command_payload.get("user_id")
         channel_id = command_payload.get("channel_id")
         response_url = command_payload.get("response_url")
@@ -492,9 +509,6 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
             send_slack_response(response_url, "❌ Error: Could not determine case ID for this channel.")
             return False
         
-        # Parse command
-        subcommand, args = parse_command(command_text)
-        
         logger.info(f"Processing command '{subcommand}' for case {case_id} from user {user_id}")
         
         # Validate user permissions
@@ -503,11 +517,7 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
             return False
         
         # Route to appropriate handler
-        if not subcommand or subcommand == "help":
-            send_slack_response(response_url, COMMAND_HELP)
-            return True
-        
-        elif subcommand == "status":
+        if subcommand == "status":
             return handle_status_command(case_id, response_url)
         
         elif subcommand == "summarize":
@@ -539,7 +549,7 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
         return False
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Lambda handler for processing Slack slash commands.
     

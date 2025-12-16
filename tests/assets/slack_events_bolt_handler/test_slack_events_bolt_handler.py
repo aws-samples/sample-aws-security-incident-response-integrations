@@ -225,8 +225,8 @@ class TestSlackEventsBoltHandler:
             
             assert result is None
 
-    def test_lambda_handler_success(self):
-        """Test successful Lambda handler execution"""
+    def test_handler_success(self):
+        """Test successful handler execution"""
         with patch.object(index, "slack_handler") as mock_slack_handler:
             mock_slack_handler.handle.return_value = {
                 "statusCode": 200,
@@ -236,31 +236,31 @@ class TestSlackEventsBoltHandler:
             event = {"body": json.dumps({"type": "event_callback"})}
             context = Mock()
             
-            result = index.lambda_handler(event, context)
+            result = index.handler(event, context)
             
             assert result["statusCode"] == 200
             mock_slack_handler.handle.assert_called_once_with(event, context)
 
-    def test_lambda_handler_no_slack_handler(self):
-        """Test Lambda handler when Slack handler is not initialized"""
+    def test_handler_no_slack_handler(self):
+        """Test handler when Slack handler is not initialized"""
         with patch.object(index, "slack_handler", None):
             event = {"body": json.dumps({"type": "event_callback"})}
             context = Mock()
             
-            result = index.lambda_handler(event, context)
+            result = index.handler(event, context)
             
             assert result["statusCode"] == 500
             assert "Slack handler not initialized" in result["body"]
 
-    def test_lambda_handler_exception(self):
-        """Test Lambda handler with exception"""
+    def test_handler_exception(self):
+        """Test handler with exception"""
         with patch.object(index, "slack_handler") as mock_handler:
             mock_handler.handle.side_effect = Exception("Test error")
             
             event = {"body": json.dumps({"type": "event_callback"})}
             context = Mock()
             
-            result = index.lambda_handler(event, context)
+            result = index.handler(event, context)
             
             assert result["statusCode"] == 500
             assert "Test error" in result["body"]

@@ -306,7 +306,18 @@ class SirToSlackMapper:
             str: Slack channel description
         """
         description = sir_case.get("description", "No description provided")
-        case_id = sir_case.get("caseId", "Unknown")
+        
+        # Try multiple possible case ID fields and extract from ARN if needed
+        case_id = sir_case.get("caseId")
+        if not case_id:
+            case_arn = sir_case.get("caseArn")
+            if case_arn:
+                import re
+                match = re.search(r"/(\d+)$", case_arn)
+                case_id = match.group(1) if match else "Unknown"
+            else:
+                case_id = "Unknown"
+        
         severity = sir_case.get("severity", "Unknown")
         
         return f"AWS Security Incident Response Case {case_id} - {severity} Severity\n\n{description}"
@@ -419,7 +430,17 @@ class SirToSlackMapper:
         Returns:
             Dict[str, Any]: Slack message payload with blocks
         """
-        case_id = sir_case.get("caseId", "Unknown")
+        # Try multiple possible case ID fields and extract from ARN if needed
+        case_id = sir_case.get("caseId")
+        if not case_id:
+            case_arn = sir_case.get("caseArn")
+            if case_arn:
+                import re
+                match = re.search(r"/(\d+)$", case_arn)
+                case_id = match.group(1) if match else "Unknown"
+            else:
+                case_id = "Unknown"
+        
         title = sir_case.get("title", "Security Incident")
         description = sir_case.get("description", "No description provided")
         status = sir_case.get("caseStatus", "Unknown")
@@ -526,7 +547,16 @@ class SirToSlackMapper:
         Returns:
             Dict[str, Any]: Slack message payload
         """
-        case_id = sir_case.get("caseId", "Unknown")
+        # Try multiple possible case ID fields and extract from ARN if needed
+        case_id = sir_case.get("caseId")
+        if not case_id:
+            case_arn = sir_case.get("caseArn")
+            if case_arn:
+                import re
+                match = re.search(r"/(\d+)$", case_arn)
+                case_id = match.group(1) if match else "Unknown"
+            else:
+                case_id = "Unknown"
         
         if update_type == "status":
             status = sir_case.get("caseStatus", "Unknown")
@@ -551,14 +581,13 @@ class SirToSlackMapper:
         elif update_type == "title":
             title = sir_case.get("title", "Unknown")
             return {
-                "text": f"Case {case_id} title updated",
+                "text": f"Title updated: {title}",
                 "blocks": [
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": f"📝 *Case Title Updated*\n" +
-                                    f"Case {case_id} title: *{title}*"
+                            "text": f"📝 *Case Title Updated*\n*{title}*"
                         }
                     }
                 ]
@@ -573,8 +602,7 @@ class SirToSlackMapper:
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": f"📝 *Case Description Updated*\n" +
-                                    f"Case {case_id} description updated"
+                            "text": f"📝 *Case Description Updated*\n"
                         }
                     },
                     {
@@ -615,7 +643,17 @@ class SirToSlackMapper:
         Returns:
             Dict[str, Any]: Slack message payload with summary
         """
-        case_id = sir_case.get("caseId", "Unknown")
+        # Try multiple possible case ID fields and extract from ARN if needed
+        case_id = sir_case.get("caseId")
+        if not case_id:
+            case_arn = sir_case.get("caseArn")
+            if case_arn:
+                import re
+                match = re.search(r"/(\d+)$", case_arn)
+                case_id = match.group(1) if match else "Unknown"
+            else:
+                case_id = "Unknown"
+        
         title = sir_case.get("title", "Security Incident")
         description = sir_case.get("description", "No description provided")
         status = sir_case.get("caseStatus", "Unknown")

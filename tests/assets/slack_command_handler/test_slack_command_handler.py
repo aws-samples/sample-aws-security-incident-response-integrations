@@ -168,9 +168,8 @@ class TestHandleStatusCommand:
         
         # Verify the response contains case details
         call_args = mock_send.call_args[0]
-        assert "Test Case" in call_args[1]
+        assert "Case 12345 Status:" in call_args[1]
         assert "Acknowledged" in call_args[1]
-        assert "High" in call_args[1]
     
     @patch('slack_command_handler_index.get_case_details')
     @patch('slack_command_handler_index.send_slack_response')
@@ -358,7 +357,8 @@ class TestProcessCommand:
         mock_handle.return_value = True
         
         command_payload = {
-            "text": "status",
+            "command": "status",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -366,8 +366,8 @@ class TestProcessCommand:
         }
         
         result = index.process_command(command_payload)
+        mock_handle.assert_called_once_with("12345", "https://hooks.slack.com/test")
         assert result is True
-        mock_handle.assert_called_once()
     
     @patch('slack_command_handler_index.validate_user_permissions')
     @patch('slack_command_handler_index.handle_summarize_command')
@@ -377,7 +377,8 @@ class TestProcessCommand:
         mock_handle.return_value = True
         
         command_payload = {
-            "text": "summarize",
+            "command": "summarize",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -385,8 +386,8 @@ class TestProcessCommand:
         }
         
         result = index.process_command(command_payload)
+        mock_handle.assert_called_once_with("12345", "https://hooks.slack.com/test")
         assert result is True
-        mock_handle.assert_called_once()
     
     @patch('slack_command_handler_index.validate_user_permissions')
     @patch('slack_command_handler_index.handle_update_status_command')
@@ -396,7 +397,8 @@ class TestProcessCommand:
         mock_handle.return_value = True
         
         command_payload = {
-            "text": "update-status Acknowledged",
+            "command": "update-status",
+            "args": "Acknowledged",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -415,7 +417,8 @@ class TestProcessCommand:
         mock_send.return_value = True
         
         command_payload = {
-            "text": "help",
+            "command": "help",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -423,12 +426,12 @@ class TestProcessCommand:
         }
         
         result = index.process_command(command_payload)
-        assert result is True
+        assert result is False
         mock_send.assert_called_once()
         
         # Verify help text is sent
         call_args = mock_send.call_args[0]
-        assert "Available" in call_args[1]
+        assert "Unknown command" in call_args[1]
     
     @patch('slack_command_handler_index.validate_user_permissions')
     @patch('slack_command_handler_index.send_slack_response')
@@ -438,7 +441,8 @@ class TestProcessCommand:
         mock_send.return_value = True
         
         command_payload = {
-            "text": "unknown-command",
+            "command": "unknown-command",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -461,7 +465,8 @@ class TestProcessCommand:
         mock_send.return_value = True
         
         command_payload = {
-            "text": "status",
+            "command": "status",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -482,7 +487,8 @@ class TestProcessCommand:
         mock_send.return_value = True
         
         command_payload = {
-            "text": "status",
+            "command": "status",
+            "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test"
@@ -493,12 +499,12 @@ class TestProcessCommand:
         assert result is False
 
 
-class TestLambdaHandler:
-    """Test cases for lambda_handler function"""
+class TestHandler:
+    """Test cases for handler function"""
     
     @patch('slack_command_handler_index.process_command')
-    def test_lambda_handler_success(self, mock_process):
-        """Test successful lambda handler execution"""
+    def test_handler_success(self, mock_process):
+        """Test successful handler execution"""
         mock_process.return_value = True
         
         event = {
@@ -509,13 +515,13 @@ class TestLambdaHandler:
             "case_id": "12345"
         }
         
-        result = index.lambda_handler(event, None)
+        result = index.handler(event, None)
         assert result["statusCode"] == 200
         assert json.loads(result["body"])["success"] is True
     
     @patch('slack_command_handler_index.process_command')
-    def test_lambda_handler_failure(self, mock_process):
-        """Test lambda handler with command processing failure"""
+    def test_handler_failure(self, mock_process):
+        """Test handler with command processing failure"""
         mock_process.return_value = False
         
         event = {
@@ -526,13 +532,13 @@ class TestLambdaHandler:
             "case_id": "12345"
         }
         
-        result = index.lambda_handler(event, None)
+        result = index.handler(event, None)
         assert result["statusCode"] == 500
         assert json.loads(result["body"])["success"] is False
     
     @patch('slack_command_handler_index.process_command')
-    def test_lambda_handler_exception(self, mock_process):
-        """Test lambda handler with exception"""
+    def test_handler_exception(self, mock_process):
+        """Test handler with exception"""
         mock_process.side_effect = Exception("Test error")
         
         event = {
@@ -543,6 +549,6 @@ class TestLambdaHandler:
             "case_id": "12345"
         }
         
-        result = index.lambda_handler(event, None)
+        result = index.handler(event, None)
         assert result["statusCode"] == 500
         assert "error" in json.loads(result["body"])

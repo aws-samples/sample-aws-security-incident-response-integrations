@@ -393,6 +393,38 @@ def remove_keys(data, keys_to_exclude):
         return data
 
 
+def is_slack_originated_update(case_id: str, table_name: str) -> bool:
+    """
+    Check if a case update originated from Slack to prevent notification loops.
+    
+    Args:
+        case_id (str): Case ID to check
+        table_name (str): DynamoDB table name
+        
+    Returns:
+        bool: True if update originated from Slack, False otherwise
+    """
+    try:
+        response = dynamodb_client.get_item(
+            TableName=table_name,
+            Key={"PK": {"S": f"Case#{case_id}"}, "SK": {"S": "slack_update_flag"}}
+        )
+        
+        if "Item" in response:
+            # Flag exists, delete it and return True
+            dynamodb_client.delete_item(
+                TableName=table_name,
+                Key={"PK": {"S": f"Case#{case_id}"}, "SK": {"S": "slack_update_flag"}}
+            )
+            logger.info(f"Detected Slack-originated update for case {case_id}, skipping notification")
+            return True
+            
+        return False
+    except Exception as e:
+        logger.warning(f"Error checking Slack update flag for case {case_id}: {str(e)}")
+        return False
+
+
 def store_incidents_in_dynamodb(
     incidents: List[Dict], table_name: str, event_bus_name="default"
 ) -> bool:
@@ -486,8 +518,12 @@ def store_incidents_in_dynamodb(
                             },
                         )
 
-                        logger.info(f"Publishing CaseUpdatedEvent for: {case_id}")
-                        event_publisher.publish_event(CaseUpdatedEvent(case))
+                        # Check if this update originated from Slack to prevent notification loops
+                        if not is_slack_originated_update(case_id, table_name):
+                            logger.info(f"Publishing CaseUpdatedEvent for: {case_id}")
+                            event_publisher.publish_event(CaseUpdatedEvent(case))
+                        else:
+                            logger.info(f"Skipping CaseUpdatedEvent for Slack-originated update: {case_id}")
                 else:
                     # Create new incident
                     dynamodb_client.put_item(
