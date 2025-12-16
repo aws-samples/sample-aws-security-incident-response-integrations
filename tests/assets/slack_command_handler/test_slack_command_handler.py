@@ -187,14 +187,14 @@ class TestHandleStatusCommand:
         assert "Error" in call_args[1]
 
 
-class TestHandleSummarizeCommand:
-    """Test cases for handle_summarize_command function"""
+class TestHandleIncidentDetailsCommand:
+    """Test cases for handle_incident_details_command function"""
     
     @patch('slack_command_handler_index.get_case_details')
     @patch('slack_command_handler_index.send_slack_response')
     @patch('slack_command_handler_index.incidents_table')
-    def test_handle_summarize_command_success(self, mock_table, mock_send, mock_get_case):
-        """Test successful summarize command"""
+    def test_handle_incident_details_command_success(self, mock_table, mock_send, mock_get_case):
+        """Test successful incident-details command"""
         mock_get_case.return_value = {
             "caseId": "12345",
             "title": "Test Case",
@@ -210,7 +210,7 @@ class TestHandleSummarizeCommand:
         }
         mock_send.return_value = True
         
-        result = index.handle_summarize_command("12345", "https://hooks.slack.com/test")
+        result = index.handle_incident_details_command("12345", "https://hooks.slack.com/test")
         assert result is True
         mock_send.assert_called_once()
         
@@ -370,14 +370,14 @@ class TestProcessCommand:
         assert result is True
     
     @patch('slack_command_handler_index.validate_user_permissions')
-    @patch('slack_command_handler_index.handle_summarize_command')
-    def test_process_command_summarize(self, mock_handle, mock_validate):
-        """Test processing summarize command"""
+    @patch('slack_command_handler_index.handle_incident_details_command')
+    def test_process_command_incident_details(self, mock_handle, mock_validate):
+        """Test processing incident-details command"""
         mock_validate.return_value = True
         mock_handle.return_value = True
         
         command_payload = {
-            "command": "summarize",
+            "command": "incident-details",
             "args": "",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",

@@ -46,7 +46,7 @@ COMMAND_HELP = """
 *Available /security-ir commands:*
 
 • `/security-ir status` - Get current case status and details
-• `/security-ir summarize` - Get a summary of the case
+• `/security-ir incident-details` - Get incident details
 • `/security-ir update-status <status>` - Update case status
 • `/security-ir update-description <description>` - Update case description
 • `/security-ir update-title <title>` - Update case title
@@ -763,7 +763,7 @@ if app:
                 invoke_command_handler(command_payload)
                 return
             
-            elif subcommand in ["summarize", "update-status", "update-description", "update-title", "close"]:
+            elif subcommand in ["incident-details", "update-status", "update-description", "update-title", "close"]:
                 # Acknowledge immediately and process
                 ack(f"⏳ Processing {subcommand} command...")
                 

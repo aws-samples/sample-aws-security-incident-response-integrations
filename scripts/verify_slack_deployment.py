@@ -249,7 +249,7 @@ def print_next_steps(outputs):
    - Command: /security-ir
    - Request URL: {webhook_url}
    - Short Description: Manage AWS Security Incident Response cases
-   - Usage Hint: [status|update-status|update-description|update-title|close|summarize] [args]
+   - Usage Hint: [status|update-status|update-description|update-title|close|incident-details] [args]
    - Click "Save"
 
 3. Test the Integration:

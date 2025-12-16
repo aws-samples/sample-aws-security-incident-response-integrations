@@ -7,7 +7,7 @@ This document provides detailed information on validation, troubleshooting, diag
 - [Outputs and Validation](#outputs-and-validation)
 - [Common Issues and Solutions](#common-issues-and-solutions)
 - [Diagnostic Steps](#diagnostic-steps)
-- [Health Checks](#health-checks)
+- [Checklist in case of any errors](#checklist-in-case-of-any-errors)
 - [Security Considerations](#security-considerations)
 - [Performance Optimization](#performance-optimization)
 
@@ -648,37 +648,11 @@ This output provides the CloudWatch Logs group name for the Slack Command Handle
      --statistics Sum
    ```
 
-## Health Checks
-
-### Daily Health Check Checklist
+## Checklist in case of any errors
 
 - [ ] Check Lambda error rates in CloudWatch
-- [ ] Verify EventBridge rule is enabled
-- [ ] Check DynamoDB table for recent updates
-- [ ] Verify SSM parameters are accessible
-- [ ] Test creating a new case and verify channel creation
-- [ ] Test posting a message and verify sync
-- [ ] Check API Gateway metrics for errors
-
-### Weekly Health Check Checklist
-
-- [ ] Review CloudWatch Logs for patterns
-- [ ] Check Lambda function memory usage
-- [ ] Verify bot token is still valid
-- [ ] Review DynamoDB table size and performance
-- [ ] Test all slash commands
-- [ ] Verify attachment sync functionality
+- [ ] Review CloudWatch Logs for pattern
 - [ ] Review CloudWatch alarms
-
-### Monthly Health Check Checklist
-
-- [ ] Review and rotate credentials if needed
-- [ ] Check Lambda function versions and aliases
-- [ ] Review IAM policies for least privilege
-- [ ] Analyze cost and usage patterns
-- [ ] Update documentation if needed
-- [ ] Review and update CloudWatch alarms
-- [ ] Perform load testing
 
 ## Security Considerations
 

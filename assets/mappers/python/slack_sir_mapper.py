@@ -34,7 +34,7 @@ STATUS_MAPPING = {
     "Detection and Analysis": "🔍 Under Investigation", 
     "Containment, Eradication and Recovery": "🚨 Active Response",
     "Post-incident Activities": "📋 Post-Incident Review",
-    "Ready to Close": "✅ Ready to Close",
+    "Ready to Close": "👍 Ready to Close",
     "Closed": "✅ Closed",
 }
 
@@ -500,7 +500,7 @@ class SirToSlackMapper:
                             "• `/security-ir update-title <title>` - Update case title\n" +
                             "• `/security-ir update-description <description>` - Update description\n" +
                             "• `/security-ir close` - Close the case\n" +
-                            "• `/security-ir summarize` - Get case summary"
+                            "• `/security-ir incident-details` - Get incident details"
                 }
             }
         ]

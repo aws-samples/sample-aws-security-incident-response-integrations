@@ -45,7 +45,7 @@ COMMAND_HELP = """
 *Available /security-ir commands:*
 
 • `/security-ir status` - Get current case status and details
-• `/security-ir summarize` - Get a summary of the case
+• `/security-ir incident-details` - Get incident details
 • `/security-ir update-status <status>` - Update case status
 • `/security-ir update-description <description>` - Update case description
 • `/security-ir update-title <title>` - Update case title
@@ -230,8 +230,8 @@ def handle_status_command(case_id: str, response_url: str) -> bool:
         return False
 
 
-def handle_summarize_command(case_id: str, response_url: str) -> bool:
-    """Handle the summarize command.
+def handle_incident_details_command(case_id: str, response_url: str) -> bool:
+    """Handle the incident-details command.
     
     Args:
         case_id: AWS SIR case ID
@@ -246,7 +246,7 @@ def handle_summarize_command(case_id: str, response_url: str) -> bool:
             send_slack_response(response_url, "❌ Error: Could not retrieve case details.")
             return False
         
-        # Get case comments for summary
+        # Get case details
         title = case_details.get("title", "N/A")
         status = case_details.get("caseStatus", "N/A")
         severity = case_details.get("severity", "N/A")
@@ -269,7 +269,29 @@ def handle_summarize_command(case_id: str, response_url: str) -> bool:
         except Exception as e:
             logger.warning(f"Could not get comment count: {str(e)}")
         
-        response_text = f"""*Case Summary for {case_id}*
+        # Get investigations for this case
+        investigations_text = ""
+        try:
+            investigations_response = security_incident_response_client.list_investigations(
+                caseId=case_id
+            )
+            investigations = investigations_response.get("investigations", [])
+            
+            if investigations:
+                investigations_text = f"\n*Investigations:* {len(investigations)}"
+                for i, investigation in enumerate(investigations[:3], 1):  # Show first 3
+                    inv_id = investigation.get("investigationId", "N/A")
+                    inv_status = investigation.get("status", "N/A")
+                    investigations_text += f"\n  {i}. {inv_id} - {inv_status}"
+                if len(investigations) > 3:
+                    investigations_text += f"\n  ... and {len(investigations) - 3} more"
+            else:
+                investigations_text = "\n*Investigations:* None"
+        except Exception as e:
+            logger.warning(f"Could not get investigations: {str(e)}")
+            investigations_text = "\n*Investigations:* Unable to retrieve"
+        
+        response_text = f"""*Incident Details for {case_id}*
 
 *Title:* {title}
 *Current Status:* {status}
@@ -277,6 +299,7 @@ def handle_summarize_command(case_id: str, response_url: str) -> bool:
 *Created:* {created_date}
 *Watchers:* {watcher_count}
 *Comments:* {comment_count}
+*Investigation details:* {investigations_text}
 
 This case is currently in *{status}* status. Use `/security-ir status` for full details.
 """
@@ -285,7 +308,7 @@ This case is currently in *{status}* status. Use `/security-ir status` for full 
         return True
         
     except Exception as e:
-        logger.error(f"Error handling summarize command: {str(e)}")
+        logger.error(f"Error handling incident-details command: {str(e)}")
         send_slack_response(response_url, f"❌ Error: {str(e)}")
         return False
 
@@ -323,7 +346,7 @@ def handle_update_status_command(case_id: str, new_status: str, response_url: st
         
         send_slack_response(
             response_url,
-            f"✅ Case status updated to *{new_status}*",
+            f"ℹ️ Case status updated to *{new_status}*",
             response_type="in_channel"
         )
         return True
@@ -388,7 +411,7 @@ def handle_update_description_command(case_id: str, new_description: str, respon
         
         send_slack_response(
             response_url,
-            "✅ Case description updated successfully",
+            "ℹ️ Case description updated successfully",
             response_type="in_channel"
         )
         return True
@@ -431,7 +454,7 @@ def handle_update_title_command(case_id: str, new_title: str, response_url: str)
         
         send_slack_response(
             response_url,
-            f"✅ Case title updated to: *{new_title}*",
+            f"ℹ️ Case title updated to: *{new_title}*",
             response_type="in_channel"
         )
         return True
@@ -520,8 +543,8 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
         if subcommand == "status":
             return handle_status_command(case_id, response_url)
         
-        elif subcommand == "summarize":
-            return handle_summarize_command(case_id, response_url)
+        elif subcommand == "incident-details":
+            return handle_incident_details_command(case_id, response_url)
         
         elif subcommand == "update-status":
             return handle_update_status_command(case_id, args, response_url)

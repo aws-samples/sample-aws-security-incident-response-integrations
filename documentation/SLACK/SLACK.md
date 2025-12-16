@@ -192,7 +192,7 @@ After successful deployment, you'll see:
      - **Command**: `/security-ir`
      - **Request URL**: Your API Gateway endpoint (same as Event Subscriptions)
      - **Short Description**: `Manage AWS Security Incident Response cases`
-     - **Usage Hint**: `[status|update-status|update-description|update-title|close|summarize] [args]`
+     - **Usage Hint**: `[status|update-status|update-description|update-title|close|incident-details] [args]`
    - Click "Save"
 
 2. **Reinstall App** (if prompted):
@@ -238,7 +238,7 @@ After successful deployment, you'll see:
 4. **Test Slash Commands**:
    - In the incident channel, type `/security-ir status`
    - Verify you receive the current case status
-   - Try other commands like `/security-ir summarize`
+   - Try other commands like `/security-ir incident-details`
 
 ### Validation Checklist
 
@@ -400,9 +400,9 @@ Channel will remain active for reference
 - Channel topic is updated to reflect closed status
 - System comment added to AWS Security IR case
 
-#### `/security-ir summarize`
-**Purpose**: Get case summary with key events
-**Usage**: `/security-ir summarize`
+#### `/security-ir incident-details`
+**Purpose**: Get incident details with key information
+**Usage**: `/security-ir incident-details`
 **Expected Outcome**:
 ```
 📊 Case Summary
@@ -646,7 +646,7 @@ The `/security-ir` command supports the following subcommands:
 | `update-description` | Update case description | `/security-ir update-description <text>` | `/security-ir update-description Updated findings` |
 | `update-title` | Update case title | `/security-ir update-title <text>` | `/security-ir update-title Critical Security Issue` |
 | `close` | Close the case | `/security-ir close` | Closes the case and updates channel |
-| `summarize` | Get case summary | `/security-ir summarize` | Returns summary with key events |
+| `incident-details` | Get incident details | `/security-ir incident-details` | Returns details with key information |
 
 **Note**: All commands must be used within an incident channel (channel name starts with `aws-security-incident-response-case-`).
 
