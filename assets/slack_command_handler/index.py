@@ -523,42 +523,57 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
         response_url = command_payload.get("response_url")
         case_id = command_payload.get("case_id")
         
+        logger.info(f"Processing command payload - subcommand: '{subcommand}', args: '{args}', case_id: '{case_id}', user_id: '{user_id}'")
+        
         if not response_url:
-            logger.error("No response URL provided")
+            logger.error("No response URL provided in command payload")
             return False
         
         if not case_id:
-            logger.error("No case ID provided")
+            logger.error("No case ID provided in command payload")
             send_slack_response(response_url, "❌ Error: Could not determine case ID for this channel.")
+            return False
+        
+        if not user_id:
+            logger.error("No user ID provided in command payload")
+            send_slack_response(response_url, "❌ Error: Could not determine user for this command.")
             return False
         
         logger.info(f"Processing command '{subcommand}' for case {case_id} from user {user_id}")
         
         # Validate user permissions
         if not validate_user_permissions(user_id, case_id):
+            logger.warning(f"User {user_id} does not have permission to manage case {case_id}")
             send_slack_response(response_url, "❌ Error: You do not have permission to manage this case.")
             return False
         
         # Route to appropriate handler
         if subcommand == "status":
+            logger.info(f"Routing to status handler for case {case_id}")
             return handle_status_command(case_id, response_url)
         
         elif subcommand == "incident-details":
+            logger.info(f"Routing to incident-details handler for case {case_id}")
             return handle_incident_details_command(case_id, response_url)
         
         elif subcommand == "update-status":
+            logger.info(f"Routing to update-status handler for case {case_id} with args: '{args}'")
             return handle_update_status_command(case_id, args, response_url)
         
         elif subcommand == "update-description":
+            logger.info(f"Routing to update-description handler for case {case_id}")
             return handle_update_description_command(case_id, args, response_url)
         
         elif subcommand == "update-title":
+            logger.info(f"Routing to update-title handler for case {case_id}")
             return handle_update_title_command(case_id, args, response_url)
         
         elif subcommand == "close":
+            logger.info(f"Routing to close handler for case {case_id}")
             return handle_close_command(case_id, response_url)
         
         else:
+            logger.warning(f"Unknown subcommand '{subcommand}' for case {case_id}")
             send_slack_response(
                 response_url,
                 f"❌ Error: Unknown command '{subcommand}'.\n\n{COMMAND_HELP}"
@@ -566,7 +581,8 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
             return False
         
     except Exception as e:
-        logger.error(f"Error processing command: {str(e)}")
+        logger.error(f"Unexpected error processing command: {str(e)}", exc_info=True)
+        response_url = command_payload.get("response_url")
         if response_url:
             send_slack_response(response_url, f"❌ Error: {str(e)}")
         return False
@@ -584,20 +600,36 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         Dict containing status and response information
     """
     try:
-        logger.info("Processing Slack command")
-        logger.debug(f"Event: {json.dumps(event)}")
+        logger.info("Processing Slack command handler request")
+        logger.info(f"Received event keys: {list(event.keys())}")
+        logger.debug(f"Full event: {json.dumps(event, default=str)}")
+        
+        # Validate event structure
+        required_fields = ['command', 'case_id', 'user_id', 'response_url']
+        missing_fields = [field for field in required_fields if not event.get(field)]
+        
+        if missing_fields:
+            error_msg = f"Missing required fields: {missing_fields}"
+            logger.error(error_msg)
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": error_msg, "success": False})
+            }
         
         # Process the command
         success = process_command(event)
         
-        return {
+        result = {
             "statusCode": 200 if success else 500,
             "body": json.dumps({"success": success})
         }
         
+        logger.info(f"Command processing completed with success: {success}")
+        return result
+        
     except Exception as e:
-        logger.error(f"Error in lambda handler: {str(e)}")
+        logger.error(f"Unexpected error in lambda handler: {str(e)}", exc_info=True)
         return {
             "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
+            "body": json.dumps({"error": str(e), "success": False})
         }

@@ -637,3 +637,31 @@ class SlackBoltClient:
         except Exception as e:
             logger.error(f"Error looking up user by email {email}: {str(e)}")
             return None
+
+    def list_files(self, channel: str = None, count: int = 100) -> Optional[List[Dict[str, Any]]]:
+        """List files in a Slack channel using files.list API.
+
+        Args:
+            channel (str, optional): Channel ID to filter files
+            count (int): Maximum number of files to retrieve
+
+        Returns:
+            Optional[List[Dict[str, Any]]]: List of files or None if retrieval fails
+        """
+        if not self.client:
+            logger.error("Slack client not initialized")
+            return None
+
+        try:
+            def _list_files():
+                response = self.client.files_list(
+                    channel=channel,
+                    count=count
+                )
+                return response["files"]
+
+            return self._retry_with_backoff(_list_files)
+            
+        except Exception as e:
+            logger.error(f"Error listing files for channel {channel}: {str(e)}")
+            return None
