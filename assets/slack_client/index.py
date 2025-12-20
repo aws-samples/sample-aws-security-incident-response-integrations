@@ -260,6 +260,38 @@ class DatabaseService:
             logger.error(f"Error updating field {field_name} in DynamoDB: {error_code}")
             return False
 
+    @exponential_backoff_retry(max_retries=3, base_delay=0.5, max_delay=15.0)
+    def add_slack_file_id(self, case_id: str, file_id: str, filename: str) -> bool:
+        """Add a Slack file ID to the case record.
+
+        Args:
+            case_id (str): The IR case ID
+            file_id (str): Slack file ID
+            filename (str): Filename
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Get current case data
+            case_response = self.get_case(case_id)
+            if not case_response or "Item" not in case_response:
+                return False
+
+            case_data = case_response["Item"]
+            slack_file_ids = case_data.get("slackFileIds", [])
+            
+            # Add new file ID if not already present
+            file_record = {"fileId": file_id, "filename": filename}
+            if not any(f.get("fileId") == file_id for f in slack_file_ids):
+                slack_file_ids.append(file_record)
+                return self.update_case_field(case_id, "slackFileIds", slack_file_ids)
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error adding Slack file ID for case {case_id}: {str(e)}")
+            return False
+
 
 class SlackService:
     """Class to handle Slack operations"""
@@ -302,15 +334,16 @@ class SlackService:
             topic = map_case_to_slack_channel_topic(case_data)
             self.slack_client.update_channel_topic(channel_id, topic)
 
-            # Add watchers to the channel
+            # Store mapping in database first
+            self.db_service.update_slack_mapping(case_id, channel_id)
+
+            # Add watchers to the channel after mapping is stored
             watchers = case_data.get("watchers", [])
             if watchers:
-                slack_users = map_watchers_to_slack_users(watchers)
-                if slack_users:
-                    self.slack_client.add_users_to_channel(channel_id, slack_users)
-
-            # Store mapping in database
-            self.db_service.update_slack_mapping(case_id, channel_id)
+                logger.info(f"Adding {len(watchers)} watchers to Slack channel for case {case_id}")
+                self.sync_watchers_to_slack(case_id, watchers)
+                # Store watchers in database to track them
+                self.db_service.update_case_details(case_id, case_watchers=watchers)
 
             # Ensure case_data has caseId for notification mapping
             case_data_with_id = case_data.copy()
@@ -548,13 +581,34 @@ class SlackService:
                 logger.warning(f"No Slack channel found for case {case_id}")
                 return False
 
+            # Get previously synced watchers to identify new ones
+            stored_watchers = case_from_db["Item"].get("slackChannelCaseWatchers", [])
+            current_watcher_emails = set()
+            stored_watcher_emails = set()
+            
+            # Extract current watcher emails
+            for watcher in watchers:
+                if isinstance(watcher, dict) and watcher.get("email"):
+                    current_watcher_emails.add(watcher["email"])
+            
+            # Extract stored watcher emails
+            for watcher in stored_watchers:
+                if isinstance(watcher, dict) and watcher.get("email"):
+                    stored_watcher_emails.add(watcher["email"])
+            
+            # Only process new watchers
+            new_watcher_emails = current_watcher_emails - stored_watcher_emails
+            if not new_watcher_emails:
+                logger.debug(f"No new watchers to sync for case {case_id}")
+                return True
+
             # Get current channel members
             current_members = self.slack_client.get_channel_members(slack_channel_id)
             if current_members is None:
                 logger.error(f"Failed to get current channel members for case {case_id}")
                 return False
 
-            # Process each watcher
+            # Process only new watchers
             users_to_add = []
             for watcher in watchers:
                 watcher_email = None
@@ -564,7 +618,7 @@ class SlackService:
                     watcher_email = watcher.get("email")
                     watcher_name = watcher.get("name") or watcher_email or "Unknown"
                 
-                if not watcher_email:
+                if not watcher_email or watcher_email not in new_watcher_emails:
                     continue
                 
                 # Try to find the user in Slack
@@ -578,13 +632,10 @@ class SlackService:
                     else:
                         logger.debug(f"User {watcher_name} ({watcher_email}) already in channel for case {case_id}")
                 else:
-                    # User not found in Slack, check if message already posted
+                    # User not found in Slack, post notification
                     message = f"👤 New watcher added to Security IR case: **{watcher_name}** ({watcher_email}) - not found in Slack workspace"
-                    if not self._is_watcher_message_posted(slack_channel_id, watcher_email):
-                        self.slack_client.post_message(slack_channel_id, message)
-                        logger.info(f"Posted notification for watcher not found in Slack: {watcher_name} ({watcher_email})")
-                    else:
-                        logger.debug(f"Watcher notification already posted for: {watcher_name} ({watcher_email})")
+                    self.slack_client.post_message(slack_channel_id, message)
+                    logger.info(f"Posted notification for watcher not found in Slack: {watcher_name} ({watcher_email})")
 
             # Add users to channel if any need to be added
             if users_to_add:
@@ -1066,6 +1117,13 @@ class SlackService:
             bool: True if successful, False otherwise
         """
         try:
+            filename = attachment.get("fileName") or attachment.get("filename") or attachment.get("name") or "attachment"
+            
+            # Check if this file already exists in the Slack channel
+            if self._file_exists_in_slack_channel(case_id, filename):
+                logger.info(f"Skipping attachment sync for {filename} - already exists in Slack channel")
+                return True
+            
             # Get channel ID from database
             case_from_db = self.db_service.get_case(case_id)
             if not case_from_db or "Item" not in case_from_db:
@@ -1080,9 +1138,15 @@ class SlackService:
             # Extract attachment details - try multiple field names
             attachment_id = attachment.get("attachmentId") or attachment.get("id") or ""
             filename = attachment.get("fileName") or attachment.get("filename") or attachment.get("name") or "attachment"
+            attachment_status = attachment.get("status", "Unknown")
             
-            logger.info(f"Processing attachment - ID: {attachment_id}, filename: {filename}")
+            logger.info(f"Processing attachment - ID: {attachment_id}, filename: {filename}, status: {attachment_status}")
             logger.debug(f"Full attachment data: {attachment}")
+            
+            # Check attachment status - only process ready attachments
+            if attachment_status.lower() in ["pending", "processing", "failed"]:
+                logger.info(f"Skipping attachment '{filename}' with status '{attachment_status}' for case {case_id}")
+                return True  # Return True to avoid error messages for pending attachments
             
             # Check file size limits before download if size is available
             max_size = 100 * 1024 * 1024  # 100MB
@@ -1150,6 +1214,27 @@ class SlackService:
                     self._add_system_comment_to_case(case_id, error_comment)
                     return False
                     
+            except ClientError as download_error:
+                error_code = download_error.response.get("Error", {}).get("Code", "")
+                error_message_text = str(download_error)
+                
+                # Skip posting error messages for pending/processing attachments
+                if error_code == "ValidationException" and "still pending" in error_message_text.lower():
+                    logger.info(f"Attachment '{filename}' is still pending for case {case_id}, skipping sync")
+                    return True
+                
+                logger.error(f"Error downloading attachment {attachment_id}: {error_message_text}")
+                # Post error message to Slack
+                error_message = f"❌ Failed to sync attachment '{filename}' from AWS SIR case {case_id}: {error_message_text}"
+                self.slack_client.post_message(slack_channel_id, error_message)
+                
+                # Also add system comment to AWS SIR case
+                error_comment = create_system_comment(
+                    f"Failed to sync attachment '{filename}' to Slack",
+                    error_message_text
+                )
+                self._add_system_comment_to_case(case_id, error_comment)
+                return False
             except Exception as download_error:
                 logger.error(f"Error downloading attachment {attachment_id}: {str(download_error)}")
                 # Post error message to Slack
@@ -1186,10 +1271,19 @@ class SlackService:
         total_count = len(attachments)
 
         for attachment in attachments:
+            filename = attachment.get("fileName") or attachment.get("filename") or attachment.get("name") or "attachment"
+            
+            # Check if file exists in Slack channel (using improved method)
+            if self._file_exists_in_slack_channel(case_id, filename):
+                logger.info(f"Skipping attachment {filename} - already exists in Slack channel")
+                success_count += 1
+                continue
+            
+            # File not found in Slack, upload it
             if self.sync_attachment_to_slack(case_id, attachment):
                 success_count += 1
             else:
-                logger.warning(f"Failed to sync attachment {attachment.get('filename', 'unknown')} for case {case_id}")
+                logger.warning(f"Failed to sync attachment {filename} for case {case_id}")
 
         logger.info(f"Synced {success_count}/{total_count} attachments to Slack for case {case_id}")
         return success_count == total_count
@@ -1256,6 +1350,49 @@ class SlackService:
         except Exception as e:
             logger.warning(f"Error getting Slack user name for {user_id}: {str(e)}")
             return user_id
+    
+    def _file_exists_in_slack_channel(self, case_id: str, filename: str) -> bool:
+        """Check if a file already exists in the Slack channel.
+
+        Args:
+            case_id (str): The IR case ID
+            filename (str): Filename to check
+
+        Returns:
+            bool: True if file exists in Slack channel, False otherwise
+        """
+        try:
+            # Get channel ID and stored file IDs
+            case_from_db = self.db_service.get_case(case_id)
+            if not case_from_db or "Item" not in case_from_db:
+                return False
+
+            slack_channel_id = case_from_db["Item"].get("slackChannelId")
+            if not slack_channel_id:
+                return False
+
+            # First, try using stored file IDs with files.info API
+            slack_file_ids = case_from_db["Item"].get("slackFileIds", [])
+            for file_record in slack_file_ids:
+                stored_filename = file_record.get("filename", "")
+                if stored_filename.lower() == filename.lower():
+                    file_id = file_record.get("fileId")
+                    if file_id and self.slack_client.get_file_info(file_id):
+                        return True
+
+            # Fallback to files.list API
+            channel_files = self.slack_client.list_files(channel=slack_channel_id, count=200)
+            if channel_files:
+                for file_info in channel_files:
+                    file_name = file_info.get("name", "")
+                    if file_name.lower() == filename.lower():
+                        return True
+
+            return False
+            
+        except Exception as e:
+            logger.warning(f"Error checking files in Slack channel for case {case_id}: {str(e)}")
+            return False
 
 
 class IncidentService:
@@ -1360,18 +1497,21 @@ class IncidentService:
             if comments:
                 self.slack_service.sync_all_comments_to_slack(case_id, comments)
             
-            # Always sync watchers on every CaseUpdated event
-            watchers = case_detail.get("watchers", [])
-            if watchers:
-                self.slack_service.sync_watchers_to_slack(case_id, watchers)
-            
-            # Sync attachments in CaseUpdated events since AttachmentAdded events don't exist
-            attachments = case_detail.get("caseAttachments", [])
-            if attachments:
-                self.slack_service.sync_attachments_to_slack(case_id, attachments)
-            
             # Check what actually changed by comparing with stored state
             changed_fields = self._get_changed_fields(case_id, case_detail)
+            
+            # Only sync watchers if they actually changed
+            if "watchers" in changed_fields:
+                watchers = case_detail.get("watchers", [])
+                if watchers:
+                    self.slack_service.sync_watchers_to_slack(case_id, watchers)
+                    # Update stored watchers immediately to prevent duplicate processing
+                    self.db_service.update_case_details(case_id, case_watchers=watchers)
+            
+            # Sync attachments in CaseUpdated events - this is the only way attachments get synced
+            attachments = case_detail.get("caseAttachments", [])
+            if attachments:
+                self.slack_service.sync_attachments_from_sir_to_slack(case_id, attachments)
             
             if changed_fields:
                 logger.info(f"Detected changes in fields: {changed_fields} for case {case_id}")
@@ -1530,8 +1670,8 @@ class IncidentService:
                 changed_fields.append("severity")
             
             current_watchers = case_detail.get("watchers", [])
-            stored_watchers = stored_data.get("slackChannelCaseWatchers", [])
-            if stored_watchers != [] and current_watchers != stored_watchers:
+            stored_watchers = stored_data.get("slackChannelCaseWatchers")
+            if stored_watchers is not None and current_watchers != stored_watchers:
                 changed_fields.append("watchers")
             
             return changed_fields
