@@ -432,11 +432,17 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         )
         slack_notifications_rule.add_target(slack_notifications_target)
 
-        # Grant permission to create comments in Security IR cases
+
+
+        # Grant permission to create comments, upload attachments, and get case details in Security IR cases
         slack_events_bolt_handler_role.add_to_policy(
             aws_iam.PolicyStatement(
                 effect=aws_iam.Effect.ALLOW,
-                actions=["security-ir:CreateCaseComment"],
+                actions=[
+                    "security-ir:CreateCaseComment",
+                    "security-ir:GetCaseAttachmentUploadUrl",
+                    "security-ir:GetCase",
+                ],
                 resources=["*"],
             )
         )

@@ -508,7 +508,7 @@ class TestHandler:
         mock_process.return_value = True
         
         event = {
-            "text": "status",
+            "command": "status",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -525,7 +525,7 @@ class TestHandler:
         mock_process.return_value = False
         
         event = {
-            "text": "invalid",
+            "command": "invalid",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
@@ -542,7 +542,7 @@ class TestHandler:
         mock_process.side_effect = Exception("Test error")
         
         event = {
-            "text": "status",
+            "command": "status",
             "user_id": "U1234567890",
             "channel_id": "C1234567890",
             "response_url": "https://hooks.slack.com/test",
