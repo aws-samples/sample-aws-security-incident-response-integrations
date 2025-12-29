@@ -108,7 +108,23 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run pytest
+      - name: Run pytest with coverage
         run: |
-          # Run all tests (tests that need to be skipped use @pytest.mark.skip)
-          pytest tests/ -v
+          # Run all tests with coverage (tests that need to be skipped use @pytest.mark.skip)
+          pytest tests/ -v --cov=. --cov-report=xml --cov-report=term
+
+      - name: Code Coverage Report Difference
+        uses: romeovs/lcov-reporter-action@v0.3.1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          lcov-file: coverage.xml
+          delete-old-comments: true
+
+      - name: Check Coverage Difference
+        uses: 5monkeys/cobertura-action@master
+        with:
+          path: coverage.xml
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          minimum_coverage: 1
+          fail_below_threshold: true
+          show_missing: true

@@ -621,11 +621,8 @@ class SlackBoltClient:
             return None
 
         try:
-            # def _get_file_info():
             response = self.client.files_info(file=file_id)
             return response["file"]
-
-            # return self._retry_with_backoff(_get_file_info)
             
         except Exception as e:
             logger.error(f"Error getting file info for {file_id}: {str(e)}")
