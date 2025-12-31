@@ -24,6 +24,7 @@
 - [ ] I have performed a self-review of my code
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing tests pass locally with my changes
+- [ ] The code coverage difference report check has passed
 - [ ] Security considerations have been addressed
 
 ## New Integration Target Questions
