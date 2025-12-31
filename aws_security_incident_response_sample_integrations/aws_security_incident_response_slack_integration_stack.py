@@ -499,6 +499,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
                     "security-ir:CloseCase",
                     "security-ir:CreateCaseComment",
                     "security-ir:ListComments",
+                    "security-ir:ListInvestigations",
                 ],
                 resources=["*"],
             )

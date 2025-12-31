@@ -407,12 +407,9 @@ class SlackService:
                 topic = map_case_to_slack_channel_topic(case_data)
                 self.slack_client.update_channel_topic(slack_channel_id, topic)
             
-            # Post description update message if description changed
+            # Update channel purpose/description if description changed
             if update_type == "description":
                 description = case_data.get("description", "No description provided")
-                desc_message = f"📝 **Case Description Updated**\n{description}"
-                self.slack_client.post_message(slack_channel_id, desc_message)
-                
                 # Try to update channel purpose/description if method exists
                 try:
                     if hasattr(self.slack_client, 'update_channel_purpose'):
