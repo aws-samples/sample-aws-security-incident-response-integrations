@@ -607,6 +607,27 @@ class SlackBoltClient:
             logger.error(f"Error getting messages from channel {channel_id}: {str(e)}")
             return None
 
+    def get_file_info(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """Get information about a Slack file.
+
+        Args:
+            file_id (str): The Slack file ID
+
+        Returns:
+            Optional[Dict[str, Any]]: File information or None if retrieval fails
+        """
+        if not self.client:
+            logger.error("Slack client not initialized")
+            return None
+
+        try:
+            response = self.client.files_info(file=file_id)
+            return response["file"]
+            
+        except Exception as e:
+            logger.error(f"Error getting file info for {file_id}: {str(e)}")
+            return None
+
     def find_user_by_email(self, email: str) -> Optional[str]:
         """Find a Slack user ID by email address.
 
