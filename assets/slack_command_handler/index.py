@@ -411,7 +411,7 @@ def handle_update_description_command(case_id: str, new_description: str, respon
         
         send_slack_response(
             response_url,
-            "ℹ️ Case description updated successfully",
+            f"ℹ️ Case description updated to: *{new_description}*",
             response_type="in_channel"
         )
         return True
@@ -481,15 +481,14 @@ def handle_close_command(case_id: str, response_url: str) -> bool:
         True if successful, False otherwise
     """
     try:
-        # Close the case by setting status to Resolved
-        security_incident_response_client.update_case_status(
-            caseId=case_id,
-            caseStatus="Resolved"
+        # Close the case using the close_case API
+        security_incident_response_client.close_case(
+            caseId=case_id
         )
         
         send_slack_response(
             response_url,
-            f"✅ Case {case_id} has been closed (status set to Resolved)",
+            f"✅ Case {case_id} has been closed successfully",
             response_type="in_channel"
         )
         return True
