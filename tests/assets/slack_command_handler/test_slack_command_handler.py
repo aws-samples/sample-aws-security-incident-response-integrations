@@ -330,14 +330,13 @@ class TestHandleCloseCommand:
     @patch('slack_command_handler_index.send_slack_response')
     def test_handle_close_command_success(self, mock_send, mock_client):
         """Test successful case close"""
-        mock_client.update_case_status.return_value = {}
+        mock_client.close_case.return_value = {}
         mock_send.return_value = True
         
         result = index.handle_close_command("12345", "https://hooks.slack.com/test")
         assert result is True
-        mock_client.update_case_status.assert_called_once_with(
-            caseId="12345",
-            caseStatus="Resolved"
+        mock_client.close_case.assert_called_once_with(
+            caseId="12345"
         )
         
         # Verify success message
