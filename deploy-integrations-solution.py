@@ -136,6 +136,59 @@ def deploy_servicenow(args):
         return 1
 
 
+def deploy_slack(args):
+    try:
+        cmd = [
+            "npx",
+            "cdk",
+            "deploy",
+            "--app",
+            "python3 app_slack.py",
+            "AwsSecurityIncidentResponseSampleIntegrationsCommonStack",
+            "AwsSecurityIncidentResponseSlackIntegrationStack",
+            "--parameters",
+            f"AwsSecurityIncidentResponseSampleIntegrationsCommonStack:logLevel={args.log_level}",
+            "--parameters",
+            f"AwsSecurityIncidentResponseSlackIntegrationStack:slackBotToken={args.bot_token}",
+            "--parameters",
+            f"AwsSecurityIncidentResponseSlackIntegrationStack:slackSigningSecret={args.signing_secret}",
+            "--parameters",
+            f"AwsSecurityIncidentResponseSlackIntegrationStack:slackWorkspaceId={args.workspace_id}",
+        ]
+        print("\n🔄 Deploying Slack integration...\n")
+        # Using subprocess with a list of arguments is safe from shell injection
+        result = subprocess.run(cmd, check=True)  # nosec B603
+        if result.returncode == 0:
+            print("\n✅ Slack integration deployed successfully!")
+            
+            # Run deployment verification if requested
+            if not args.skip_verification:
+                print("\n🔍 Running deployment verification...")
+                verify_cmd = [
+                    "python3",
+                    "scripts/verify_slack_deployment.py",
+                    "--region",
+                    args.region if hasattr(args, 'region') and args.region else "us-east-1",
+                ]
+                verify_result = subprocess.run(verify_cmd)  # nosec B603
+                if verify_result.returncode != 0:
+                    print("\n⚠️  Deployment verification found some issues. Please review the output above.")
+            else:
+                print("\n📝 Next steps:")
+                print("   1. Run verification: python3 scripts/verify_slack_deployment.py")
+                print("   2. Configure your Slack app's Event Subscriptions URL with the API Gateway endpoint")
+                print("   3. Configure your Slack app's Slash Commands with the /security-ir command")
+                print("   4. Install the Slack app to your workspace")
+                print("   5. Test the integration by creating a test AWS Security IR case")
+        return result.returncode
+    except subprocess.CalledProcessError as e:
+        print(f"\n❌ Error deploying Slack integration: {e}")
+        return e.returncode
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        return 1
+
+
 def main():
     """Main function to parse arguments and deploy integrations."""
     parser = argparse.ArgumentParser(
@@ -158,7 +211,11 @@ def main():
     jira_parser.add_argument("--url", required=True, help="Jira URL")
     jira_parser.add_argument("--token", required=True, help="Jira API token")
     jira_parser.add_argument("--project-key", required=True, help="Jira Project key")
-
+    jira_parser.add_argument(
+        "--log-level",
+        choices=["info", "debug", "error"],
+        help="Log level for Lambda functions (overrides global setting)",
+    )
     jira_parser.set_defaults(func=deploy_jira)
 
     # ServiceNow integration
@@ -186,8 +243,40 @@ def main():
         required=True,
         help="ServiceNow integration module: 'itsm' for IT Service Management or 'ir' for Incident Response",
     )
-
+    servicenow_parser.add_argument(
+        "--log-level",
+        choices=["info", "debug", "error"],
+        help="Log level for Lambda functions (overrides global setting)",
+    )
     servicenow_parser.set_defaults(func=deploy_servicenow)
+
+    # Slack integration
+    slack_parser = subparsers.add_parser("slack", help="Deploy Slack integration")
+    slack_parser.add_argument(
+        "--bot-token", required=True, help="Slack Bot User OAuth Token (xoxb-...)"
+    )
+    slack_parser.add_argument(
+        "--signing-secret", required=True, help="Slack App Signing Secret"
+    )
+    slack_parser.add_argument(
+        "--workspace-id", required=True, help="Slack Workspace ID"
+    )
+    slack_parser.add_argument(
+        "--region",
+        default="us-east-1",
+        help="AWS region for deployment (default: us-east-1)",
+    )
+    slack_parser.add_argument(
+        "--skip-verification",
+        action="store_true",
+        help="Skip post-deployment verification checks",
+    )
+    slack_parser.add_argument(
+        "--log-level",
+        choices=["info", "debug", "error"],
+        help="Log level for Lambda functions (overrides global setting)",
+    )
+    slack_parser.set_defaults(func=deploy_slack)
 
     try:
         args = parser.parse_args()
@@ -196,9 +285,10 @@ def main():
             print("\n❌ Error: Integration type is required")
             print(
                 textwrap.dedent("""
-                Please specify either 'jira' or 'service-now' as the integration type.
+                Please specify 'jira', 'service-now', or 'slack' as the integration type.
                 Example: deploy-integrations-solution jira --email user@example.com --url https://example.atlassian.net --token YOUR_TOKEN --project-key PROJ
                 Example: deploy-integrations-solution service-now --instance-id example --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET --user-id YOUR_USER_ID --private-key-path ./private.key --integration-module itsm
+                Example: deploy-integrations-solution slack --bot-token xoxb-... --signing-secret YOUR_SECRET --workspace-id YOUR_WORKSPACE_ID
             """)
             )
             parser.print_help()

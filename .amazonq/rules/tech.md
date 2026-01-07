@@ -7,14 +7,14 @@ Use AWS CDK v2.x with Python for all infrastructure deployment. Apply CDK Nag fo
 ## AWS Services Architecture
 
 - Use EventBridge custom event bus "security-incident-event-bus" for event routing
-- Implement Lambda functions with Python runtime for serverless compute
-- Package shared code in Lambda Layers (domain models, mappers, wrappers)
+- Implement Lambda functions with Python 3.13 runtime for serverless compute
+- Package shared code in Lambda Layers (domain models, mappers, wrappers, Slack Bolt)
 - Use DynamoDB with PK/SK pattern for mapping data storage
 - Configure SNS for Jira webhook events messaging
-- Set up API Gateway REST endpoints for ServiceNow webhooks
+- Set up API Gateway REST endpoints for ServiceNow and Slack webhooks
 - Implement SQS dead-letter queues for failed event handling
 - Configure CloudWatch with 1-week log retention for monitoring
-- Store credentials securely in Systems Manager Parameter Store
+- Store credentials securely in Systems Manager Parameter Store with encryption
 
 ## Development Standards
 
@@ -36,6 +36,7 @@ pip install -r requirements-dev.txt  # optional dev dependencies
 ```bash
 ./deploy-integrations-solution.py jira --email user@example.com --url https://example.atlassian.net --token TOKEN --project-key PROJ
 ./deploy-integrations-solution.py service-now --instance-id INSTANCE --username USER --password PASS
+./deploy-integrations-solution.py slack --bot-token xoxb-TOKEN --signing-secret SECRET --workspace-id WORKSPACE
 ```
 
 ### Testing and Quality
@@ -51,7 +52,7 @@ detect-secrets scan                      # secret detection
 ### CDK Operations
 ```bash
 npx cdk synth                            # synthesize templates
-npx cdk deploy --app "python3 app_[integration-target].py" StackName  # deploy
+npx cdk deploy --app "python3 app_[integration-target].py" StackName  # deploy (jira/service-now/slack)
 npx cdk destroy StackName                # destroy
 ```
 

@@ -832,5 +832,3 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             value=f"{service_now_api_gateway.url.rstrip('/')}/webhook",
             description="ServiceNow Webhook API Gateway URL",
         )
-
-

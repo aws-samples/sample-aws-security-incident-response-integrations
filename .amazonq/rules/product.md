@@ -25,6 +25,13 @@ AWS Security Incident Response Sample Integrations provides bidirectional synchr
 - Provide resource setup automation for initial configuration
 - Use API Gateway webhooks for ServiceNow notifications
 
+### Slack Integration
+- Create dedicated Slack channels for new AWS SIR cases
+- Sync messages, comments, and attachments bidirectionally
+- Support slash commands for case management from Slack
+- Use Slack Bolt framework for event handling and API interactions
+- Implement real-time webhook processing via API Gateway
+
 ## Development Principles
 
 - **Fail-safe Operations**: All external API calls must handle failures gracefully
