@@ -359,7 +359,7 @@ A: Yes, you can deploy the stack multiple times with different parameters to con
 
 ## Related Resources
 
-- [AWS Security Incident Response Documentation](https://docs.aws.amazon.com/security-incident-response/)
+- [AWS Security Incident Response Documentation](https://docs.aws.amazon.com/security-ir/)
 - [Jira API Documentation](https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/)
 - [Jira Automation Documentation](https://support.atlassian.com/jira-cloud-administration/docs/automate-your-jira-cloud-processes-and-workflows/)
 - [AWS SNS Documentation](https://docs.aws.amazon.com/sns/)
