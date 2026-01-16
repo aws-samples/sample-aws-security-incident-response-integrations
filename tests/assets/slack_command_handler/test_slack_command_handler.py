@@ -67,7 +67,7 @@ class TestGetCaseIdFromChannel:
     @patch('slack_command_handler_index.incidents_table')
     def test_get_case_id_success(self, mock_table):
         """Test successful case ID retrieval"""
-        mock_table.scan.return_value = {
+        mock_table.query.return_value = {
             "Items": [
                 {"PK": "Case#12345", "SK": "latest", "slackChannelId": "C1234567890"}
             ]
@@ -79,7 +79,7 @@ class TestGetCaseIdFromChannel:
     @patch('slack_command_handler_index.incidents_table')
     def test_get_case_id_not_found(self, mock_table):
         """Test case ID not found"""
-        mock_table.scan.return_value = {"Items": []}
+        mock_table.query.return_value = {"Items": []}
         
         result = index.get_case_id_from_channel("C1234567890")
         assert result is None
