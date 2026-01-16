@@ -1,0 +1,1 @@
+There are expired AWS credentials in your environment. The CDK app will synth without current account information.

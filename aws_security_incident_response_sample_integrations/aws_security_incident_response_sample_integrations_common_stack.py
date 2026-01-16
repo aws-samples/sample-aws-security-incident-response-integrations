@@ -84,6 +84,14 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             point_in_time_recovery=True,
         )
 
+        # Add GSI for Slack channel lookups
+        self.table.add_global_secondary_index(
+            index_name="slack-channel-index",
+            partition_key=dynamodb.Attribute(
+                name="slackChannelId", type=dynamodb.AttributeType.STRING
+            ),
+        )
+
         """
         cdk for event_bus
         """

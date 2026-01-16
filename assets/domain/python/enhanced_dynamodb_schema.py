@@ -236,17 +236,19 @@ class EnhancedDynamoDBService:
             Optional[str]: Case ID or None if not found
         """
         try:
-            response = self.table.scan(
-                FilterExpression="slackChannelId = :channel_id",
+            response = self.table.query(
+                IndexName="slack-channel-index",
+                KeyConditionExpression="slackChannelId = :channel_id",
                 ExpressionAttributeValues={":channel_id": slack_channel_id}
             )
-            
+
             items = response.get("Items", [])
-            
+
             # Handle pagination if there are more items
             while "LastEvaluatedKey" in response:
-                response = self.table.scan(
-                    FilterExpression="slackChannelId = :channel_id",
+                response = self.table.query(
+                    IndexName="slack-channel-index",
+                    KeyConditionExpression="slackChannelId = :channel_id",
                     ExpressionAttributeValues={":channel_id": slack_channel_id},
                     ExclusiveStartKey=response["LastEvaluatedKey"],
                 )

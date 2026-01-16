@@ -96,9 +96,10 @@ def get_case_id_from_channel(channel_id: str) -> Optional[str]:
         return None
         
     try:
-        # Query DynamoDB to find case ID by slack channel ID
-        response = incidents_table.scan(
-            FilterExpression="slackChannelId = :channel_id",
+        # Query DynamoDB to find case ID by slack channel ID using GSI
+        response = incidents_table.query(
+            IndexName="slack-channel-index",
+            KeyConditionExpression="slackChannelId = :channel_id",
             ExpressionAttributeValues={":channel_id": channel_id}
         )
         
