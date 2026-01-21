@@ -25,6 +25,8 @@ from constructs import Construct
 from .constants import (
     SECURITY_IR_EVENT_SOURCE,
     SERVICE_NOW_EVENT_SOURCE,
+    LAMBDA_MEMORY_SIZE,
+    LAMBDA_TIMEOUT_MINUTES,
 )
 from .aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
@@ -217,8 +219,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             "SecurityIncidentResponseServiceNowClient",
             entry=path.join(path.dirname(__file__), "..", "assets/service_now_client"),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(15),
-            memory_size=1024,
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            memory_size=LAMBDA_MEMORY_SIZE,
             layers=[domain_layer, mappers_layer, wrappers_layer],
             environment={
                 "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
@@ -431,7 +433,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "assets/service_now_secret_rotation_handler",
             ),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(5),
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
             role=service_now_secret_rotation_handler_role,
         )
 
@@ -534,8 +536,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 path.dirname(__file__), "..", "assets/service_now_notifications_handler"
             ),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(5),
-            memory_size=1024,
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            memory_size=LAMBDA_MEMORY_SIZE,
             layers=[domain_layer, mappers_layer, wrappers_layer],
             environment={
                 "EVENT_BUS_NAME": event_bus.event_bus_name,
@@ -619,7 +621,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "assets/service_now_api_gateway_authorizer",
             ),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.seconds(30),
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
             environment={
                 "API_AUTH_SECRET": api_auth_secret.secret_arn,
                 "LOG_LEVEL": log_level_param.value_as_string,
@@ -778,8 +780,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             ),
             layers=[domain_layer, mappers_layer, wrappers_layer],
             runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(5),
-            memory_size=1024,
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            memory_size=LAMBDA_MEMORY_SIZE,
             environment={
                 "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
                 "SERVICE_NOW_CLIENT_ID": service_now_client_id_ssm.parameter_name,
