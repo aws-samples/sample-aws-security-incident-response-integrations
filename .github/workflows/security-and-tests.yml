@@ -5,7 +5,7 @@ env:
 
 on:
   pull_request:
-    branches: [ main, v4/slack-integration ]
+    branches: [ main, v3/service-now-integration, v4/slack-integration ]
 
 jobs:
   security-scan:
