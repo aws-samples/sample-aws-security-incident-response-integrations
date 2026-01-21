@@ -140,5 +140,4 @@ jobs:
         if: github.event_name == 'pull_request'
         with:
           recreate: true
-          path: code-coverage-results.md
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          message-path: code-coverage-results.md
