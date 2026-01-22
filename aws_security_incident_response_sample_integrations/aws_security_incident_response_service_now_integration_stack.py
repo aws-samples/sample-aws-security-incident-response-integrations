@@ -15,7 +15,8 @@ from aws_cdk import (
     aws_logs,
     aws_secretsmanager,
     aws_ssm,
-    aws_s3_assets,
+    aws_s3 as s3,
+    aws_kms as kms,
     CustomResource,
     custom_resources as cr,
 )
@@ -24,6 +25,8 @@ from constructs import Construct
 from .constants import (
     SECURITY_IR_EVENT_SOURCE,
     SERVICE_NOW_EVENT_SOURCE,
+    LAMBDA_MEMORY_SIZE,
+    LAMBDA_TIMEOUT_MINUTES,
 )
 from .aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
@@ -143,7 +146,13 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         service_now_user_id_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
 
         # Use existing S3 bucket from deploy script
-        from aws_cdk import aws_s3 as s3
+        # Reference the AWS-managed S3 KMS key
+        s3_kms_key = kms.Alias.from_alias_name(
+            self,
+            "AWSS3ManagedKey",
+            "alias/aws/s3"
+        )
+        
         private_key_bucket = s3.Bucket.from_bucket_name(
             self,
             "ServiceNowPrivateKeyBucket",
@@ -210,7 +219,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             "SecurityIncidentResponseServiceNowClient",
             entry=path.join(path.dirname(__file__), "..", "assets/service_now_client"),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(15),
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            memory_size=LAMBDA_MEMORY_SIZE,
             layers=[domain_layer, mappers_layer, wrappers_layer],
             environment={
                 "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
@@ -265,6 +275,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
 
         # Grant S3 permissions to read private key
         private_key_bucket.grant_read(service_now_client_role)
+        
+        # Grant KMS permissions to decrypt S3 objects using specific key
+        s3_kms_key.grant_decrypt(service_now_client_role)
 
         # Grant specific DynamoDB permissions instead of full access
         table.grant_read_write_data(service_now_client_role)
@@ -420,7 +433,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "assets/service_now_secret_rotation_handler",
             ),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(5),
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
             role=service_now_secret_rotation_handler_role,
         )
 
@@ -523,6 +536,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 path.dirname(__file__), "..", "assets/service_now_notifications_handler"
             ),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            memory_size=LAMBDA_MEMORY_SIZE,
             layers=[domain_layer, mappers_layer, wrappers_layer],
             environment={
                 "EVENT_BUS_NAME": event_bus.event_bus_name,
@@ -557,6 +572,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
 
         # Grant S3 permissions to read private key
         private_key_bucket.grant_read(service_now_notifications_handler_role)
+        
+        # Grant KMS permissions to decrypt S3 objects using specific key
+        s3_kms_key.grant_decrypt(service_now_notifications_handler_role)
 
         # Grant specific DynamoDB permissions instead of full access
         table.grant_read_write_data(service_now_notifications_handler_role)
@@ -603,7 +621,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "assets/service_now_api_gateway_authorizer",
             ),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.seconds(30),
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
             environment={
                 "API_AUTH_SECRET": api_auth_secret.secret_arn,
                 "LOG_LEVEL": log_level_param.value_as_string,
@@ -731,6 +749,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
 
         # Grant S3 permissions to read private key
         private_key_bucket.grant_read(service_now_resource_setup_role)
+        
+        # Grant KMS permissions to decrypt S3 objects using specific key
+        s3_kms_key.grant_decrypt(service_now_resource_setup_role)
 
         # Add suppression for wildcard resource in SSM and Secrets Manager policies
         NagSuppressions.add_resource_suppressions(
@@ -759,7 +780,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             ),
             layers=[domain_layer, mappers_layer, wrappers_layer],
             runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(5),
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            memory_size=LAMBDA_MEMORY_SIZE,
             environment={
                 "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
                 "SERVICE_NOW_CLIENT_ID": service_now_client_id_ssm.parameter_name,

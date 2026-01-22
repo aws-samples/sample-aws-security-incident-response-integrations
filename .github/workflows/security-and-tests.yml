@@ -3,9 +3,14 @@ name: Security and Tests
 env:
   UV_SYSTEM_PYTHON: 1
 
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 on:
   pull_request:
-    branches: [ main, v4/slack-integration ]
+    branches: [ main, v3/service-now-integration, v4/slack-integration ]
 
 jobs:
   security-scan:
@@ -95,6 +100,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -128,11 +134,3 @@ jobs:
           indicators: true
           output: both
           thresholds: '1 80'
-
-      - name: Add Coverage PR Comment
-        uses: marocchino/sticky-pull-request-comment@v2
-        if: github.event_name == 'pull_request'
-        with:
-          recreate: true
-          path: code-coverage-results.md
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

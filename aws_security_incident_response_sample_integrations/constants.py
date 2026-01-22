@@ -70,3 +70,7 @@ SLACK_COMMAND_WATCHERS = "watchers"
 SLACK_COMMAND_SUMMARY = "summary"
 
 # ServiceNow automation constants
+
+# Lambda configuration constants
+LAMBDA_MEMORY_SIZE = 1024
+LAMBDA_TIMEOUT_MINUTES = 15
