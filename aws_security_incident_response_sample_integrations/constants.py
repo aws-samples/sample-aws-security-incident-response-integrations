@@ -4,6 +4,10 @@ This module contains all the constants used across the integration components,
 including AWS account IDs, event sources, and integration-specific constants.
 """
 
+from aws_cdk.aws_lambda import Runtime
+
+PYTHON_LAMBDA_RUNTIME = Runtime.PYTHON_3_13
+
 # JIRA Account ID/Service Principal for creating an SNS topic that receives notifications/events from JIRA
 # see the detailed documentation here - https://support.atlassian.com/cloud-automation/docs/configure-aws-sns-for-jira-automation/
 JIRA_AWS_ACCOUNT_ID = "815843069303"

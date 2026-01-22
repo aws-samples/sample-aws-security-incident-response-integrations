@@ -121,6 +121,8 @@ def deploy_servicenow(args):
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:privateKeyBucket={bucket_name}",
             "--parameters",
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:integrationModule={args.integration_module}",
+            "--parameters",
+            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:useOAuth={'true' if getattr(args, 'use_oauth', False) else 'false'}",
         ]
         print("\n🔄 Deploying ServiceNow integration...\n")
         # Using subprocess with a list of arguments is safe from shell injection
@@ -243,6 +245,13 @@ def main():
         required=True,
         help="ServiceNow integration module: 'itsm' for IT Service Management or 'ir' for Incident Response",
     )
+    # TODO: Enable when ready to publish OAuth 2 Authentication for API Gateway
+    # servicenow_parser.add_argument(
+    #     "--use-oauth",
+    #     action="store_true",
+    #     default=False,
+    #     help="Use OAuth for API Gateway authentication instead of token-based auth (not yet implemented)",
+    # )
     servicenow_parser.add_argument(
         "--log-level",
         choices=["info", "debug", "error"],

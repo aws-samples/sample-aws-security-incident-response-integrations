@@ -1,8 +1,13 @@
 from os import path
 from aws_cdk import (
+    Aspects,
+    CfnCondition,
     CfnOutput,
     CfnParameter,
+    CfnResource,
     Duration,
+    Fn,
+    IAspect,
     Stack,
     Aws,
     RemovalPolicy,
@@ -19,15 +24,29 @@ from aws_cdk import (
     CustomResource,
     custom_resources as cr,
 )
+import jsii
 from cdk_nag import NagSuppressions
 from constructs import Construct
 from .constants import (
     SECURITY_IR_EVENT_SOURCE,
     SERVICE_NOW_EVENT_SOURCE,
+    PYTHON_LAMBDA_RUNTIME
 )
 from .aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
 )
+
+
+@jsii.implements(IAspect)
+class ApplyCondition:
+    """Aspect that applies a CfnCondition to all CfnResources in a construct tree."""
+
+    def __init__(self, condition: CfnCondition):
+        self.condition = condition
+
+    def visit(self, node):
+        if isinstance(node, CfnResource):
+            node.cfn_options.condition = self.condition
 
 
 class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
@@ -112,6 +131,39 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="ServiceNow integration module: 'itsm' for IT Service Management or 'ir' for Incident Response",
             allowed_values=["itsm", "ir"],
             default="itsm",
+        )
+
+        # API Gateway authentication type parameter
+        use_oauth_param = CfnParameter(
+            self,
+            "useOAuth",
+            type="String",
+            description="Use OAuth for API Gateway authentication instead of token-based auth. Set to 'true' to enable OAuth (not yet implemented).",
+            allowed_values=["true", "false"],
+            default="false",
+        )
+
+        # Create CfnCondition for deploy-time evaluation of OAuth setting
+        # Note: OAuth is not yet implemented - this condition is for future use
+        self.use_oauth_condition = CfnCondition(
+            self,
+            "UseOAuthCondition",
+            expression=Fn.condition_equals(use_oauth_param.value_as_string, "true"),
+        )
+
+        # Condition for token-based auth (when OAuth is NOT enabled)
+        # This is the default authentication method
+        self.use_token_auth_condition = CfnCondition(
+            self,
+            "UseTokenAuthCondition",
+            expression=Fn.condition_equals(use_oauth_param.value_as_string, "false"),
+        )
+
+        combined_condition = CfnCondition(self, 'TemporaryOrCondition',
+                                          expression=Fn.condition_or(
+                                            self.use_oauth_condition,
+                                            self.use_token_auth_condition
+            )
         )
 
         # Create SSM parameters
@@ -209,7 +261,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             self,
             "SecurityIncidentResponseServiceNowClient",
             entry=path.join(path.dirname(__file__), "..", "assets/service_now_client"),
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            runtime=PYTHON_LAMBDA_RUNTIME,
             timeout=Duration.minutes(15),
             layers=[domain_layer, mappers_layer, wrappers_layer],
             environment={
@@ -242,7 +294,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
         service_now_client_rule.add_target(service_now_client_target)
 
-        # grant permissions to DynamoDB table and security-ir
+        # grant permissions to security-ir
         service_now_client_role.add_to_policy(
             aws_iam.PolicyStatement(
                 effect=aws_iam.Effect.ALLOW,
@@ -255,13 +307,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
 
         # allow adding SSM values
-        service_now_client_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=["ssm:GetParameter", "ssm:PutParameter"],
-                resources=["*"],
-            )
-        )
+        for ssm_param in [service_now_instance_id_ssm, service_now_client_id_ssm, service_now_user_id_ssm, private_key_asset_bucket_ssm, private_key_asset_key_ssm, service_now_client_secret_ssm_param]:
+            ssm_param.grant_read(service_now_client_role)
+            ssm_param.grant_write(service_now_client_role)
 
         # Grant S3 permissions to read private key
         private_key_bucket.grant_read(service_now_client_role)
@@ -288,19 +336,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             ),
         )
         enable_poller_cr.node.add_dependency(service_now_client)
-
-        # Add suppressions for IAM5 findings related to wildcard resources
-        NagSuppressions.add_resource_suppressions(
-            service_now_client_role,
-            [
-                {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for security-ir and SSM actions",
-                    "applies_to": ["Resource::*"],
-                }
-            ],
-            True,
-        )
 
         """
         cdk for API Gateway to receive events from ServiceNow
@@ -335,7 +370,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             )
         )
 
-        # Create API Gateway
         service_now_api_gateway = aws_apigateway.RestApi(
             self,
             "ServiceNowWebhookApi",
@@ -373,6 +407,11 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         # Add dependency to ensure the role is created before the account uses it
         api_gateway_account.node.add_dependency(api_gateway_logging_role)
 
+        # Apply token-based auth condition to API Gateway and related resources
+        # These resources will only be created when useOAuth=false (default)
+        Aspects.of(service_now_api_gateway).add(ApplyCondition(combined_condition))
+        Aspects.of(api_gateway_account).add(ApplyCondition(combined_condition))
+
         """
         cdk for Secrets Manager secret with rotation for API Gateway authorization
         """
@@ -384,32 +423,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Role for ServiceNow secret rotation Lambda function",
         )
 
-        service_now_secret_rotation_handler_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
-                ],
-            )
-        )
-
-        service_now_secret_rotation_handler_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "secretsmanager:GetSecretValue",
-                    "secretsmanager:PutSecretValue",
-                    "secretsmanager:UpdateSecretVersionStage",
-                ],
-                resources=["*"],
-            )
-        )
-
         # Create rotation Lambda function
         service_now_secret_rotation_handler = py_lambda.PythonFunction(
             self,
@@ -419,7 +432,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "..",
                 "assets/service_now_secret_rotation_handler",
             ),
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            runtime=PYTHON_LAMBDA_RUNTIME,
             timeout=Duration.minutes(5),
             role=service_now_secret_rotation_handler_role,
         )
@@ -438,24 +451,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             ),
         )
 
+        api_auth_secret.grant_read(service_now_secret_rotation_handler_role)
+        api_auth_secret.grant_write(service_now_secret_rotation_handler_role)
+
         # Configure rotation
         api_auth_secret.add_rotation_schedule(
             "RotationSchedule",
             rotation_lambda=service_now_secret_rotation_handler,
             automatically_after=Duration.days(30),
-        )
-
-        # Add suppression for rotation role
-        NagSuppressions.add_resource_suppressions(
-            service_now_secret_rotation_handler_role,
-            [
-                {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for Secrets Manager rotation",
-                    "applies_to": ["Resource::*"],
-                }
-            ],
-            True,
         )
 
         """
@@ -502,19 +505,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             )
         )
 
-        # Add suppressions for IAM5 findings related to wildcard resources
-        NagSuppressions.add_resource_suppressions(
-            service_now_notifications_handler_role,
-            [
-                {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for SSM parameters",
-                    "applies_to": ["Resource::*"],
-                }
-            ],
-            True,
-        )
-
         # Create Lambda function for Service Now Notifications handler with custom role
         service_now_notifications_handler = py_lambda.PythonFunction(
             self,
@@ -522,7 +512,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             entry=path.join(
                 path.dirname(__file__), "..", "assets/service_now_notifications_handler"
             ),
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            runtime=PYTHON_LAMBDA_RUNTIME,
             layers=[domain_layer, mappers_layer, wrappers_layer],
             environment={
                 "EVENT_BUS_NAME": event_bus.event_bus_name,
@@ -602,7 +592,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "..",
                 "assets/service_now_api_gateway_authorizer",
             ),
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            runtime=PYTHON_LAMBDA_RUNTIME,
             timeout=Duration.seconds(30),
             environment={
                 "API_AUTH_SECRET": api_auth_secret.secret_arn,
@@ -636,46 +626,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         service_now_notifications_handler.grant_invoke(
             aws_iam.ServicePrincipal("apigateway.amazonaws.com")
         )
-
-        # Add suppression for authorizer role
-        NagSuppressions.add_resource_suppressions(
-            service_now_api_gateway_authorizer_role,
-            [
-                {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for CloudWatch Logs permissions",
-                    "applies_to": ["Resource::arn:*:logs:*:*:*"],
-                }
-            ],
-            True,
-        )
-
-        # Add suppressions for IAM5 findings related to wildcard resources
-        NagSuppressions.add_resource_suppressions(
-            service_now_notifications_handler,
-            [
-                {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for security-ir, events, lambda, and SSM actions",
-                    "applies_to": ["Resource::*"],
-                }
-            ],
-            True,
-        )
-
-        # Add suppressions for API Gateway logging role
-        NagSuppressions.add_resource_suppressions(
-            api_gateway_logging_role,
-            [
-                {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for CloudWatch Logs permissions",
-                    "applies_to": ["Resource::arn:*:logs:*:*:*"],
-                }
-            ],
-            True,
-        )
-
         """
         Custom Lambda resource for creating ServiceNow resources (Business Rule and Outbound REST API). These Service Now resources will automate the event processing for Incident related updates in AWS Security IR
         """
@@ -732,19 +682,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         # Grant S3 permissions to read private key
         private_key_bucket.grant_read(service_now_resource_setup_role)
 
-        # Add suppression for wildcard resource in SSM and Secrets Manager policies
-        NagSuppressions.add_resource_suppressions(
-            service_now_resource_setup_role,
-            [
-                {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resource is required for SSM parameter access and Secrets Manager rotation",
-                    "applies_to": ["Resource::*"],
-                }
-            ],
-            True,
-        )
-
         # Use the API Gateway's physical ID as the resource prefix
         # This will be available after deployment and used for naming ServiceNow resources
 
@@ -758,7 +695,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "assets/service_now_resource_setup_handler",
             ),
             layers=[domain_layer, mappers_layer, wrappers_layer],
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            runtime=PYTHON_LAMBDA_RUNTIME,
             timeout=Duration.minutes(5),
             environment={
                 "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
@@ -798,14 +735,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         NagSuppressions.add_stack_suppressions(
             self,
             [
-                {
-                    "id": "AwsSolutions-IAM4",
-                    "reason": "Built-in LogRetention Lambda role requires AWSLambdaBasicExecutionRole managed policy",
-                },
-                {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Built-in LogRetention Lambda needs these permissions to manage log retention",
-                },
                 {"id": "AwsSolutions-SQS3", "reason": "SQS is used as DLQ"},
                 {
                     "id": "AwsSolutions-L1",
