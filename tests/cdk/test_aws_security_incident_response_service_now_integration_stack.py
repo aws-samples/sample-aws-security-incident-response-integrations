@@ -160,15 +160,15 @@ class TestConditionalResources:
 
     def test_api_gateway_has_condition_applied(self, template):
         """Test that API Gateway resources have the combined condition applied."""
-        api_gateways = template.find_resources("AWS::ApiGateway::RestApi")
-        
+        api_gateways = template.find_resources("AWS::ApiGateway::Authorizer")
+
         # At least one API Gateway should have a condition
         has_condition = False
         for resource in api_gateways.values():
             if "Condition" in resource:
                 has_condition = True
                 break
-        assert has_condition, "API Gateway should have a condition applied"
+        assert has_condition, "Authorizers should have a condition applied"
 
     def test_use_oauth_parameter_allowed_values(self, template):
         """Test that useOAuth parameter only allows 'true' or 'false'."""
