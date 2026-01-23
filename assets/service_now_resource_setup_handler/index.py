@@ -670,7 +670,7 @@ class ServiceNowApiService:
                 "script": f"""
         (function executeRule(current, previous) {{
             try {{
-                var event_type = previous ? 'IncidentUpdated' : 'IncidentCreated';
+                var event_type = current.operation() == 'insert' ? 'IncidentCreated' : 'IncidentUpdated';
                 var payload = {{
                     "event_type": event_type,
                     "incident_number": current.number.toString(),
