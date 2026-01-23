@@ -274,11 +274,8 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             timeout=Duration.minutes(15),
             layers=[self.domain_layer, self.mappers_layer, self.wrappers_layer],
             environment={
-                "JIRA_EVENT_SOURCE": JIRA_EVENT_SOURCE,
-                "SERVICE_NOW_EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
+                **environment_vars,
                 "SLACK_EVENT_SOURCE": SLACK_EVENT_SOURCE,
-                "INCIDENTS_TABLE_NAME": self.table.table_name,
-                "LOG_LEVEL": self.log_level_param.value_as_string,
             },
             role=security_ir_client_role,
         )
@@ -344,6 +341,31 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                     resources=ssm_resources,
                 )
             )
+            
+            # Add S3 permissions for ServiceNow private key if bucket is specified
+            if service_now_params.get('private_key_asset_bucket_param_name'):
+                # Get bucket name from SSM parameter and construct specific S3 ARN
+                bucket_param_name = service_now_params['private_key_asset_bucket_param_name']
+                key_param_name = service_now_params.get('private_key_asset_key_param_name', '/SecurityIncidentResponse/privateKeyAssetKey')
+                
+                self.security_ir_client.add_to_role_policy(
+                    aws_iam.PolicyStatement(
+                        effect=aws_iam.Effect.ALLOW,
+                        actions=["s3:GetObject"],
+                        resources=[
+                            f"arn:aws:s3:::snow-key-{self.account}/private.key"
+                        ],
+                    )
+                )
+                
+                # Add KMS decrypt permissions for S3 objects using AWS-managed S3 key
+                self.security_ir_client.add_to_role_policy(
+                    aws_iam.PolicyStatement(
+                        effect=aws_iam.Effect.ALLOW,
+                        actions=["kms:Decrypt"],
+                        resources=[f"arn:aws:kms:{self.region}:{self.account}:alias/aws/s3"],
+                    )
+                )
 
         # Grant specific DynamoDB permissions instead of full access
         self.table.grant_read_write_data(self.security_ir_client)

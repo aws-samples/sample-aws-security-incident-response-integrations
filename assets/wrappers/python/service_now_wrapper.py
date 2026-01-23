@@ -160,28 +160,28 @@ class ServiceNowClient:
                 logger.error("Missing S3 bucket or key for private key asset")
                 return None
             
-            # Read private key using S3 resource
-            s3_object = self.s3_resource.Object(bucket, key)
-            private_key = s3_object.get()['Body'].read().decode('utf-8')
+            # Read private key with minimal memory footprint
+            if not self.s3_resource:
+                self.s3_resource = boto3.resource('s3')
             
-            if not user_id or not client_id:
-                logger.error("Missing user ID or client ID for JWT")
-                return None
+            response = self.s3_resource.Object(bucket, key).get()
+            private_key = response['Body'].read().decode('utf-8')
+            response['Body'].close()
             
-            # Create JWT payload
-            payload = {                
-                "iss": client_id,  # Issuer - OAuth client ID
-                "sub": user_id,    # Subject - ServiceNow user ID
-                "aud": client_id,  # Audience - OAuth client ID
-                "iat": int(time.time()),  # Issued at - current timestamp
-                "exp": int(time.time()) + 3600,  # Expiration - 1 hour from now
-                "jti": str(uuid.uuid4())  # JWT ID - unique identifier
+            # Create minimal JWT payload
+            payload = {
+                "iss": client_id,
+                "sub": user_id,
+                "aud": client_id,
+                "iat": int(time.time()),
+                "exp": int(time.time()) + 3600,
+                "jti": str(uuid.uuid4())
             }
             
             # Encode JWT
             encoded_jwt = jwt.encode(payload, private_key, algorithm=JWT_HEADER["alg"], headers=JWT_HEADER)
-            return encoded_jwt
             
+            return encoded_jwt
         except Exception as e:
             logger.error(f"Error generating JWT: {str(e)}")
             return None
@@ -321,53 +321,7 @@ class ServiceNowClient:
         glide_record.comments = fields.get("comments", "")
         glide_record.category = fields.get("category", "inquiry")
         glide_record.subcategory = fields.get("subcategory", "internal application")
-        # if "incident_state" in fields:
-        #     glide_record.incident_state = fields["incident_state"]
         return glide_record
-
-    def get_incident_with_display_values(
-        self, incident_number: str, integration_module: str = "itsm"
-    ) -> Optional[Dict[str, Any]]:
-        """Get a ServiceNow incident by incident_number.
-
-        Args:
-            incident_number (str): The ServiceNow incident number
-            integration_module (str): Integration module type ('itsm' or 'ir')
-
-        Returns:
-            Optional[Dict[str, Any]]: Incident record dictionary or None if retrieval fails
-        """
-        try:
-            if integration_module == "itsm":
-                table_name = "incident"
-            elif integration_module == "ir":
-                table_name = "sn_si_incident"
-            else:
-                logger.error(f"Invalid integration module: {integration_module}")
-                return None
-
-            glide_record = self.__get_glide_record(table_name)
-            glide_record.add_query("number", incident_number)
-            glide_record.query()
-            if glide_record.next():
-                logger.info(
-                    f"Incident details for {incident_number} from ServiceNow {table_name}: {glide_record}"
-                )
-                logger.info(
-                    f"Getting DisplayValue for the Incident {incident_number} GlideRecord from ServiceNow"
-                )
-                glide_record_with_display_values = glide_record.serialize(
-                    display_value=True
-                )
-                logger.info(
-                    f"Display values for incident details for {incident_number} from ServiceNow {table_name}: {glide_record_with_display_values}"
-                )
-                return glide_record_with_display_values
-        except Exception as e:
-            logger.error(
-                f"Error getting incident details for {incident_number} from ServiceNow: {str(e)}"
-            )
-            return None
 
     def get_incident(
         self, incident_number: str, integration_module: str = "itsm"
@@ -440,11 +394,9 @@ class ServiceNowClient:
                         f"Incident attachment details for incident {glide_record.number}: {attachment_details}"
                     )
                     attachments_list.append(attachment_details)
+                logger.info(f"Attachments list in ServiceNow: {attachments_list}")
                 return attachments_list
             else:
-                logger.error(
-                    f"Incident {service_now_incident_id} not found in {table_name}"
-                )
                 return None
         except Exception as e:
             logger.error(
@@ -490,6 +442,46 @@ class ServiceNowClient:
                 f"Error getting attachment data for incident {glide_record.number} from ServiceNow: {str(e)}"
             )
             return None
+
+    def get_incident_with_display_values(
+        self, incident_number: str, integration_module: str = "itsm"
+    ) -> Optional[Dict[str, Any]]:
+        """Get a ServiceNow incident by incident_number.
+
+        Args:
+            incident_number (str): The ServiceNow incident number
+            integration_module (str): Integration module type ('itsm' or 'ir')
+
+        Returns:
+            Optional[Dict[str, Any]]: Incident record dictionary or None if retrieval fails
+        """
+        try:
+            if integration_module == "itsm":
+                table_name = "incident"
+            elif integration_module == "ir":
+                table_name = "sn_si_incident"
+            else:
+                logger.error(f"Invalid integration module: {integration_module}")
+                return None
+
+            glide_record = self.__get_glide_record(table_name)  
+            glide_record.add_query("number", incident_number)
+            glide_record.query()
+            
+            if glide_record.next():
+                glide_record_with_display_values = glide_record.serialize(display_value=True)
+                logger.info(
+                    f"Display values for incident details for {incident_number} from ServiceNow {table_name}: {glide_record_with_display_values}"
+                )
+                return glide_record_with_display_values
+            else:
+                logger.error(f"No incident found with number: {incident_number}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting incident details for {incident_number} from ServiceNow: {str(e)}")
+            return None
+
 
     def create_incident(
         self, fields: Dict[str, Any], integration_module: str = "itsm"
@@ -759,7 +751,6 @@ class ServiceNowClient:
             return incident_dict
         except Exception as e:
             logger.error(f"Error extracting ServiceNow incident details: {str(e)}")
-            # Return minimal details if extraction fails
             return {
                 "id": (
                     service_now_incident.id

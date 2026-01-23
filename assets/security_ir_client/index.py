@@ -152,6 +152,9 @@ def process_service_now_event(
         )
         security_ir_fields["caseId"] = security_ir_case_id
         logger.info(f"New Security IR case created: {security_ir_case_id}")
+        # Delete the prior entry with PK as ServiceNow#service_now_incident_id to avoid scan queries picking the wrong record
+        logger.info(f"Delete the prior entry with PK as ServiceNow#{service_now_incident_id} to avoid scan queries picking the wrong record")
+        database_service.delete_service_now_record_ddb(service_now_incident_id)
 
     elif "updated" in service_now_event_type.lower():
         # if it's an update then an entry for the incident must already exist in the database
@@ -222,6 +225,10 @@ def process_service_now_event(
                 event_source=event_source,
             )
             security_ir_fields["caseId"] = security_ir_case_id
+            logger.info(f"New Security IR case created: {security_ir_case_id}")
+            # Delete the prior entry with PK as ServiceNow#service_now_incident_id to avoid scan queries picking the wrong record
+            logger.info(f"Delete the prior entry with PK as ServiceNow#{service_now_incident_id} to avoid scan queries picking the wrong record")
+            database_service.delete_service_now_record_ddb(service_now_incident_id)
 
     # Add comments as applicable to the SIR case
     # get comments for matching sir case
@@ -230,9 +237,20 @@ def process_service_now_event(
     )
 
     # extract ServiceNow incident comments in a list for validation, comparison and updates to SIR case
-    service_now_incident_comments = service_now_incident.get(
-        "comments_and_work_notes", ""
-    )
+    service_now_incident_comments = ""
+    comments = service_now_incident.get("comments", "")
+    work_notes = service_now_incident.get("work_notes", "")
+    comments_and_work_notes = service_now_incident.get("comments_and_work_notes", "")
+    
+    if not comments_and_work_notes:
+        if comments:
+            service_now_incident_comments += comments
+        if work_notes:
+            if service_now_incident_comments:
+                service_now_incident_comments += "\n"
+            service_now_incident_comments += work_notes
+    else:
+        service_now_incident_comments += comments_and_work_notes
 
     logger.info(
         f"Mapping ServiceNow incident comments to Security IR case : {service_now_incident_comments}"
@@ -316,6 +334,8 @@ def process_service_now_event(
     if security_ir_incident:
         security_ir_incident["caseId"] = security_ir_case_id
         database_service.store_incident_in_dynamodb(security_ir_incident)
+        # Create mapping between ServiceNow incident and Security IR case in the database
+        database_service.update_mapping(security_ir_case_id, service_now_incident_id)
 
 
 def process_jira_event(jira_issue: dict, event_source: str) -> None:
@@ -522,6 +542,7 @@ class DatabaseService:
         elif event_source == SERVICE_NOW_EVENT_SOURCE:
             attr_name = "serviceNowIncidentId"
         try:
+            # TODO: Use GSIs and replace the following scan queries to use the service-now index instead (see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210189285892844?focus=true)
             response = self.__ddb_table.scan(
                 FilterExpression=Attr(attr_name).eq(record_id)
             )
@@ -541,12 +562,21 @@ class DatabaseService:
                 )
                 security_ir_case_id = None
             else:
-                security_ir_case_id = items[0]["PK"]
-                security_ir_case_id = re.search(
-                    r"Case#(\d+)", security_ir_case_id
-                ).group(1)
-                logger.info(f"Security IR case ID: {security_ir_case_id}")
+                security_ir_case_id = None
+                # Loop through all items to find one with valid Case# format
+                for item in items:
+                    pk = item.get("PK")
+                    if pk:
+                        match = re.search(r"Case#(.+)", pk)
+                        if match:
+                            security_ir_case_id = match.group(1)
+                            logger.info(f"Security IR case id: {pk}")
+                            break
+                
+                if not security_ir_case_id:
+                    logger.error(f"No valid Case# format found in items for {record_id}")
 
+            logger.info(f"Security IR case ID: {security_ir_case_id}")
             return security_ir_case_id
 
         except ClientError as e:
@@ -560,6 +590,33 @@ class DatabaseService:
                 f"{event_source} issue/incident for Case#{record_id} not found in database"
             )
             return None
+
+    def update_mapping(self, case_id: str, service_now_incident_id: str) -> bool:
+        """
+        Update the mapping between a Security IR case and a ServiceNow incident.
+
+        Args:
+            case_id (str): The Security IR case ID
+            service_now_incident_id (str): The ServiceNow incident ID
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            self.__ddb_table.update_item(
+                Key={"PK": f"Case#{case_id}", "SK": "latest"},
+                UpdateExpression="set serviceNowIncidentId = :j",
+                ExpressionAttributeValues={":j": service_now_incident_id},
+                ReturnValues="UPDATED_NEW",
+            )
+            logger.info(
+                f"Security IR case {case_id} mapped to ServiceNow incident {service_now_incident_id}"
+            )
+            return True
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            logger.error(f"Error updating DynamoDB table: {error_code}")
+            return False
 
     def store_incident_in_dynamodb(self, incident: dict) -> bool:
         """Store or update incident in DynamoDB.
@@ -628,6 +685,29 @@ class DatabaseService:
 
         except Exception as e:
             logger.error(f"Error storing incident in DynamoDB: {str(e)}")
+            return False
+
+    def delete_service_now_record_ddb(self, service_now_incident_id: str) -> bool:
+        """Delete ServiceNow record from DynamoDB.
+
+        Args:
+            service_now_incident_id (str): ServiceNow incident ID
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            self.__ddb_table.delete_item(
+                Key={
+                    "PK": f"ServiceNow#{service_now_incident_id}",
+                    "SK": "latest"
+                }
+            )
+            logger.info(f"Deleted ServiceNow record for incident {service_now_incident_id}")
+            return True
+        except ClientError as e:
+            error_code = e.response["Error"]["Code"]
+            logger.error(f"Error deleting ServiceNow record: {error_code}")
             return False
 
     def json_datetime_encoder(self, obj: Any) -> str:
@@ -963,15 +1043,26 @@ class IncidentService:
             if event_source == SERVICE_NOW_EVENT_SOURCE and incident_number:
                 parameter_service = ParameterService()
                 # Get credentials from SSM
-                instance_id = parameter_service.get_parameter(
-                    os.environ.get("SERVICE_NOW_INSTANCE_ID")
-                )
+                instance_id_param = os.environ.get("SERVICE_NOW_INSTANCE_ID")
+                if not instance_id_param:
+                    logger.error("SERVICE_NOW_INSTANCE_ID environment variable not set")
+                    return False
+                    
+                instance_id = parameter_service.get_parameter(instance_id_param)
+                if not instance_id:
+                    logger.error(f"Failed to retrieve instance_id from parameter: {instance_id_param}")
+                    return False
+                    
                 logger.info(f"instance: {instance_id}")
                 client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
                 client_secret_param_name = os.environ.get("SERVICE_NOW_CLIENT_SECRET_PARAM")
                 user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
                 private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
                 private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
+                
+                if not all([client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
+                    logger.error("Missing required ServiceNow environment variables")
+                    return False
 
                 service_now_service = ServiceNowService(
                     instance_id,

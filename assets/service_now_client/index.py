@@ -454,6 +454,23 @@ class IncidentService:
                 service_now_fields["state"] = service_now_status
 
         return service_now_fields
+    
+    def get_service_now_incident_id_ddb(self, ir_case_id: str) -> Optional[str]:
+        """Check if ServiceNow incident exists for the given IR case.
+
+        Args:
+            ir_case_id (str): IR case ID
+
+        Returns:
+            Optional[str]: ServiceNow incident ID if exists, None otherwise
+        """
+        case_from_ddb = self.db_service.get_case(ir_case_id)
+        if not case_from_ddb or "Item" not in case_from_ddb:
+            logger.error(
+                f"No Security IR case found in database for IR case {ir_case_id}"
+            )
+            return None
+        return case_from_ddb["Item"].get("serviceNowIncidentId")
 
     def process_security_incident(
         self, ir_case: Dict[str, Any], integration_module: str = "itsm"
@@ -500,11 +517,16 @@ class IncidentService:
 
             # Handle based on event type
             if ir_event_type == "CaseCreated":
-                service_now_incident_id = self.handle_case_creation(
-                    ir_case_id,
-                    service_now_fields,
-                    integration_module,
-                )
+                service_now_incident_id = self.get_service_now_incident_id_ddb(ir_case_id)
+                if service_now_incident_id is None:
+                    logger.info(
+                        f"No ServiceNow incident found for IR case {ir_case_id} in database, creating ServiceNow incident..."
+                    )
+                    service_now_incident_id = self.handle_case_creation(
+                        ir_case_id,
+                        service_now_fields,
+                        integration_module,
+                    )
                 # Only add unmapped SIR fields comment to the ServiceNow comment_list for the first time when Incident is created
                 comments_list.append(unmapped_sir_fields_comment)
             elif ir_event_type == "CaseUpdated":
@@ -529,11 +551,17 @@ class IncidentService:
             logger.info(f"ServiceNow incident details: {service_now_incident}")
 
             # Map Security IR case comments to ServiceNow incident
-            service_now_incident_comments = (
-                service_now_incident.get("comments_and_work_notes")
-                if service_now_incident
-                else None
-            )
+            service_now_incident_comments = ""
+            if service_now_incident:
+                comments = service_now_incident.get("comments", "")
+                work_notes = service_now_incident.get("work_notes", "")
+                
+                if comments:
+                    service_now_incident_comments += comments
+                if work_notes:
+                    if service_now_incident_comments:
+                        service_now_incident_comments += "\n"
+                    service_now_incident_comments += work_notes
 
             if sir_case_comments:
                 comments_to_be_added = map_sir_case_comments_to_service_now_incident(
@@ -554,6 +582,8 @@ class IncidentService:
                 if service_now_incident
                 else None
             )
+            logger.info(f"ServiceNow incident existing attachments: {service_now_incident_attachments}")
+            
             if sir_case_attachments:
                 logger.info(
                     "Uploading Security IR case attachments to ServiceNow incident"
@@ -595,7 +625,7 @@ class IncidentService:
         except Exception as e:
             logger.error(f"Error in process_security_incident: {str(e)}")
             return None
-
+        
     def handle_case_creation(
         self,
         ir_case_id: str,
@@ -648,21 +678,9 @@ class IncidentService:
         Returns:
             Tuple[Optional[str], bool]: Tuple of (ServiceNow incident ID, incident_created flag)
         """
-        # Set incident_created flag to False. This flag will only be set to true if Incident does not already exist in DDB, and is created in ServiceNow for an IncidentUpdated event
         incident_created = False
+        service_now_incident_id = self.get_service_now_incident_id_ddb(ir_case_id)
 
-        # Get case details from database
-        case_from_ddb = self.db_service.get_case(ir_case_id)
-        if not case_from_ddb and "Item" not in case_from_ddb:
-            logger.error(
-                f"No Security IR case found in database for IR case {ir_case_id}"
-            )
-            return None
-
-        # Get ServiceNow incident ID
-        service_now_incident_id = case_from_ddb["Item"].get("serviceNowIncidentId")
-
-        # Create new incident in ServiceNow if none exists
         if service_now_incident_id is None:
             logger.info(
                 f"No ServiceNow incident found for IR case {ir_case_id} in database, creating ServiceNow incident..."
@@ -674,7 +692,6 @@ class IncidentService:
             )
             incident_created = True
         else:
-            # Update existing incident in ServiceNow
             logger.info(
                 f"ServiceNow incident {service_now_incident_id} found for IR case {ir_case_id} in database, updating ServiceNow incident..."
             )
