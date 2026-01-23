@@ -1,4 +1,4 @@
 requests==2.32.4
 boto3>=1.37.7
-PyJWT==2.8.0
+PyJWT==2.10.1
 cryptography>=46.0.3
