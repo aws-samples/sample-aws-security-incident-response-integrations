@@ -5,11 +5,11 @@ This document provides an overview of the AWS Security Incident Response Jira in
 ## Deployment
 
 1. Use the `jira` argument to deploy the JIRA integration:
-   `./deploy-integrations-solution.py jira -h`
+   `./deploy_integrations_solution.py jira -h`
    You should see the following output:
 
    ```
-   usage: deploy-integrations-solution jira [-h] --email EMAIL --url URL --token TOKEN
+   usage: deploy_integrations_solution jira [-h] --email EMAIL --url URL --token TOKEN
 
    options:
       -h, --help     show this help message and exit
@@ -21,7 +21,7 @@ This document provides an overview of the AWS Security Incident Response Jira in
 2. Deploy the integration with a single command
 
    ```bash
-   ./deploy-integrations-solution.py jira \
+   ./deploy_integrations_solution.py jira \
       --email <your-jira-email> \
       --url <your-jira-url> \
       --token <your-jira-api-token> \
@@ -132,7 +132,7 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    git clone https://github.com/sample-aws-security-incident-response-integrations.git
    cd sample-aws-security-incident-response-integrations/
    pip install -r requirements.txt
-   chmod +x deploy-integrations-solution.py
+   chmod +x deploy_integrations_solution.py
    sudo systemctl start docker.service
    sudo chmod 666 /var/run/docker.sock
    ```
@@ -160,7 +160,7 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    git clone https://github.com/sample-aws-security-incident-response-integrations.git
    cd sample-aws-security-incident-response-integrations/
    pip install -r requirements.txt
-   chmod +x deploy-integrations-solution.py
+   chmod +x deploy_integrations_solution.py
    sudo systemctl start docker.service
    sudo chmod 666 /var/run/docker.sock
    ```

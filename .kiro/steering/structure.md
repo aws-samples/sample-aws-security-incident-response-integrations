@@ -4,7 +4,7 @@
 
 - **app.py** - Main CDK application entry point for Jira integration
 - **app_service_now.py** - CDK application entry point for ServiceNow integration
-- **deploy-integrations-solution.py** - CLI deployment script with integration-specific parameters
+- **deploy_integrations_solution.py** - CLI deployment script with integration-specific parameters
 - **cdk.json** - CDK configuration and feature flags
 - **requirements.txt** - Python dependencies (includes asset-specific requirements)
 - **requirements-dev.txt** - Development and testing dependencies

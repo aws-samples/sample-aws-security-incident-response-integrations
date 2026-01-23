@@ -1,20 +1,18 @@
-"""Tests for deploy-integrations-solution.py deployment script."""
+"""Tests for deploy_integrations_solution.py deployment script."""
 
 import argparse
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
+import boto3
 import pytest
+from moto import mock_aws
 
-# Use runpy to load the module with a hyphenated filename
-import runpy
+from deploy_integrations_solution import deploy_jira, deploy_servicenow, deploy_slack, main
 
-deploy_module = runpy.run_path("deploy-integrations-solution.py")
-deploy_jira = deploy_module["deploy_jira"]
-deploy_servicenow = deploy_module["deploy_servicenow"]
-deploy_slack = deploy_module["deploy_slack"]
-main = deploy_module["main"]
+# Test account ID used by moto
+MOTO_ACCOUNT_ID = "123456789012"
 
 
 class TestArgumentParsing:
@@ -28,38 +26,17 @@ class TestArgumentParsing:
 
     def test_jira_all_arguments_parsed(self):
         """Test that all Jira arguments are correctly parsed."""
-        test_args = [
-            "prog",
-            "jira",
-            "--email",
-            "test@example.com",
-            "--url",
-            "https://example.atlassian.net",
-            "--token",
-            "test-token",
-            "--project-key",
-            "PROJ",
-        ]
-        with patch.object(sys, "argv", test_args):
-            with patch(
-                "runpy.run_path",
-                return_value={**deploy_module, "deploy_jira": MagicMock(return_value=0)},
-            ):
-                # Re-import to get the patched version
-                patched = runpy.run_path("deploy-integrations-solution.py")
-                with patch.object(sys, "argv", test_args):
-                    with patch("subprocess.run") as mock_run:
-                        mock_run.return_value = MagicMock(returncode=0)
-                        result = deploy_jira(
-                            argparse.Namespace(
-                                email="test@example.com",
-                                url="https://example.atlassian.net",
-                                token="test-token",
-                                project_key="PROJ",
-                                log_level="error",
-                            )
-                        )
-                        assert result == 0
+        args = argparse.Namespace(
+            email="test@example.com",
+            url="https://example.atlassian.net",
+            token="test-token",
+            project_key="PROJ",
+            log_level="error",
+        )
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            result = deploy_jira(args)
+            assert result == 0
 
     def test_servicenow_required_arguments(self):
         """Test that ServiceNow integration requires all mandatory arguments."""
@@ -229,6 +206,22 @@ class TestDeployJira:
 class TestDeployServiceNow:
     """Tests for ServiceNow deployment function."""
 
+    @pytest.fixture
+    def servicenow_args(self, tmp_path):
+        """Common ServiceNow deployment arguments with a real temp key file."""
+        key_file = tmp_path / "test.key"
+        key_file.write_text("fake-private-key-content")
+        return argparse.Namespace(
+            instance_id="test-instance",
+            client_id="client123",
+            client_secret="secret456",
+            user_id="user789",
+            private_key_path=str(key_file),
+            integration_module="itsm",
+            log_level="error",
+            use_oauth=False,
+        )
+
     def test_deploy_servicenow_private_key_not_found(self):
         """Test ServiceNow deployment fails when private key file doesn't exist."""
         args = argparse.Namespace(
@@ -241,208 +234,131 @@ class TestDeployServiceNow:
             log_level="error",
             use_oauth=False,
         )
-        with patch("os.path.exists", return_value=False):
+        result = deploy_servicenow(args)
+        assert result == 1
+
+    @mock_aws
+    def test_deploy_servicenow_success(self, servicenow_args):
+        """Test successful ServiceNow deployment."""
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = deploy_servicenow(servicenow_args)
+            assert result == 0
+            mock_run.assert_called_once()
+
+    @mock_aws
+    def test_deploy_servicenow_s3_bucket_already_exists(self, servicenow_args):
+        """Test ServiceNow deployment handles existing S3 bucket."""
+        # Pre-create the bucket to simulate "already exists"
+        s3 = boto3.client("s3", region_name="us-east-1")
+        bucket_name = f"snow-key-{MOTO_ACCOUNT_ID}"
+        s3.create_bucket(Bucket=bucket_name)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = deploy_servicenow(servicenow_args)
+            assert result == 0
+            mock_run.assert_called_once()
+
+    def test_deploy_servicenow_s3_bucket_creation_error(self, tmp_path):
+        """Test ServiceNow deployment handles S3 bucket creation errors."""
+        key_file = tmp_path / "test.key"
+        key_file.write_text("fake-private-key-content")
+        args = argparse.Namespace(
+            instance_id="test-instance",
+            client_id="client123",
+            client_secret="secret456",
+            user_id="user789",
+            private_key_path=str(key_file),
+            integration_module="itsm",
+            log_level="error",
+            use_oauth=False,
+        )
+        mock_s3 = MagicMock()
+        mock_s3.exceptions.BucketAlreadyOwnedByYou = type("BucketAlreadyOwnedByYou", (Exception,), {})
+        mock_s3.exceptions.BucketAlreadyExists = type("BucketAlreadyExists", (Exception,), {})
+        mock_s3.create_bucket.side_effect = Exception("Bucket creation failed")
+        mock_sts = MagicMock()
+        mock_sts.get_caller_identity.return_value = {"Account": MOTO_ACCOUNT_ID}
+
+        with patch("boto3.client") as mock_boto:
+            mock_boto.side_effect = lambda service, **kwargs: mock_s3 if service == "s3" else mock_sts
             result = deploy_servicenow(args)
             assert result == 1
 
-    def test_deploy_servicenow_success(self):
-        """Test successful ServiceNow deployment."""
-        args = argparse.Namespace(
-            instance_id="test-instance",
-            client_id="client123",
-            client_secret="secret456",
-            user_id="user789",
-            private_key_path="./test.key",
-            integration_module="itsm",
-            log_level="error",
-            use_oauth=False,
-        )
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-
-        mock_s3 = MagicMock()
-        mock_sts = MagicMock()
-        mock_sts.get_caller_identity.return_value = {"Account": "123456789012"}
-
-        with patch("os.path.exists", return_value=True):
-            with patch("boto3.client") as mock_boto:
-                mock_boto.side_effect = lambda service: mock_s3 if service == "s3" else mock_sts
-                with patch("subprocess.run", return_value=mock_result) as mock_run:
-                    result = deploy_servicenow(args)
-                    assert result == 0
-                    mock_run.assert_called_once()
-
-    def test_deploy_servicenow_s3_bucket_already_exists(self):
-        """Test ServiceNow deployment handles existing S3 bucket."""
-        args = argparse.Namespace(
-            instance_id="test-instance",
-            client_id="client123",
-            client_secret="secret456",
-            user_id="user789",
-            private_key_path="./test.key",
-            integration_module="itsm",
-            log_level="error",
-            use_oauth=False,
-        )
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-
-        mock_s3 = MagicMock()
-        # Simulate BucketAlreadyOwnedByYou exception
-        mock_s3.exceptions.BucketAlreadyOwnedByYou = type("BucketAlreadyOwnedByYou", (Exception,), {})
-        mock_s3.create_bucket.side_effect = mock_s3.exceptions.BucketAlreadyOwnedByYou()
-        mock_sts = MagicMock()
-        mock_sts.get_caller_identity.return_value = {"Account": "123456789012"}
-
-        with patch("os.path.exists", return_value=True):
-            with patch("boto3.client") as mock_boto:
-                mock_boto.side_effect = lambda service: mock_s3 if service == "s3" else mock_sts
-                with patch("subprocess.run", return_value=mock_result) as mock_run:
-                    result = deploy_servicenow(args)
-                    assert result == 0
-                    mock_run.assert_called_once()
-
-    def test_deploy_servicenow_s3_bucket_creation_error(self):
-        """Test ServiceNow deployment handles S3 bucket creation errors."""
-        args = argparse.Namespace(
-            instance_id="test-instance",
-            client_id="client123",
-            client_secret="secret456",
-            user_id="user789",
-            private_key_path="./test.key",
-            integration_module="itsm",
-            log_level="error",
-            use_oauth=False,
-        )
-        mock_s3 = MagicMock()
-        mock_s3.exceptions.BucketAlreadyOwnedByYou = type("BucketAlreadyOwnedByYou", (Exception,), {})
-        mock_s3.create_bucket.side_effect = Exception("Bucket creation failed")
-        mock_sts = MagicMock()
-        mock_sts.get_caller_identity.return_value = {"Account": "123456789012"}
-
-        with patch("os.path.exists", return_value=True):
-            with patch("boto3.client") as mock_boto:
-                mock_boto.side_effect = lambda service: mock_s3 if service == "s3" else mock_sts
-                result = deploy_servicenow(args)
-                assert result == 1
-
-    def test_deploy_servicenow_s3_upload_error(self):
+    def test_deploy_servicenow_s3_upload_error(self, tmp_path):
         """Test ServiceNow deployment handles S3 upload errors."""
+        key_file = tmp_path / "test.key"
+        key_file.write_text("fake-private-key-content")
         args = argparse.Namespace(
             instance_id="test-instance",
             client_id="client123",
             client_secret="secret456",
             user_id="user789",
-            private_key_path="./test.key",
+            private_key_path=str(key_file),
             integration_module="itsm",
             log_level="error",
             use_oauth=False,
         )
         mock_s3 = MagicMock()
         mock_s3.exceptions.BucketAlreadyOwnedByYou = type("BucketAlreadyOwnedByYou", (Exception,), {})
+        mock_s3.exceptions.BucketAlreadyExists = type("BucketAlreadyExists", (Exception,), {})
         mock_s3.upload_file.side_effect = Exception("Upload failed")
         mock_sts = MagicMock()
-        mock_sts.get_caller_identity.return_value = {"Account": "123456789012"}
+        mock_sts.get_caller_identity.return_value = {"Account": MOTO_ACCOUNT_ID}
 
-        with patch("os.path.exists", return_value=True):
-            with patch("boto3.client") as mock_boto:
-                mock_boto.side_effect = lambda service: mock_s3 if service == "s3" else mock_sts
-                result = deploy_servicenow(args)
-                assert result == 1
+        with patch("boto3.client") as mock_boto:
+            mock_boto.side_effect = lambda service, **kwargs: mock_s3 if service == "s3" else mock_sts
+            result = deploy_servicenow(args)
+            assert result == 1
 
-    def test_deploy_servicenow_subprocess_error(self):
+    @mock_aws
+    def test_deploy_servicenow_subprocess_error(self, servicenow_args):
         """Test ServiceNow deployment handles subprocess errors."""
-        args = argparse.Namespace(
-            instance_id="test-instance",
-            client_id="client123",
-            client_secret="secret456",
-            user_id="user789",
-            private_key_path="./test.key",
-            integration_module="itsm",
-            log_level="error",
-            use_oauth=False,
-        )
-        mock_result = MagicMock()
-        mock_result.returncode = 0
+        with patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "cmd")):
+            result = deploy_servicenow(servicenow_args)
+            assert result == 1
 
-        mock_s3 = MagicMock()
-        mock_sts = MagicMock()
-        mock_sts.get_caller_identity.return_value = {"Account": "123456789012"}
-
-        with patch("os.path.exists", return_value=True):
-            with patch("boto3.client") as mock_boto:
-                mock_boto.side_effect = lambda service: mock_s3 if service == "s3" else mock_sts
-                with patch(
-                    "subprocess.run",
-                    side_effect=subprocess.CalledProcessError(1, "cmd"),
-                ):
-                    result = deploy_servicenow(args)
-                    assert result == 1
-
-    def test_deploy_servicenow_use_oauth_false(self):
+    @mock_aws
+    def test_deploy_servicenow_use_oauth_false(self, servicenow_args):
         """Test ServiceNow deployment with use_oauth explicitly set to False."""
-        args = argparse.Namespace(
-            instance_id="test-instance",
-            client_id="client123",
-            client_secret="secret456",
-            user_id="user789",
-            private_key_path="./test.key",
-            integration_module="itsm",
-            log_level="error",
-            use_oauth=False,
-        )
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        mock_s3 = MagicMock()
-        mock_sts = MagicMock()
-        mock_sts.get_caller_identity.return_value = {"Account": "123456789012"}
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = deploy_servicenow(servicenow_args)
+            assert result == 0
+            cmd = " ".join(mock_run.call_args[0][0])
+            assert "useOAuth=false" in cmd
 
-        with patch("os.path.exists", return_value=True):
-            with patch("boto3.client") as mock_boto:
-                mock_boto.side_effect = lambda service: mock_s3 if service == "s3" else mock_sts
-                with patch("subprocess.run", return_value=mock_result) as mock_run:
-                    result = deploy_servicenow(args)
-                    assert result == 0
-                    cmd = " ".join(mock_run.call_args[0][0])
-                    assert "useOAuth=false" in cmd
-
-    def test_deploy_servicenow_use_oauth_true(self):
+    @mock_aws
+    def test_deploy_servicenow_use_oauth_true(self, servicenow_args):
         """Test ServiceNow deployment with use_oauth explicitly set to True."""
-        args = argparse.Namespace(
-            instance_id="test-instance",
-            client_id="client123",
-            client_secret="secret456",
-            user_id="user789",
-            private_key_path="./test.key",
-            integration_module="itsm",
-            log_level="error",
-            use_oauth=True,
-        )
+        servicenow_args.use_oauth = True
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        mock_s3 = MagicMock()
-        mock_sts = MagicMock()
-        mock_sts.get_caller_identity.return_value = {"Account": "123456789012"}
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = deploy_servicenow(servicenow_args)
+            assert result == 0
+            cmd = " ".join(mock_run.call_args[0][0])
+            assert "useOAuth=true" in cmd
 
-        with patch("os.path.exists", return_value=True):
-            with patch("boto3.client") as mock_boto:
-                mock_boto.side_effect = lambda service: mock_s3 if service == "s3" else mock_sts
-                with patch("subprocess.run", return_value=mock_result) as mock_run:
-                    result = deploy_servicenow(args)
-                    assert result == 0
-                    cmd = " ".join(mock_run.call_args[0][0])
-                    assert "useOAuth=true" in cmd
-
-    def test_deploy_servicenow_use_oauth_missing_attribute(self):
+    @mock_aws
+    def test_deploy_servicenow_use_oauth_missing_attribute(self, tmp_path):
         """Test ServiceNow deployment defaults use_oauth to False when attribute is missing."""
+        key_file = tmp_path / "test.key"
+        key_file.write_text("fake-private-key-content")
         args = argparse.Namespace(
             instance_id="test-instance",
             client_id="client123",
             client_secret="secret456",
             user_id="user789",
-            private_key_path="./test.key",
+            private_key_path=str(key_file),
             integration_module="itsm",
             log_level="error",
             # use_oauth intentionally omitted - should default to False
@@ -450,18 +366,11 @@ class TestDeployServiceNow:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        mock_s3 = MagicMock()
-        mock_sts = MagicMock()
-        mock_sts.get_caller_identity.return_value = {"Account": "123456789012"}
-
-        with patch("os.path.exists", return_value=True):
-            with patch("boto3.client") as mock_boto:
-                mock_boto.side_effect = lambda service: mock_s3 if service == "s3" else mock_sts
-                with patch("subprocess.run", return_value=mock_result) as mock_run:
-                    result = deploy_servicenow(args)
-                    assert result == 0
-                    cmd = " ".join(mock_run.call_args[0][0])
-                    assert "useOAuth=false" in cmd
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = deploy_servicenow(args)
+            assert result == 0
+            cmd = " ".join(mock_run.call_args[0][0])
+            assert "useOAuth=false" in cmd
 
 
 class TestDeploySlack:

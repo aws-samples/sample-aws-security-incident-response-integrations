@@ -25,7 +25,6 @@ with patch('boto3.client'), patch('boto3.resource'):
         MAX_FILE_SIZE_BYTES,
         SLACK_MAX_RETRIES,
         SLACK_INITIAL_RETRY_DELAY,
-        SLACK_MAX_RETRY_DELAY
     )
 
 

@@ -6,7 +6,7 @@ This document provides an overview of the AWS Security Incident Response Service
 
 ```bash
 # Deploy the integration with JWT OAuth authentication
-./deploy-integrations-solution.py service-now \
+./deploy_integrations_solution.py service-now \
   --instance-id <your-servicenow-instance-id> \
   --client-id <your-oauth-client-id> \
   --client-secret <your-oauth-client-secret> \
@@ -19,7 +19,7 @@ This document provides an overview of the AWS Security Incident Response Service
 Eg.
 ```bash
 # Deploy the integration with JWT OAuth authentication
-./deploy-integrations-solution.py service-now \
+./deploy_integrations_solution.py service-now \
   --instance-id dev1234 \
   --client-id test-1234 \
   --client-secret "XXXXXXXXXXXXXXXXXXXX" \
@@ -148,7 +148,7 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git
    cd sample-aws-security-incident-response-integrations/
    pip install -r requirements.txt
-   chmod +x deploy-integrations-solution.py
+   chmod +x deploy_integrations_solution.py
    sudo systemctl start docker.service
    sudo chmod 666 /var/run/docker.sock
    ```
@@ -189,7 +189,7 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git
    cd sample-aws-security-incident-response-integrations/
    pip install -r requirements.txt
-   chmod +x deploy-integrations-solution.py
+   chmod +x deploy_integrations_solution.py
    sudo systemctl start docker.service
    sudo chmod 666 /var/run/docker.sock
    ```
@@ -572,8 +572,8 @@ The stack provides the following outputs that can be used for integration:
   
 3. **Deploy the Stack**:
    ```bash
-   # Using the deploy-integrations-solution script with JWT OAuth
-   deploy-integrations-solution service-now \
+   # Using the deploy_integrations_solution script with JWT OAuth
+   deploy_integrations_solution service-now \
      --instance-id <your-servicenow-instance-id> \
      --client-id <your-oauth-client-id> \
      --client-secret <your-oauth-client-secret> \
