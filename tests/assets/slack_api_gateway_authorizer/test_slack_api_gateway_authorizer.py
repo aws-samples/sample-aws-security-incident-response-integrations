@@ -12,14 +12,24 @@ from pathlib import Path
 
 import pytest
 
+# Store original boto3 module reference if it exists
+_original_boto3 = sys.modules.get("boto3")
+
 # Mock boto3 before importing the module
-sys.modules["boto3"] = Mock()
+_mock_boto3 = Mock()
+sys.modules["boto3"] = _mock_boto3
 
 # Add the assets directory to the path
 assets_path = Path(__file__).parent.parent.parent.parent / "assets"
 sys.path.insert(0, str(assets_path / "slack_api_gateway_authorizer"))
 
 import index
+
+# Restore original boto3 module after import to prevent test pollution
+if _original_boto3 is not None:
+    sys.modules["boto3"] = _original_boto3
+else:
+    del sys.modules["boto3"]
 
 
 @pytest.fixture
