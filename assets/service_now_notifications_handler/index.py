@@ -563,7 +563,6 @@ class ServiceNowService:
             if not self.service_now_client:
                 logger.info("Service Now Client failed to initialize")
             
-            # Get incident with memory cleanup
             service_now_incident = self.service_now_client.get_incident_with_display_values(
                 service_now_incident_id, integration_module
             )
@@ -839,7 +838,6 @@ class ServiceNowMessageProcessorService:
             logger.info(
                 f"Publishing IncidentCreatedEvent for ServiceNow incident {incident_number}"
             )
-            # Process operations separately to manage memory
             db_success = self.db_service._add_incident_details(incident_number, incident_details)
             if db_success:
                 event = IncidentCreatedEvent(incident_details)
@@ -1016,7 +1014,6 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
                 instance_id,
                 table_name,
                 event_bus_name,
-                # jwt_header=JWT_HEADER,
                 client_id_param_name=client_id_param_name,
                 client_secret_param_name=client_secret_param_name,
                 user_id_param_name=user_id_param_name,
@@ -1030,7 +1027,6 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
             )
         
         try:
-            # Extract and process with memory cleanup
             body = processor._extract_event_body(event)
             
             if body is None or body == "{}":

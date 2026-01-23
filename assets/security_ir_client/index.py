@@ -240,13 +240,17 @@ def process_service_now_event(
     service_now_incident_comments = ""
     comments = service_now_incident.get("comments", "")
     work_notes = service_now_incident.get("work_notes", "")
+    comments_and_work_notes = service_now_incident.get("comments_and_work_notes", "")
     
-    if comments:
-        service_now_incident_comments += comments
-    if work_notes:
-        if service_now_incident_comments:
-            service_now_incident_comments += "\n"
-        service_now_incident_comments += work_notes
+    if not comments_and_work_notes:
+        if comments:
+            service_now_incident_comments += comments
+        if work_notes:
+            if service_now_incident_comments:
+                service_now_incident_comments += "\n"
+            service_now_incident_comments += work_notes
+    else:
+        service_now_incident_comments += comments_and_work_notes
 
     logger.info(
         f"Mapping ServiceNow incident comments to Security IR case : {service_now_incident_comments}"
@@ -538,6 +542,7 @@ class DatabaseService:
         elif event_source == SERVICE_NOW_EVENT_SOURCE:
             attr_name = "serviceNowIncidentId"
         try:
+            # TODO: Use GSIs and replace the following scan queries to use the service-now index instead (see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210189285892844?focus=true)
             response = self.__ddb_table.scan(
                 FilterExpression=Attr(attr_name).eq(record_id)
             )
