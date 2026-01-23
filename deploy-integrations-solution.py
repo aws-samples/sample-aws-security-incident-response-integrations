@@ -18,6 +18,30 @@ import boto3
 import os
 
 
+def configure_s3_bucket_security(s3_client, bucket_name):
+    """Configure S3 bucket with encryption and versioning.
+    
+    Args:
+        s3_client: Boto3 S3 client
+        bucket_name (str): Name of the S3 bucket
+    """
+    s3_client.put_bucket_encryption(
+        Bucket=bucket_name,
+        ServerSideEncryptionConfiguration={
+            'Rules': [{
+                'ApplyServerSideEncryptionByDefault': {
+                    'SSEAlgorithm': 'aws:kms',
+                    'KMSMasterKeyID': 'alias/aws/s3'
+                }
+            }]
+        }
+    )
+    s3_client.put_bucket_versioning(
+        Bucket=bucket_name,
+        VersioningConfiguration={'Status': 'Enabled'}
+    )
+
+
 def deploy_jira(args):
     """Deploy Jira integration using CDK.
 
@@ -79,13 +103,29 @@ def deploy_servicenow(args):
         # Create S3 client and upload private key
         s3_client = boto3.client('s3')
         account = boto3.client('sts').get_caller_identity()['Account']
+        region = boto3.Session().region_name or 'us-east-1'
         bucket_name = f"snow-key-{account}"
         
         try:
-            s3_client.create_bucket(Bucket=bucket_name)
-            print(f"\n📦 Created S3 bucket: {bucket_name}")
-        except s3_client.exceptions.BucketAlreadyOwnedByYou:
-            print(f"\n📦 Using existing S3 bucket: {bucket_name}")
+            if region == 'us-east-1':
+                s3_client.create_bucket(Bucket=bucket_name)
+            else:
+                s3_client.create_bucket(
+                    Bucket=bucket_name,
+                    CreateBucketConfiguration={'LocationConstraint': region}
+                )
+            
+            # Enable encryption and versioning
+            configure_s3_bucket_security(s3_client, bucket_name)
+            print(f"\n📦 Created encrypted S3 bucket: {bucket_name}")
+        except (s3_client.exceptions.BucketAlreadyOwnedByYou, s3_client.exceptions.BucketAlreadyExists):
+            # Apply encryption to existing bucket
+            try:
+                configure_s3_bucket_security(s3_client, bucket_name)
+            except Exception:
+                print(f"\n📦 Encryption already enabled for S3 bucket: {bucket_name}")
+                pass
+            print(f"\n📦 Using existing encrypted S3 bucket: {bucket_name}")
         except Exception as e:
             print(f"\n❌ Error creating S3 bucket: {e}")
             return 1

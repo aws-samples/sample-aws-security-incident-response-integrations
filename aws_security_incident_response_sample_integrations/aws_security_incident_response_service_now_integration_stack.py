@@ -21,18 +21,20 @@ from aws_cdk import (
     aws_s3 as s3,
     aws_secretsmanager,
     aws_ssm,
-    aws_s3_assets,
+    aws_s3 as s3,
+    aws_kms as kms,
     CustomResource,
     custom_resources as cr,
 )
 import jsii
-from cdk_nag import NagSuppressions
 from constructs import Construct
 from .constants import (
     SECURITY_IR_EVENT_SOURCE,
     SERVICE_NOW_EVENT_SOURCE,
     PYTHON_LAMBDA_RUNTIME, SECRET_ROTATION_LAMBDA_TIMEOUT, API_GATEWAY_AUTHORIZOR_TIMEOUT,
-    API_GATEWAY_LAMBDA_HANDLER_TIMEOUT, DEFAULT_LAMBDA_TIMEOUT
+    API_GATEWAY_LAMBDA_HANDLER_TIMEOUT, DEFAULT_LAMBDA_TIMEOUT,
+    LAMBDA_MEMORY_SIZE,
+    LAMBDA_TIMEOUT_MINUTES,
 )
 from .aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
@@ -315,7 +317,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Custom role for Security Incident Response Service Now Client Lambda function",
         )
 
-        # Grant permissions to security-ir
         service_now_client_role.add_to_policy(
             aws_iam.PolicyStatement(
                 effect=aws_iam.Effect.ALLOW,
@@ -540,7 +541,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             ),
             runtime=PYTHON_LAMBDA_RUNTIME,
             timeout=SECRET_ROTATION_LAMBDA_TIMEOUT,
-            role=service_now_secret_rotation_handler_role,
         )
         # Create the secret with rotation
         secret_template = '{"token": ""}'  # nosec B105

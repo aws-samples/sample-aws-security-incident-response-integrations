@@ -65,6 +65,21 @@ Before deploying the Slack integration, you need:
    - The Workspace ID is shown in the URL: `https://app.slack.com/client/T1234567890/...`
    - The ID starts with `T` (e.g., `T1234567890`)
 
+### Bootstrap environment
+If you haven't already performed a `cdk bootstrap` on your AWS account, run the following command either via an EC2 instance or local terminal as seen in the next i.e. [Install the necessary tools](#install-the-necessary-tools) section:
+
+**Recommended: Use least-privilege bootstrap policy**
+
+For enhanced security, use the least-privilege CDK bootstrap policy that restricts permissions to only the AWS services required by this solution. See the detailed policy and instructions in [CDK_BOOTSTRAP_POLICY.md](CDK_BOOTSTRAP_POLICY.md).
+
+**Alternative: Use default bootstrap (less secure)**
+```bash
+cdk bootstrap
+```
+
+**Why to bootstrap?**
+Bootstrap is a prerequisite to deployment. You cannot deploy the solution which is a CDK application into an AWS account and region (an "environment") until that environment has been bootstrapped. Trying to deploy without bootstrapping will result in an error. Performing `cdk bootstrap` on an environment allows you to provision the foundational resources (like an S3 bucket and IAM roles) that the AWS CDK needs to manage and deploy the solution's infrastructure. 
+
 ### Install the necessary tools
 
 #### Using AWS Console (EC2 instance)
@@ -138,7 +153,11 @@ Before deploying the Slack integration, you need:
    export AWS_SECRET_ACCESS_KEY=<AWS Secret Access Key>
    export AWS_SESSION_TOKEN=<AWS Session Token>
    ```
-4. Now, run the `deploy` command from the following [Deployment Command](#deployment-command) section
+4. Create the least-privilege bootstrap policy:
+   ```bash
+   aws iam create-policy --policy-name CDKBootstrapPolicy --policy-document file://cdk-bootstrap-policy.json
+   ```
+5. Now, run the `deploy` command from the following [Deployment Command](#deployment-command) section
 
 ### Deployment Command
 
