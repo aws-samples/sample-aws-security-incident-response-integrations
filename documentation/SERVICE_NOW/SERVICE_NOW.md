@@ -99,6 +99,21 @@ JWT (JSON Web Token) OAuth authentication uses RSA key pairs to generate signed 
 2. `AWS Secret Access Key`
 3. `AWS Session Token`
 
+### Bootstrap environment
+If you haven't already performed a `cdk bootstrap` on your AWS account, run the following command either via an EC2 instance or local terminal as seen in the next i.e. [Install the necessary tools](#install-the-necessary-tools) section:
+
+**Recommended: Use least-privilege bootstrap policy**
+
+For enhanced security, use the least-privilege CDK bootstrap policy that restricts permissions to only the AWS services required by this solution. See the detailed policy and instructions in [CDK_BOOTSTRAP_POLICY.md](CDK_BOOTSTRAP_POLICY.md).
+
+**Alternative: Use default bootstrap (less secure)**
+```bash
+cdk bootstrap
+```
+
+**Why to bootstrap?**
+Bootstrap is a prerequisite to deployment. You cannot deploy the solution which is a CDK application into an AWS account and region (an "environment") until that environment has been bootstrapped. Trying to deploy without bootstrapping will result in an error. Performing `cdk bootstrap` on an environment allows you to provision the foundational resources (like an S3 bucket and IAM roles) that the AWS CDK needs to manage and deploy the solution's infrastructure. 
+
 ### Install the necessary tools
 
 #### Using AWS Console (EC2 instance)

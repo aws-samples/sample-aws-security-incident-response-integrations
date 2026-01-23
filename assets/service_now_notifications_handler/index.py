@@ -175,6 +175,8 @@ class IncidentUpdatedEvent(BaseEvent):
             "caller_id": self.incident.get("caller_id", ""),
             "urgency": self.incident.get("urgency", ""),
             "severity": self.incident.get("severity", ""),
+            "comments": self.incident.get("comments", ""),
+            "work_notes": self.incident.get("work_notes", ""),
             "comments_and_work_notes": self.incident.get("comments_and_work_notes", ""),
             "close_code": self.incident.get("close_code", ""),
             "close_notes": self.incident.get("close_notes", ""),
@@ -313,7 +315,6 @@ class EventPublisherService:
             return response
         except Exception as e:
             logger.error(f"Error publishing event: {str(e)}")
-            logger.error(traceback.format_exc())
             raise
 
 
@@ -358,56 +359,61 @@ class DatabaseService:
             List of matching items
         """
         max_retries = 5
-        wait_time = 10
-        # time.sleep(wait_time)
+        wait_time = 30
+        time.sleep(wait_time)
 
         for attempt in range(max_retries):
             try:
                 # TODO: Use GSIs and replace the following scan queries to use the service-now index instead (see https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210189285892844?focus=true)
+                
                 response = self.table.scan(
-                    FilterExpression=Attr("serviceNowIncidentId").eq(
-                        service_now_incident_id
-                    )
+                    FilterExpression="serviceNowIncidentId = :service_now_incident_id",
+                    ExpressionAttributeValues={":service_now_incident_id": service_now_incident_id}
                 )
-                items = response["Items"]
-
+                
+                items = response.get("Items", [])
+                
                 # Handle pagination if there are more items
                 while "LastEvaluatedKey" in response:
                     response = self.table.scan(
-                        FilterExpression=Attr("serviceNowIncidentId").eq(
-                            service_now_incident_id
-                        ),
+                        FilterExpression="serviceNowIncidentId = :service_now_incident_id",
+                        ExpressionAttributeValues={":service_now_incident_id": service_now_incident_id},
                         ExclusiveStartKey=response["LastEvaluatedKey"],
                     )
-                    items.extend(response["Items"])
+                    items.extend(response.get("Items", []))
 
-                # Add retry logic when items is null/empty or missing required key
-                if not items or "serviceNowIncidentDetails" not in items[0]:
-                    reason = (
-                        "not found"
-                        if not items
-                        else "missing serviceNowIncidentDetails key"
-                    )
+                if not items:
                     logger.info(
-                        f"ServiceNow incident for {service_now_incident_id} {reason} in database on attempt {attempt + 1}"
+                        f"ServiceNow incident for {service_now_incident_id} not found in database on attempt {attempt + 1}"
                     )
                     if not self.__should_retry(attempt, max_retries, wait_time):
                         return None
-                    wait_time = max(2, wait_time - 2)  # Decrease by 2s, minimum 2s
+                    wait_time = max(5, wait_time - 5)  # Decrease by 5s, minimum 5s
                     continue
 
-                logger.info(
-                    f"ServiceNow incident for {service_now_incident_id} found in database. Extracting incident details."
-                )
+                # Loop through all items to find one with serviceNowIncidentDetails
+                for item in items:
+                    if "serviceNowIncidentDetails" in item:
+                        logger.info(
+                            f"ServiceNow incident for {service_now_incident_id} found in database. Extracting incident details."
+                        )
+                        return item["serviceNowIncidentDetails"]
 
-                return items[0]["serviceNowIncidentDetails"]
+                # If no item has serviceNowIncidentDetails, retry
+                logger.info(
+                    f"ServiceNow incident for {service_now_incident_id} missing serviceNowIncidentDetails key in database on attempt {attempt + 1}"
+                )
+                if not self.__should_retry(attempt, max_retries, wait_time):
+                    return None
+                wait_time = max(5, wait_time - 5)  # Decrease by 5s, minimum 5s
+                continue
             except Exception as e:
                 logger.info(
                     f"ServiceNow incident for {service_now_incident_id} not found in database on attempt {attempt + 1}. Error encountered: str{e}"
                 )
                 if not self.__should_retry(attempt, max_retries, wait_time):
                     return []
-                wait_time = max(2, wait_time - 2)  # Decrease by 2s, minimum 2s
+                wait_time = max(5, wait_time - 5)  # Decrease by 5s, minimum 5s
                 continue
         return None
 
@@ -549,22 +555,27 @@ class ServiceNowService:
             Dictionary of incident details or None if retrieval fails
         """
         try:
+            
             integration_module = os.environ.get("INTEGRATION_MODULE", "itsm")
-            service_now_incident = (
-                self.service_now_client.get_incident_with_display_values(
-                    service_now_incident_id, integration_module
-                )
+            
+            logger.info(f"Integration module: {integration_module}")
+            
+            if not self.service_now_client:
+                logger.info("Service Now Client failed to initialize")
+            
+            service_now_incident = self.service_now_client.get_incident_with_display_values(
+                service_now_incident_id, integration_module
             )
-            service_now_incident_attachments = (
-                self.service_now_client.get_incident_attachments_details(
-                    service_now_incident_id, integration_module
-                )
-            )
+            
             if not service_now_incident:
                 logger.error(
                     f"Failed to get incident {service_now_incident_id} from ServiceNow"
                 )
                 return None
+
+            service_now_incident_attachments = self.service_now_client.get_incident_attachments_details(
+                service_now_incident_id, integration_module
+            )
 
             return self.service_now_client.extract_incident_details(
                 service_now_incident, service_now_incident_attachments
@@ -756,44 +767,59 @@ class ServiceNowMessageProcessorService:
         )
 
         # Get incident details and process based on event type
-        return self.__process_incident(incident_number)
+        return self.__process_incident(incident_number, event_type)
 
-    def __process_incident(self, incident_number: str) -> bool:
+    def __process_incident(self, incident_number: str, event_type: str) -> bool:
         """
         Process a ServiceNow incident
 
         Args:
             incident_number: The ServiceNow incident number
+            event_type: The ServiceNow incident event type i.e. IncidentUpdated or IncidentCreated
 
         Returns:
             True if processing was successful, False otherwise
         """
-        # Get ServiceNow incident details
-        service_now_incident_details = self.service_now_service._get_incident_details(
-            incident_number
-        )
-        if not service_now_incident_details:
-            logger.error(
-                f"Failed to get incident details for {incident_number} from ServiceNow"
+        try:
+            # TODO: instead of searching for Incident in DDB using scan to see if the Incident was created or updated, simply use the Event type
+            logger.info("Get incident details from SNOW")
+            # Get ServiceNow incident details
+            service_now_incident_details = self.service_now_service._get_incident_details(
+                incident_number
             )
+            if not service_now_incident_details:
+                logger.error(
+                    f"Failed to get incident details for {incident_number} from ServiceNow"
+                )
+                return False
+
+            # Get existing incident details from database
+            service_now_incident_details_ddb = self.db_service._get_incident_details(
+                incident_number
+            )
+
+            # Skip processing if event_type is IncidentCreated and incident already exists in DDB
+            if event_type == "IncidentCreated" and service_now_incident_details_ddb:
+                logger.info(f"Skipping IncidentCreated event for existing incident {incident_number}")
+                return True
+
+            # Process based on whether the incident exists in the database
+            if not service_now_incident_details_ddb:
+                result = self.__handle_new_incident(
+                    incident_number, service_now_incident_details
+                )
+            else:
+                result = self.__handle_existing_incident(
+                    incident_number,
+                    service_now_incident_details,
+                    service_now_incident_details_ddb,
+                )
+    
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error processing incident {incident_number}: {str(e)}")
             return False
-
-        # Get existing incident details from database
-        service_now_incident_details_ddb = self.db_service._get_incident_details(
-            incident_number
-        )
-
-        # Process based on whether the incident exists in the database
-        if not service_now_incident_details_ddb:
-            return self.__handle_new_incident(
-                incident_number, service_now_incident_details
-            )
-        else:
-            return self.__handle_existing_incident(
-                incident_number,
-                service_now_incident_details,
-                service_now_incident_details_ddb,
-            )
 
     def __handle_new_incident(
         self, incident_number: str, incident_details: Dict[str, Any]
@@ -812,11 +838,11 @@ class ServiceNowMessageProcessorService:
             logger.info(
                 f"Publishing IncidentCreatedEvent for ServiceNow incident {incident_number}"
             )
-            self.db_service._add_incident_details(incident_number, incident_details)
-            self.event_publisher_service._publish_event(
-                IncidentCreatedEvent(incident_details)
-            )
-            return True
+            db_success = self.db_service._add_incident_details(incident_number, incident_details)
+            if db_success:
+                event = IncidentCreatedEvent(incident_details)
+                self.event_publisher_service._publish_event(event)
+            return db_success
         except Exception as e:
             logger.error(f"Error handling new incident {incident_number}: {str(e)}")
             return False
@@ -839,21 +865,21 @@ class ServiceNowMessageProcessorService:
             True if processing was successful, False otherwise
         """
         try:
-            # Compare incident details to detect changes
-            logger.info(f"Latest Incident details from ServiceNow {incident_details}")
-            logger.info(
-                f"Existing Incident details from DDB {json.loads(existing_details)}"
-            )
-            if incident_details != json.loads(existing_details):
+            # Compare incident details to detect changes (memory efficient)
+            existing_dict = json.loads(existing_details)
+            has_changes = incident_details != existing_dict
+            
+            if has_changes:
                 logger.info(
                     f"Publishing IncidentUpdatedEvent for ServiceNow incident {incident_number}"
                 )
-                self.db_service._update_incident_details(
+                db_success = self.db_service._update_incident_details(
                     incident_number, incident_details
                 )
-                self.event_publisher_service._publish_event(
-                    IncidentUpdatedEvent(incident_details)
-                )
+                if db_success:
+                    event = IncidentUpdatedEvent(incident_details)
+                    self.event_publisher_service._publish_event(event)
+                return db_success
             else:
                 logger.info(f"No changes detected for incident {incident_number}")
             return True
@@ -925,7 +951,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         API Gateway compatible response
     """
     try:
-        # Log incoming event with more details for debugging
+        
         logger.info("Received event from Service Now")
 
         # Handle OPTIONS request for CORS
@@ -983,53 +1009,54 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
                 f"Parameter retrieval error: {str(e)}"
             )
 
-        # Create processor
-        processor = ServiceNowMessageProcessorService(
-            instance_id,
-            table_name,
-            event_bus_name,
-            client_id_param_name=client_id_param_name,
-            client_secret_param_name=client_secret_param_name,
-            user_id_param_name=user_id_param_name,
-            private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
-            private_key_asset_key_param_name=private_key_asset_key_param_name
-        )
-        processed_count = 0
-
-        # Extract the request body from API Gateway event
-        body = processor._extract_event_body(event)
-        if body is None or body == "{}":
-            logger.error("Empty or invalid request body")
-            return ResponseBuilderService._build_error_response(
-                "Empty or invalid request body"
+        try:
+            processor = ServiceNowMessageProcessorService(
+                instance_id,
+                table_name,
+                event_bus_name,
+                client_id_param_name=client_id_param_name,
+                client_secret_param_name=client_secret_param_name,
+                user_id_param_name=user_id_param_name,
+                private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
+                private_key_asset_key_param_name=private_key_asset_key_param_name
             )
-
-        # Parse the request body
-        payload = processor._parse_message(body)
-        logger.info("Parsed event payload")
-
-        # Check if payload has required fields
-        if not payload or "incident_number" not in payload:
-            logger.error("Missing required fields in payload")
+        except Exception as e:
+            logger.error(f"Failed to create ServiceNowMessageProcessorService: {str(e)}")
             return ResponseBuilderService._build_error_response(
-                "Missing required fields in payload"
+                f"Failed to initialize processor: {str(e)}"
             )
+        
+        try:
+            body = processor._extract_event_body(event)
+            
+            if body is None or body == "{}":
+                return ResponseBuilderService._build_error_response(
+                    "Empty or invalid request body"
+                )
 
-        # Process the webhook payload
-        success = processor._process_webhook_payload(payload)
+            payload = processor._parse_message(body)
 
-        if not success:
-            logger.error("Failed to process ServiceNow webhook payload")
+            if not payload or "incident_number" not in payload:
+                return ResponseBuilderService._build_error_response(
+                    "Missing required fields in payload"
+                )
+
+            success = processor._process_webhook_payload(payload)
+            
+            if not success:
+                return ResponseBuilderService._build_error_response(
+                    "Failed to process ServiceNow webhook payload"
+                )
+
+            return ResponseBuilderService._build_success_response(
+                "Successfully processed 1 record"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error during event processing: {str(e)}")
             return ResponseBuilderService._build_error_response(
-                "Failed to process ServiceNow webhook payload"
+                f"Event processing error: {str(e)}"
             )
-
-        processed_count += 1
-        logger.info(f"Successfully processed {processed_count} records")
-
-        return ResponseBuilderService._build_success_response(
-            f"Successfully processed {processed_count} records"
-        )
 
     except Exception as e:
         logger.error(f"Error in Lambda handler: {str(e)}")
