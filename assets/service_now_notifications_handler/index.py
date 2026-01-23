@@ -381,23 +381,6 @@ class DatabaseService:
                         ExclusiveStartKey=response["LastEvaluatedKey"],
                     )
                     items.extend(response.get("Items", []))
-                
-                # response = self.table.scan(
-                #     FilterExpression=Attr("serviceNowIncidentId").eq(
-                #         service_now_incident_id
-                #     )
-                # )
-                # items = response["Items"]
-
-                # # Handle pagination if there are more items
-                # while "LastEvaluatedKey" in response:
-                #     response = self.table.scan(
-                #         FilterExpression=Attr("serviceNowIncidentId").eq(
-                #             service_now_incident_id
-                #         ),
-                #         ExclusiveStartKey=response["LastEvaluatedKey"],
-                #     )
-                #     items.extend(response["Items"])
 
                 if not items:
                     logger.info(
