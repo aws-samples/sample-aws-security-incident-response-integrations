@@ -84,6 +84,8 @@ SLACK_COMMAND_SUMMARY = "summary"
 
 # ServiceNow automation constants
 
+TOKEN_ROTATION_PERIOD = Duration.days(30) # Token rotates every 30 days.
+
 # Lambda configuration constants
 LAMBDA_MEMORY_SIZE = 1024
 LAMBDA_TIMEOUT_MINUTES = 15

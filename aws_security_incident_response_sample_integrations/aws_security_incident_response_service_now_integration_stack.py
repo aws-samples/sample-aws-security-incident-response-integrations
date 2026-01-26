@@ -34,7 +34,7 @@ from .constants import (
     PYTHON_LAMBDA_RUNTIME, SECRET_ROTATION_LAMBDA_TIMEOUT, API_GATEWAY_AUTHORIZOR_TIMEOUT,
     API_GATEWAY_LAMBDA_HANDLER_TIMEOUT, DEFAULT_LAMBDA_TIMEOUT,
     LAMBDA_MEMORY_SIZE,
-    LAMBDA_TIMEOUT_MINUTES,
+    LAMBDA_TIMEOUT_MINUTES, TOKEN_ROTATION_PERIOD,
 )
 from .aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
@@ -116,7 +116,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
 
         # Create System -> ServiceNow Connectivity
         self.service_now_client = self._create_service_now_client()
-        self.enable_polling(self.service_now_client, common_stack.poller_rule)
+        common_stack.enable_polling()
+        common_stack.poller_rule.node.add_dependency(self.service_now_client) # Ensures poller doesn't start polling until the client is there to process the events.
+
         ## Create Event Bridge rule for ServiceNow Client Lambda function
         service_now_client_rule = aws_events.Rule(
             self,
@@ -284,28 +286,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             allowed_values=["true", "false"],
             default="false",
         )
-
-    def enable_polling(self, py_function: py_lambda.PythonFunction, rule: aws_events.Rule) -> None:
-        """Allows a function to be trigged by an EventBridge Scheduled Task"""
-        # Enable the poller rule after ServiceNow client is ready
-        enable_poller_cr = cr.AwsCustomResource(
-            self,
-            "EnablePollerRule",
-            on_create=cr.AwsSdkCall(
-                service="EventBridge",
-                action="enableRule",
-                parameters={
-                    "Name":rule.rule_name,
-                },
-                physical_resource_id=cr.PhysicalResourceId.of(
-                    f"enable-poller-{rule.rule_name}"
-                ),
-            ),
-            policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
-                resources=[rule.rule_arn]
-            ),
-        )
-        enable_poller_cr.node.add_dependency(py_function)
 
     def _create_service_now_client(self) -> py_lambda.PythonFunction:
         """The purpose of the ServiceNow Client is to issue commands to ServiceNow from the System"""
@@ -482,7 +462,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 )
             ],
         )
-
         api_gateway_logs = aws_logs.LogGroup(
                         self,
                         "ServiceNowApiGatewayLogs",
@@ -539,6 +518,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "..",
                 "assets/service_now_secret_rotation_handler",
             ),
+            role=service_now_secret_rotation_handler_role,
             runtime=PYTHON_LAMBDA_RUNTIME,
             timeout=SECRET_ROTATION_LAMBDA_TIMEOUT,
         )
@@ -560,7 +540,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         token_secret.add_rotation_schedule(
             "RotationSchedule",
             rotation_lambda=service_now_secret_rotation_handler,
-            automatically_after=Duration.days(30),
+            automatically_after=TOKEN_ROTATION_PERIOD,
         )
 
         # Create Lambda authorizer to enforce Token based AuthN/AuthZ

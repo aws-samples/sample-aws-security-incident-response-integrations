@@ -540,3 +540,12 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             ],
             True,
         )
+
+    def enable_polling(self):
+        self.poller_rule = aws_events.Rule(
+            self,
+            "SecurityIncidentResponsePollerRule",
+            schedule=aws_events.Schedule.rate(duration=Duration.minutes(1)),
+            targets=[aws_events_targets.LambdaFunction(self.poller)],
+            enabled=True,  # Start disabled
+        )
