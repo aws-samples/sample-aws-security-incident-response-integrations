@@ -6,6 +6,7 @@ from aws_cdk import (
     Stack,
     Aws,
     RemovalPolicy,
+    SecretValue,
     aws_apigateway,
     aws_events,
     aws_events_targets,
@@ -122,7 +123,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             self,
             "serviceNowClientSecretSecret",
             description="Service Now OAuth client secret",
-            secret_string_value=aws_secretsmanager.SecretStringValueBeta1.from_token(service_now_client_secret_param.value_as_string),
+            secret_string_value=SecretValue.cfn_parameter(service_now_client_secret_param),
         )
         service_now_client_secret_secret.apply_removal_policy(RemovalPolicy.DESTROY)
 
@@ -197,21 +198,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Custom role for Security Incident Response Service Now Client Lambda function",
         )
 
-        # Add custom policy for CloudWatch Logs permissions
-        service_now_client_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_client.function_name}*"
-                ],
-            )
-        )
-
         # create Lambda function for Service Now with custom role
         service_now_client = py_lambda.PythonFunction(
             self,
@@ -234,6 +220,21 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "LOG_LEVEL": log_level_param.value_as_string,
             },
             role=service_now_client_role,
+        )
+
+        # Add custom policy for CloudWatch Logs permissions after Lambda is created
+        service_now_client_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                effect=aws_iam.Effect.ALLOW,
+                actions=[
+                    "logs:CreateLogGroup",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents",
+                ],
+                resources=[
+                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_client.function_name}*"
+                ],
+            )
         )
 
         # create Event Bridge rule for Service Now Client Lambda function
@@ -404,12 +405,40 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         """
         cdk for Secrets Manager secret with rotation for API Gateway authorization
         """
+        # Create the secret with rotation
+        secret_template = '{"token": ""}'  # nosec B105
+        api_auth_secret = aws_secretsmanager.Secret(
+            self,
+            "ApiAuthSecret",
+            description="API Gateway authorization token for ServiceNow webhook",
+            generate_secret_string=aws_secretsmanager.SecretStringGenerator(
+                secret_string_template=secret_template,
+                generate_string_key="token",
+                exclude_characters=" %+~`#$&*()|[]{}:;<>?!'/\"\\@",
+                password_length=32,
+            ),
+        )
+
         # Create rotation Lambda role
         service_now_secret_rotation_handler_role = aws_iam.Role(
             self,
             "ServiceNowSecretRotationHandlerRole",
             assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
             description="Role for ServiceNow secret rotation Lambda function",
+        )
+
+        # Create rotation Lambda function
+        service_now_secret_rotation_handler = py_lambda.PythonFunction(
+            self,
+            "SecretRotationLambda",
+            entry=path.join(
+                path.dirname(__file__),
+                "..",
+                "assets/service_now_secret_rotation_handler",
+            ),
+            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            role=service_now_secret_rotation_handler_role,
         )
 
         service_now_secret_rotation_handler_role.add_to_policy(
@@ -436,34 +465,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 ],
                 resources=[api_auth_secret.secret_arn],
             )
-        )
-
-        # Create rotation Lambda function
-        service_now_secret_rotation_handler = py_lambda.PythonFunction(
-            self,
-            "SecretRotationLambda",
-            entry=path.join(
-                path.dirname(__file__),
-                "..",
-                "assets/service_now_secret_rotation_handler",
-            ),
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
-            role=service_now_secret_rotation_handler_role,
-        )
-
-        # Create the secret with rotation
-        secret_template = '{"token": ""}'  # nosec B105
-        api_auth_secret = aws_secretsmanager.Secret(
-            self,
-            "ApiAuthSecret",
-            description="API Gateway authorization token for ServiceNow webhook",
-            generate_secret_string=aws_secretsmanager.SecretStringGenerator(
-                secret_string_template=secret_template,
-                generate_string_key="token",
-                exclude_characters=" %+~`#$&*()|[]{}:;<>?!'/\"\\@",
-                password_length=32,
-            ),
         )
 
         # Configure rotation
@@ -495,6 +496,33 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             "ServiceNowNotificationsHandlerRole",
             assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
             description="Custom role for Service Now Notifications Handler Lambda function",
+        )
+
+        # Create Lambda function for Service Now Notifications handler with custom role
+        service_now_notifications_handler = py_lambda.PythonFunction(
+            self,
+            "ServiceNowNotificationsHandler",
+            entry=path.join(
+                path.dirname(__file__), "..", "assets/service_now_notifications_handler"
+            ),
+            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            memory_size=LAMBDA_MEMORY_SIZE,
+            layers=[domain_layer, mappers_layer, wrappers_layer],
+            environment={
+                "EVENT_BUS_NAME": event_bus.event_bus_name,
+                "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
+                "SERVICE_NOW_CLIENT_ID": service_now_client_id_ssm.parameter_name,
+                "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
+                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
+                "INCIDENTS_TABLE_NAME": table.table_name,
+                "EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
+                "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
+                "LOG_LEVEL": log_level_param.value_as_string,
+            },
+            role=service_now_notifications_handler_role,
         )
 
         # Add custom policy for CloudWatch Logs permissions
@@ -557,33 +585,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             True,
         )
 
-        # Create Lambda function for Service Now Notifications handler with custom role
-        service_now_notifications_handler = py_lambda.PythonFunction(
-            self,
-            "ServiceNowNotificationsHandler",
-            entry=path.join(
-                path.dirname(__file__), "..", "assets/service_now_notifications_handler"
-            ),
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
-            memory_size=LAMBDA_MEMORY_SIZE,
-            layers=[domain_layer, mappers_layer, wrappers_layer],
-            environment={
-                "EVENT_BUS_NAME": event_bus.event_bus_name,
-                "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
-                "SERVICE_NOW_CLIENT_ID": service_now_client_id_ssm.parameter_name,
-                "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
-                "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
-                "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
-                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
-                "INCIDENTS_TABLE_NAME": table.table_name,
-                "EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
-                "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
-                "LOG_LEVEL": log_level_param.value_as_string,
-            },
-            role=service_now_notifications_handler_role,
-        )
-
         # Add a specific rule for ServiceNow notification events
         service_now_notifications_rule = aws_events.Rule(
             self,
@@ -619,6 +620,23 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Role for ServiceNow API Gateway authorizer Lambda function",
         )
 
+        service_now_api_gateway_authorizer_lambda = py_lambda.PythonFunction(
+            self,
+            "ServiceNowApiGatewayAuthorizer",
+            entry=path.join(
+                path.dirname(__file__),
+                "..",
+                "assets/service_now_api_gateway_authorizer",
+            ),
+            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            environment={
+                "API_AUTH_SECRET": api_auth_secret.secret_arn,
+                "LOG_LEVEL": log_level_param.value_as_string,
+            },
+            role=service_now_api_gateway_authorizer_role,
+        )
+
         service_now_api_gateway_authorizer_role.add_to_policy(
             aws_iam.PolicyStatement(
                 effect=aws_iam.Effect.ALLOW,
@@ -639,23 +657,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[api_auth_secret.secret_arn],
             )
-        )
-
-        service_now_api_gateway_authorizer_lambda = py_lambda.PythonFunction(
-            self,
-            "ServiceNowApiGatewayAuthorizer",
-            entry=path.join(
-                path.dirname(__file__),
-                "..",
-                "assets/service_now_api_gateway_authorizer",
-            ),
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
-            environment={
-                "API_AUTH_SECRET": api_auth_secret.secret_arn,
-                "LOG_LEVEL": log_level_param.value_as_string,
-            },
-            role=service_now_api_gateway_authorizer_role,
         )
 
         # Create API Gateway authorizer
@@ -734,6 +735,35 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Role for ServiceNow Resource setup Lambda",
         )
 
+        # Create Lambda function for ServiceNow API setup
+        service_now_resource_setup_handler = py_lambda.PythonFunction(
+            self,
+            "ServiceNowResourceSetupLambda",
+            entry=path.join(
+                path.dirname(__file__),
+                "..",
+                "assets/service_now_resource_setup_handler",
+            ),
+            layers=[domain_layer, mappers_layer, wrappers_layer],
+            runtime=aws_lambda.Runtime.PYTHON_3_13,
+            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
+            memory_size=LAMBDA_MEMORY_SIZE,
+            environment={
+                "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
+                "SERVICE_NOW_CLIENT_ID": service_now_client_id_ssm.parameter_name,
+                "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
+                "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
+                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
+                "SERVICE_NOW_RESOURCE_PREFIX": service_now_api_gateway.rest_api_id,
+                "WEBHOOK_URL": f"{service_now_api_gateway.url.rstrip('/')}/webhook",
+                "API_AUTH_SECRET": api_auth_secret.secret_arn,
+                "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
+                "LOG_LEVEL": log_level_param.value_as_string,
+            },
+            role=service_now_resource_setup_role,
+        )
+
         # Add CloudWatch Logs permissions
         service_now_resource_setup_role.add_to_policy(
             aws_iam.PolicyStatement(
@@ -798,38 +828,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 }
             ],
             True,
-        )
-
-        # Use the API Gateway's physical ID as the resource prefix
-        # This will be available after deployment and used for naming ServiceNow resources
-
-        # Create Lambda function for ServiceNow API setup
-        service_now_resource_setup_handler = py_lambda.PythonFunction(
-            self,
-            "ServiceNowResourceSetupLambda",
-            entry=path.join(
-                path.dirname(__file__),
-                "..",
-                "assets/service_now_resource_setup_handler",
-            ),
-            layers=[domain_layer, mappers_layer, wrappers_layer],
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
-            memory_size=LAMBDA_MEMORY_SIZE,
-            environment={
-                "SERVICE_NOW_INSTANCE_ID": service_now_instance_id_ssm.parameter_name,
-                "SERVICE_NOW_CLIENT_ID": service_now_client_id_ssm.parameter_name,
-                "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
-                "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
-                "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
-                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
-                "SERVICE_NOW_RESOURCE_PREFIX": service_now_api_gateway.rest_api_id,
-                "WEBHOOK_URL": f"{service_now_api_gateway.url.rstrip('/')}/webhook",
-                "API_AUTH_SECRET": api_auth_secret.secret_arn,
-                "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
-                "LOG_LEVEL": log_level_param.value_as_string,
-            },
-            role=service_now_resource_setup_role,
         )
 
         # Create custom resource provider
