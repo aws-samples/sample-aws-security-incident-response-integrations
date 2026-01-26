@@ -14,6 +14,8 @@ from aws_cdk import (
     aws_events as events,
     aws_logs,
 )
+from aws_cdk.aws_events import CfnRule
+
 from .event_bus_logger_construct import EventBusLoggerConstruct
 from cdk_nag import NagSuppressions
 from constructs import Construct
@@ -180,7 +182,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
 
         self.poller_rule = aws_events.Rule(
             self,
-            "SecurityIncidentResponsePollerRule",
+            "SecurityIncidentResponsePollerRuleDisabled",
             schedule=aws_events.Schedule.rate(duration=Duration.minutes(1)),
             targets=[aws_events_targets.LambdaFunction(self.poller)],
             enabled=False,  # Start disabled
@@ -566,7 +568,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
     def enable_polling(self):
         self.poller_rule = aws_events.Rule(
             self,
-            "SecurityIncidentResponsePollerRule",
+            "SecurityIncidentResponsePollerRuleEnable",
             schedule=aws_events.Schedule.rate(duration=Duration.minutes(1)),
             targets=[aws_events_targets.LambdaFunction(self.poller)],
             enabled=True,  # Start disabled
