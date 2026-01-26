@@ -30,7 +30,7 @@ All Slack credentials are stored in SSM Parameter Store with the following chara
 The simplest way to set up parameters is during CDK deployment:
 
 ```bash
-./deploy-integrations-solution.py slack \
+./deploy_integrations_solution.py slack \
   --bot-token "xoxb-YOUR-BOT-TOKEN-HERE" \
   --signing-secret "YOUR-SIGNING-SECRET-HERE" \
   --workspace-id "T1234567890" \
@@ -304,7 +304,7 @@ Enable debug logging to troubleshoot parameter issues:
 
 ```bash
 # Deploy with debug logging
-./deploy-integrations-solution.py slack \
+./deploy_integrations_solution.py slack \
   --bot-token "xoxb-..." \
   --signing-secret "..." \
   --workspace-id "T1234567890" \

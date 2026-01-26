@@ -23,8 +23,8 @@ This document provides detailed information on setup, configuration, validation,
 
 2. **Deploy the Stack**:
    ```bash
-   # Using the deploy-integrations-solution script
-   deploy-integrations-solution jira \
+   # Using the deploy_integrations_solution script
+   deploy_integrations_solution jira \
      --email <your-jira-email> \
      --url <your-jira-url> \
      --token <your-jira-api-token> \

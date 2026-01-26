@@ -756,7 +756,7 @@ This output provides the CloudWatch Logs group name for the Slack Command Handle
 
 1. **Redeploy with Debug Logging**:
    ```bash
-   ./deploy-integrations-solution.py slack \
+   ./deploy_integrations_solution.py slack \
      --bot-token "<bot-token>" \
      --signing-secret "<signing-secret>" \
      --workspace-id "<workspace-id>" \

@@ -34,9 +34,9 @@ pip install -r requirements-dev.txt  # optional dev dependencies
 
 ### Deployment
 ```bash
-./deploy-integrations-solution.py jira --email user@example.com --url https://example.atlassian.net --token TOKEN --project-key PROJ
-./deploy-integrations-solution.py service-now --instance-id INSTANCE --username USER --password PASS
-./deploy-integrations-solution.py slack --bot-token xoxb-TOKEN --signing-secret SECRET --workspace-id WORKSPACE
+./deploy_integrations_solution.py jira --email user@example.com --url https://example.atlassian.net --token TOKEN --project-key PROJ
+./deploy_integrations_solution.py service-now --instance-id INSTANCE --username USER --password PASS
+./deploy_integrations_solution.py slack --bot-token xoxb-TOKEN --signing-secret SECRET --workspace-id WORKSPACE
 ```
 
 ### Testing and Quality

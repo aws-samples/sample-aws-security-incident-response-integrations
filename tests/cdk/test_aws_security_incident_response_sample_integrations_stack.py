@@ -1,4 +1,4 @@
-import sys
+"""Tests for the common integrations CDK stack."""
 
 import aws_cdk as core
 import cdk_nag
@@ -10,113 +10,7 @@ from aws_security_incident_response_sample_integrations.aws_security_incident_re
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
 )
 
-
-class Finding:
-    def __init__(self, rule_id: str, rule_explanation: str, resource: core.CfnResource):
-        self.rule_id = rule_id
-        self.rule_explanation = rule_explanation
-        self.resource = resource
-        self.stack_name = (
-            core.Names.unique_id(self.resource.stack)
-            if self.resource.stack.nested_stack_parent
-            else self.resource.stack.stack_name
-        )
-        self.resource_id = self.resource.node.path
-
-    def __str__(self):
-        return f"{self.resource_id}: {self.rule_id} -- {self.rule_explanation}"
-
-
-class FindingAggregatorLogger(cdk_nag.AnnotationLogger):
-    def __init__(self):
-        super().__init__()
-        self.non_compliant_findings: list[Finding] = []
-        self.suppressed_findings: list[Finding] = []
-
-    def on_non_compliance(
-        self,
-        *,
-        finding_id: str,
-        nag_pack_name: str,
-        resource: core.CfnResource,
-        rule_explanation: str,
-        rule_id: str,
-        rule_info: str,
-        rule_level: cdk_nag.NagMessageLevel,
-        rule_original_name: str,
-    ) -> None:
-        self.non_compliant_findings.append(Finding(rule_id, rule_explanation, resource))
-
-    def on_error(
-        self,
-        *,
-        error_message: str,
-        nag_pack_name: str,
-        resource: core.CfnResource,
-        rule_explanation: str,
-        rule_id: str,
-        rule_info: str,
-        rule_level: cdk_nag.NagMessageLevel,
-        rule_original_name: str,
-    ) -> None:
-        print(f"Error found: {rule_id} - {rule_explanation}")
-        sys.exit(1)
-
-    def on_compliance(
-        self,
-        *,
-        nag_pack_name: str,
-        resource: core.CfnResource,
-        rule_explanation: str,
-        rule_id: str,
-        rule_info: str,
-        rule_level: cdk_nag.NagMessageLevel,
-        rule_original_name: str,
-    ) -> None:
-        pass
-
-    def on_suppressed(
-        self,
-        *,
-        suppression_reason: str,
-        finding_id: str,
-        nag_pack_name: str,
-        resource: core.CfnResource,
-        rule_explanation: str,
-        rule_id: str,
-        rule_info: str,
-        rule_level: cdk_nag.NagMessageLevel,
-        rule_original_name: str,
-    ) -> None:
-        self.suppressed_findings.append(Finding(rule_id, rule_explanation, resource))
-
-    def on_not_applicable(
-        self,
-        *,
-        nag_pack_name: str,
-        resource: core.CfnResource,
-        rule_explanation: str,
-        rule_id: str,
-        rule_info: str,
-        rule_level: cdk_nag.NagMessageLevel,
-        rule_original_name: str,
-    ) -> None:
-        pass
-
-    def on_suppressed_error(
-        self,
-        *,
-        error_suppression_reason: str,
-        error_message: str,
-        nag_pack_name: str,
-        resource: core.CfnResource,
-        rule_explanation: str,
-        rule_id: str,
-        rule_info: str,
-        rule_level: cdk_nag.NagMessageLevel,
-        rule_original_name: str,
-    ) -> None:
-        print(f"Suppressed error finding: {rule_id} - {rule_explanation}")
+from .cdk_test_utils import FindingAggregatorLogger
 
 
 @pytest.fixture(autouse=True)

@@ -21,8 +21,8 @@ This document provides detailed information on troubleshooting, validation, and 
 
 2. **Deploy the Stack**:
    ```bash
-   # Using the deploy-integrations-solution script with JWT OAuth
-   deploy-integrations-solution service-now \
+   # Using the deploy_integrations_solution script with JWT OAuth
+   deploy_integrations_solution service-now \
      --instance-id <your-servicenow-instance-id> \
      --client-id <your-oauth-client-id> \
      --client-secret <your-oauth-client-secret> \

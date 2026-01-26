@@ -156,12 +156,12 @@ echo "T1234567890" | grep -E '^[A-Z0-9]{9,11}$'
 ### Step 2: Review Deployment Command
 
 ```bash
-./deploy-integrations-solution.py slack --help
+./deploy_integrations_solution.py slack --help
 ```
 
 Expected output:
 ```
-usage: deploy-integrations-solution slack [-h] --bot-token BOT_TOKEN 
+usage: deploy_integrations_solution slack [-h] --bot-token BOT_TOKEN 
                                           --signing-secret SIGNING_SECRET 
                                           --workspace-id WORKSPACE_ID 
                                           [--region REGION]
@@ -185,7 +185,7 @@ options:
 ### Step 3: Deploy the Integration
 
 ```bash
-./deploy-integrations-solution.py slack \
+./deploy_integrations_solution.py slack \
   --bot-token "xoxb-YOUR-BOT-TOKEN-HERE" \
   --signing-secret "YOUR-SIGNING-SECRET-HERE" \
   --workspace-id "T1234567890" \

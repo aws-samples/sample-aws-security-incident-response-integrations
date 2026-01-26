@@ -114,7 +114,7 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git
    cd sample-aws-security-incident-response-integrations/
    pip install -r requirements.txt
-   chmod +x deploy-integrations-solution.py
+   chmod +x deploy_integrations_solution.py
    sudo systemctl start docker.service
    sudo chmod 666 /var/run/docker.sock
    ```
@@ -143,7 +143,7 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git
    cd sample-aws-security-incident-response-integrations/
    pip install -r requirements.txt
-   chmod +x deploy-integrations-solution.py
+   chmod +x deploy_integrations_solution.py
    sudo systemctl start docker.service
    sudo chmod 666 /var/run/docker.sock
    ```
@@ -164,13 +164,13 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
 Use the deployment script to deploy the Slack integration:
 
 ```bash
-./deploy-integrations-solution.py slack --help
+./deploy_integrations_solution.py slack --help
 ```
 
 You should see the following output:
 
 ```
-usage: deploy-integrations-solution slack [-h] --bot-token BOT_TOKEN 
+usage: deploy_integrations_solution slack [-h] --bot-token BOT_TOKEN 
                                           --signing-secret SIGNING_SECRET 
                                           --workspace-id WORKSPACE_ID 
                                           [--region REGION]
@@ -194,7 +194,7 @@ options:
 Deploy the integration with a single command:
 
 ```bash
-./deploy-integrations-solution.py slack \
+./deploy_integrations_solution.py slack \
   --bot-token "xoxb-YOUR-BOT-TOKEN-HERE" \
   --signing-secret "YOUR-SIGNING-SECRET-HERE" \
   --workspace-id "T1234567890" \

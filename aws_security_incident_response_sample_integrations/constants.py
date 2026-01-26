@@ -4,6 +4,19 @@ This module contains all the constants used across the integration components,
 including AWS account IDs, event sources, and integration-specific constants.
 """
 
+from aws_cdk.aws_lambda import Runtime
+from aws_cdk import Duration
+
+# Generic Lambda Constants
+PYTHON_LAMBDA_RUNTIME = Runtime.PYTHON_3_13
+DEFAULT_LAMBDA_TIMEOUT = Duration.minutes(15) # Max Timeout for Lambda
+
+# API Gateway Constants
+API_GATEWAY_LAMBDA_HANDLER_TIMEOUT = DEFAULT_LAMBDA_TIMEOUT
+SECRET_ROTATION_LAMBDA_TIMEOUT = Duration.minutes(5) # Secrets Rotation may need to connect to an integration target to persist secret and persist it locally.
+API_GATEWAY_AUTHORIZOR_TIMEOUT = Duration.seconds(29) # The default timeout for a regional API Gateway Endpoint is 29 seconds.
+
+
 # JIRA Account ID/Service Principal for creating an SNS topic that receives notifications/events from JIRA
 # see the detailed documentation here - https://support.atlassian.com/cloud-automation/docs/configure-aws-sns-for-jira-automation/
 JIRA_AWS_ACCOUNT_ID = "815843069303"
@@ -70,6 +83,8 @@ SLACK_COMMAND_WATCHERS = "watchers"
 SLACK_COMMAND_SUMMARY = "summary"
 
 # ServiceNow automation constants
+
+TOKEN_ROTATION_PERIOD = Duration.days(30) # Token rotates every 30 days.
 
 # Lambda configuration constants
 LAMBDA_MEMORY_SIZE = 1024

@@ -42,10 +42,10 @@ pip install -r requirements-dev.txt
 
 ```bash
 # Deploy Jira integration
-./deploy-integrations-solution.py jira --email user@example.com --url https://example.atlassian.net --token TOKEN --project-key PROJ
+./deploy_integrations_solution.py jira --email user@example.com --url https://example.atlassian.net --token TOKEN --project-key PROJ
 
 # Deploy ServiceNow integration (under development)
-./deploy-integrations-solution.py service-now --instance-id INSTANCE --username USER --password PASS
+./deploy_integrations_solution.py service-now --instance-id INSTANCE --username USER --password PASS
 ```
 
 ### Testing

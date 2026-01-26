@@ -6,8 +6,8 @@ integrations with AWS Security Incident Response. It handles CDK deployment
 with proper parameter passing for different integration types.
 
 Usage:
-    ./deploy-integrations-solution.py jira --email user@example.com --url https://example.atlassian.net --token TOKEN --project-key PROJ
-    ./deploy-integrations-solution.py service-now --instance-id example --username admin --password PASSWORD --integration-module itsm
+    ./deploy_integrations_solution.py jira --email user@example.com --url https://example.atlassian.net --token TOKEN --project-key PROJ
+    ./deploy_integrations_solution.py service-now --instance-id example --username admin --password PASSWORD --integration-module itsm
 """
 
 import argparse
@@ -161,6 +161,8 @@ def deploy_servicenow(args):
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:privateKeyBucket={bucket_name}",
             "--parameters",
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:integrationModule={args.integration_module}",
+            "--parameters",
+            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:useOAuth={'true' if getattr(args, 'use_oauth', False) else 'false'}",
         ]
         print("\n🔄 Deploying ServiceNow integration...\n")
         # Using subprocess with a list of arguments is safe from shell injection
@@ -283,6 +285,13 @@ def main():
         required=True,
         help="ServiceNow integration module: 'itsm' for IT Service Management or 'ir' for Incident Response",
     )
+    # TODO: Enable when ready to publish OAuth 2 Authentication for API Gateway
+    # servicenow_parser.add_argument(
+    #     "--use-oauth",
+    #     action="store_true",
+    #     default=False,
+    #     help="Use OAuth for API Gateway authentication instead of token-based auth (not yet implemented)",
+    # )
     servicenow_parser.add_argument(
         "--log-level",
         choices=["info", "debug", "error"],
@@ -326,9 +335,9 @@ def main():
             print(
                 textwrap.dedent("""
                 Please specify 'jira', 'service-now', or 'slack' as the integration type.
-                Example: deploy-integrations-solution jira --email user@example.com --url https://example.atlassian.net --token YOUR_TOKEN --project-key PROJ
-                Example: deploy-integrations-solution service-now --instance-id example --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET --user-id YOUR_USER_ID --private-key-path ./private.key --integration-module itsm
-                Example: deploy-integrations-solution slack --bot-token xoxb-... --signing-secret YOUR_SECRET --workspace-id YOUR_WORKSPACE_ID
+                Example: deploy_integrations_solution jira --email user@example.com --url https://example.atlassian.net --token YOUR_TOKEN --project-key PROJ
+                Example: deploy_integrations_solution service-now --instance-id example --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET --user-id YOUR_USER_ID --private-key-path ./private.key --integration-module itsm
+                Example: deploy_integrations_solution slack --bot-token xoxb-... --signing-secret YOUR_SECRET --workspace-id YOUR_WORKSPACE_ID
             """)
             )
             parser.print_help()
