@@ -122,7 +122,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             self,
             "serviceNowClientSecretSecret",
             description="Service Now OAuth client secret",
-            secret_string_value=aws_secretsmanager.SecretStringValue.from_token(service_now_client_secret_param.value_as_string),
+            secret_string_value=aws_secretsmanager.SecretStringValueBeta1.from_token(service_now_client_secret_param.value_as_string),
         )
         service_now_client_secret_secret.apply_removal_policy(RemovalPolicy.DESTROY)
 
