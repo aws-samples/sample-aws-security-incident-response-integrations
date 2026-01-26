@@ -393,57 +393,6 @@ class ServiceNowApiService:
             logger.error(f"Error creating system property: {str(e)}")
             return False
 
-    def __update_outbound_rest_message_request_function_headers(
-        self,
-        headers,
-        base_url,
-        outbound_rest_message_request_function_name,
-        api_auth_secret_arn,
-    ):
-        """Create/Update HTTP request headers for the Outbound REST Message function in ServiceNow.
-
-        Args:
-            headers (Dict[str, str]): HTTP headers for ServiceNow API requests
-            base_url (str): ServiceNow instance base URL
-            outbound_rest_message_request_function_name (str): Name of the REST message function
-            api_auth_secret_arn (str): ARN of the API auth secret in Secrets Manager
-        """
-        try:
-            logger.info(
-                "Updating Http request headers in the Outbound REST Message function resource in ServiceNow for integration with AWS Security Incident Response"
-            )
-
-            # Get headers and base URL for ServiceNow API requests
-            headers = self.__get_request_headers()
-            base_url = self.__get_request_base_url()
-
-            # Update Authorization header to use sys_property dynamically
-            rest_message_post_function_headers_payload = {
-                "rest_message_function": f"{outbound_rest_message_request_function_name}",
-                # "name": "Authorization",
-                # "value": "Bearer ${gs.getProperty('aws-security-ir-apigw-key')}",
-            }
-
-                rest_message_post_function_headers_response = requests.post(
-                    f"{base_url}/api/now/table/sys_rest_message_fn_headers",
-                    json=rest_message_post_function_headers_payload,
-                    headers=headers,
-                    timeout=30,
-                )
-
-                rest_message_post_function_headers_response_json = json.loads(
-                    rest_message_post_function_headers_response.text
-                )
-
-                logger.info(
-                    f"Http request authorization headers added for Outbound REST Message function with response: {rest_message_post_function_headers_response_json}"
-                )
-        except Exception as e:
-            logger.error(
-                f"Error updating Http request headers for the Outbound REST message function: {str(e)}"
-            )
-            return None
-
     def __create_outbound_rest_message_request_function(
         self,
         headers,
