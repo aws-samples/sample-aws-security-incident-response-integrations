@@ -172,6 +172,8 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    ```
 10. Now, run the `deploy` command from the [Deployment](#deployment) section
 
+    **Note:** It may take 2-4 minutes after deployment completion to start seeing synchronization of new incidents between ServiceNow and AWS Security Incident Response.
+
 #### Using local terminal instance
 
 1. Open a new Terminal session
@@ -212,6 +214,8 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    export AWS_SESSION_TOKEN=<AWS Session Token>
    ```
 8. Now, run the `deploy` command from the [Deployment](#deployment) section
+
+   **Note:** It may take 2-4 minutes after deployment completion to start seeing synchronization of new incidents between ServiceNow and AWS Security Incident Response.
 
 ## Configure OAuth in ServiceNow
 

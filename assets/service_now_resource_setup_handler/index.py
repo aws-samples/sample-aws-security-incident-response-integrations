@@ -105,41 +105,39 @@ class ServiceNowApiService:
             instance_id (str): ServiceNow instance ID
             **kwargs: OAuth configuration parameters including:
                 - client_id_param_name (str): SSM parameter name containing OAuth client ID
-                - client_secret_param_name (str): SSM parameter name containing OAuth client secret
+                - client_secret_arn (str): Secret ARN containing OAuth client secret
                 - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
                 - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
                 - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
         self.instance_id = instance_id
         self.client_id_param_name = kwargs.get('client_id_param_name')
-        self.client_secret_param_name = kwargs.get('client_secret_param_name')
+        self.client_secret_arn = kwargs.get('client_secret_arn')
         self.user_id_param_name = kwargs.get('user_id_param_name')
         self.private_key_asset_bucket_param_name = kwargs.get('private_key_asset_bucket_param_name')
         self.private_key_asset_key_param_name = kwargs.get('private_key_asset_key_param_name')
         self.secrets_manager_service = SecretsManagerService()
         self.s3_resource = boto3.resource('s3')
 
-    def __get_parameter(self, param_name: str) -> Optional[str]:
+    def __get_secret_value(self, secret_arn: str) -> Optional[str]:
         """
-        Fetch a parameter from SSM Parameter Store.
+        Fetch a secret value from AWS Secrets Manager.
 
         Args:
-            param_name (str): SSM parameter name
+            secret_arn (str): Secret ARN
 
         Returns:
-            Optional[str]: Parameter value or None if retrieval fails
+            Optional[str]: Secret value or None if retrieval fails
         """
         try:
-            if not param_name:
-                logger.error("No parameter name provided")
+            if not secret_arn:
+                logger.error("No secret ARN provided")
                 return None
 
-            response = ssm_client.get_parameter(
-                Name=param_name, WithDecryption=True
-            )
-            return response["Parameter"]["Value"]
+            response = secrets_client.get_secret_value(SecretId=secret_arn)
+            return response["SecretString"]
         except Exception as e:
-            logger.error(f"Error retrieving parameter {param_name} from SSM: {str(e)}")
+            logger.error(f"Error retrieving secret {secret_arn} from Secrets Manager: {str(e)}")
             return None
         
     def __get_request_base_url(self) -> Optional[str]:
@@ -232,7 +230,7 @@ class ServiceNowApiService:
                 return None
             
             # Get parameters for JWT OAuth
-            client_secret = self.__get_parameter(self.client_secret_param_name)
+            client_secret = self.__get_secret_value(self.client_secret_arn)
             client_id = self.__get_parameter(self.client_id_param_name)
             user_id = self.__get_parameter(self.user_id_param_name)
             
@@ -344,6 +342,57 @@ class ServiceNowApiService:
         except Exception as e:
             logger.error(f"Error adding parameters to Http request function: {str(e)}")
 
+    def _create_system_property(self, apigw_api_key_property_name, api_auth_secret_arn):
+        """Create system property for API Gateway key in ServiceNow.
+
+        Args:
+            apigw_api_key_property_name (str): Name of the system property to create
+            api_auth_secret_arn (str): ARN of the API auth secret in Secrets Manager
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(
+                "Creating system property for API Gateway key in ServiceNow"
+            )
+
+            # Get headers and base URL for ServiceNow API requests
+            headers = self.__get_request_headers()
+            base_url = self.__get_request_base_url()
+
+            # Get API auth token from Secrets Manager
+            auth_token = (
+                self.secrets_manager_service.get_secret_value(api_auth_secret_arn)
+                if api_auth_secret_arn
+                else None
+            )
+
+            # Create password2 type property in sys_properties table if token is available
+            if auth_token:
+                sys_property_payload = {
+                    "name": apigw_api_key_property_name,
+                    "value": auth_token,
+                    "type": "password2",
+                    "description": "Password for external API integration",
+                    "ignore_cache": "true"
+                }
+
+                requests.post(
+                    f"{base_url}/api/now/table/sys_properties",
+                    json=sys_property_payload,
+                    headers=headers,
+                    timeout=30,
+                )
+                logger.info(f"System property {apigw_api_key_property_name} created successfully")
+                return True
+            else:
+                logger.error("No auth token available to create system property")
+                return False
+        except Exception as e:
+            logger.error(f"Error creating system property: {str(e)}")
+            return False
+
     def __update_outbound_rest_message_request_function_headers(
         self,
         headers,
@@ -364,35 +413,31 @@ class ServiceNowApiService:
                 "Updating Http request headers in the Outbound REST Message function resource in ServiceNow for integration with AWS Security Incident Response"
             )
 
-            # Get API auth token from Secrets Manager
-            auth_token = (
-                self.secrets_manager_service.get_secret_value(api_auth_secret_arn)
-                if api_auth_secret_arn
-                else None
-            )
+            # Get headers and base URL for ServiceNow API requests
+            headers = self.__get_request_headers()
+            base_url = self.__get_request_base_url()
 
-            # Update Authorization header if token is available
-            if auth_token:
-                rest_message_post_function_headers_payload = {
-                    "rest_message_function": f"{outbound_rest_message_request_function_name}",
-                    "name": "Authorization",
-                    "value": f"Bearer {auth_token}",
-                }
+            # Update Authorization header to use sys_property dynamically
+            rest_message_post_function_headers_payload = {
+                "rest_message_function": f"{outbound_rest_message_request_function_name}",
+                # "name": "Authorization",
+                # "value": "Bearer ${gs.getProperty('aws-security-ir-apigw-key')}",
+            }
 
-            rest_message_post_function_headers_response = requests.post(
-                f"{base_url}/api/now/table/sys_rest_message_fn_headers",
-                json=rest_message_post_function_headers_payload,
-                headers=headers,
-                timeout=30,
-            )
+                rest_message_post_function_headers_response = requests.post(
+                    f"{base_url}/api/now/table/sys_rest_message_fn_headers",
+                    json=rest_message_post_function_headers_payload,
+                    headers=headers,
+                    timeout=30,
+                )
 
-            rest_message_post_function_headers_response_json = json.loads(
-                rest_message_post_function_headers_response.text
-            )
+                rest_message_post_function_headers_response_json = json.loads(
+                    rest_message_post_function_headers_response.text
+                )
 
-            logger.info(
-                f"Http request authorization headers added for Outbound REST Message function with response: {rest_message_post_function_headers_response_json}"
-            )
+                logger.info(
+                    f"Http request authorization headers added for Outbound REST Message function with response: {rest_message_post_function_headers_response_json}"
+                )
         except Exception as e:
             logger.error(
                 f"Error updating Http request headers for the Outbound REST message function: {str(e)}"
@@ -407,7 +452,6 @@ class ServiceNowApiService:
         request_content,
         outbound_rest_message_name,
         outbound_rest_message_request_function_name,
-        api_auth_secret_arn,
     ):
         """Create HTTP request function for the Outbound REST Message resource in ServiceNow.
 
@@ -418,7 +462,6 @@ class ServiceNowApiService:
             request_content (str): JSON string containing request body template
             outbound_rest_message_name (str): Name of the outbound REST message
             outbound_rest_message_request_function_name (str): Name of the request function
-            api_auth_secret_arn (str): ARN of the API auth secret in Secrets Manager
 
         Returns:
             Optional[str]: System ID of the created function or None if error
@@ -449,13 +492,6 @@ class ServiceNowApiService:
                 f"Http request function for Outbound REST Message created with response: {rest_message_post_function_response_json}"
             )
 
-            self.__update_outbound_rest_message_request_function_headers(
-                headers,
-                base_url,
-                outbound_rest_message_request_function_name,
-                api_auth_secret_arn,
-            )
-
             rest_message_post_function_sys_id = (
                 rest_message_post_function_response_json.get("result").get("sys_id")
             )
@@ -465,14 +501,13 @@ class ServiceNowApiService:
             return None
 
     def _create_outbound_rest_message(
-        self, webhook_url, resource_prefix, api_auth_secret_arn
+        self, webhook_url, resource_prefix
     ):
         """Create Outbound REST Message for publishing Incident events to the integration solution.
 
         Args:
             webhook_url (str): URL of the webhook endpoint
             resource_prefix (str): Prefix for ServiceNow resource naming
-            api_auth_secret_arn (str): ARN of the API auth secret in Secrets Manager
 
         Returns:
             Optional[Tuple[str, str]]: (outbound_rest_message_name, outbound_rest_message_request_function_name) or None if error
@@ -523,7 +558,6 @@ class ServiceNowApiService:
                 request_content=request_content,
                 outbound_rest_message_name=outbound_rest_message_name,
                 outbound_rest_message_request_function_name=outbound_rest_message_request_function_name,
-                api_auth_secret_arn=api_auth_secret_arn,
             )
 
             if outbound_rest_message_request_function_sys_id is None:
@@ -555,6 +589,7 @@ class ServiceNowApiService:
         outbound_rest_message_name,
         outbound_rest_message_request_function_name,
         resource_prefix,
+        apigw_api_key_property_name,
     ):
         """Create Business Rule to trigger Incident events for ITSM module.
 
@@ -588,7 +623,7 @@ class ServiceNowApiService:
                 "script": f"""
         (function executeRule(current, previous) {{
             try {{
-                var event_type = previous ? 'IncidentUpdated' : 'IncidentCreated';
+                var event_type = current.operation() == 'insert' ? 'IncidentCreated' : 'IncidentUpdated';
                 var payload = {{
                     "event_type": event_type,
                     "incident_number": current.number.toString(),
@@ -597,6 +632,8 @@ class ServiceNowApiService:
                 var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                 var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
                 var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                var api_key = gs.getProperty('{apigw_api_key_property_name}');
+				request.setRequestHeader('Authorization', api_key);
                 request.setRequestBody(JSON.stringify(payload));
                 
                 var response = request.executeAsync();
@@ -637,6 +674,7 @@ class ServiceNowApiService:
         outbound_rest_message_name,
         outbound_rest_message_request_function_name,
         resource_prefix,
+        apigw_api_key_property_name,
     ):
         """Create Business Rule to trigger Incident events for IR module.
 
@@ -679,6 +717,8 @@ class ServiceNowApiService:
                 var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                 var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
                 var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                var api_key = gs.getProperty('{apigw_api_key_property_name}');
+				request.setRequestHeader('Authorization', api_key);
                 request.setRequestBody(JSON.stringify(payload));
                 
                 var response = request.executeAsync();
@@ -719,6 +759,7 @@ class ServiceNowApiService:
         outbound_rest_message_name,
         outbound_rest_message_request_function_name,
         resource_prefix,
+        apigw_api_key_property_name,
     ):
         """Create Business Rule to trigger Incident events for attachment changes.
 
@@ -726,6 +767,7 @@ class ServiceNowApiService:
             outbound_rest_message_name (str): Name of the outbound REST message
             outbound_rest_message_request_function_name (str): Name of the request function
             resource_prefix (str): Prefix for ServiceNow resource naming
+            apigw_api_key_property_name (str): Name of the system property containing API key
 
         Returns:
             Optional[requests.Response]: Response from ServiceNow API or None if error
@@ -773,6 +815,8 @@ class ServiceNowApiService:
                     var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                     var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
                     var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                    var api_key = gs.getProperty('{apigw_api_key_property_name}');
+				    request.setRequestHeader('Authorization', api_key);
                     request.setRequestBody(JSON.stringify(payload));
                     
                     var response = request.executeAsync();
@@ -816,6 +860,7 @@ class ServiceNowApiService:
         outbound_rest_message_name,
         outbound_rest_message_request_function_name,
         resource_prefix,
+        apigw_api_key_property_name,
     ):
         """Create Business Rule to trigger Incident events for attachment changes.
 
@@ -870,6 +915,8 @@ class ServiceNowApiService:
                     var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                     var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
                     var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                    var api_key = gs.getProperty('{apigw_api_key_property_name}');
+				    request.setRequestHeader('Authorization', api_key);
                     request.setRequestBody(JSON.stringify(payload));
                     
                     var response = request.executeAsync();
@@ -943,7 +990,7 @@ def handler(event, context):
             os.environ.get("SERVICE_NOW_INSTANCE_ID")
         )
         client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
-        client_secret_param_name = os.environ.get("SERVICE_NOW_CLIENT_SECRET_PARAM")
+        client_secret_arn = os.environ.get("SERVICE_NOW_CLIENT_SECRET_ARN")
         user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
         private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
         private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
@@ -951,15 +998,21 @@ def handler(event, context):
         service_now_api_service = ServiceNowApiService(
             instance_id,
             client_id_param_name=client_id_param_name,
-            client_secret_param_name=client_secret_param_name,
+            client_secret_arn=client_secret_arn,
             user_id_param_name=user_id_param_name,
             private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
             private_key_asset_key_param_name=private_key_asset_key_param_name
         )
 
+        # Create system property for API Gateway key
+        apigw_api_key_property_name = f"{service_now_resource_prefix}-aws-apigw-key"
+        if not service_now_api_service._create_system_property(apigw_api_key_property_name, api_auth_secret_arn):
+            logger.error("Failed to create system property for API Gateway key")
+            return {"Status": "FAILED", "PhysicalResourceId": "service-now-api-setup"}
+
         outbound_rest_message_result = (
             service_now_api_service._create_outbound_rest_message(
-                webhook_url, service_now_resource_prefix, api_auth_secret_arn
+                webhook_url, service_now_resource_prefix
             )
         )
 
@@ -983,24 +1036,28 @@ def handler(event, context):
                 service_now_api_outbound_rest_message_name,
                 service_now_api_outbound_rest_message_request_function_name,
                 service_now_resource_prefix,
+                apigw_api_key_property_name,
             )
             # Create attachment business rule
             service_now_api_service._create_attachment_business_rule_ir(
                 service_now_api_outbound_rest_message_name,
                 service_now_api_outbound_rest_message_request_function_name,
                 service_now_resource_prefix,
+                apigw_api_key_property_name,
             )
         else:
             service_now_api_service._create_incident_business_rule_itsm(
                 service_now_api_outbound_rest_message_name,
                 service_now_api_outbound_rest_message_request_function_name,
                 service_now_resource_prefix,
+                apigw_api_key_property_name,
             )
             # Create attachment business rule
             service_now_api_service._create_attachment_business_rule_itsm(
                 service_now_api_outbound_rest_message_name,
                 service_now_api_outbound_rest_message_request_function_name,
                 service_now_resource_prefix,
+                apigw_api_key_property_name,
             )
 
         return {"Status": "SUCCESS", "PhysicalResourceId": "service-now-api-setup"}

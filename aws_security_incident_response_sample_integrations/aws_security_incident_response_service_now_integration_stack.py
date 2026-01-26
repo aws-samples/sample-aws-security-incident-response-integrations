@@ -117,15 +117,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             default="itsm",
         )
 
-        # Create SSM parameters
-        service_now_client_secret_ssm_param = aws_ssm.StringParameter(
+        # Store Service Now Client Secret in Secrets Manager
+        service_now_client_secret_secret = aws_secretsmanager.Secret(
             self,
-            "serviceNowClientSecretSSM",
-            parameter_name="/SecurityIncidentResponse/serviceNowClientSecret",
-            string_value=service_now_client_secret_param.value_as_string,
+            "serviceNowClientSecretSecret",
             description="Service Now OAuth client secret",
+            secret_string_value=aws_secretsmanager.SecretStringValue.from_token(service_now_client_secret_param.value_as_string),
         )
-        service_now_client_secret_ssm_param.apply_removal_policy(RemovalPolicy.DESTROY)
+        service_now_client_secret_secret.apply_removal_policy(RemovalPolicy.DESTROY)
 
         service_now_client_id_ssm = aws_ssm.StringParameter(
             self,
@@ -208,7 +207,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                     "logs:PutLogEvents",
                 ],
                 resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
+                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_client.function_name}*"
                 ],
             )
         )
@@ -229,7 +228,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
                 "INCIDENTS_TABLE_NAME": table.table_name,
-                "SERVICE_NOW_CLIENT_SECRET_PARAM": service_now_client_secret_ssm_param.parameter_name,
+                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
                 "EVENT_SOURCE": SECURITY_IR_EVENT_SOURCE,
                 "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
                 "LOG_LEVEL": log_level_param.value_as_string,
@@ -264,12 +263,26 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             )
         )
 
-        # allow adding SSM values
+        # allow adding SSM values and accessing secrets
         service_now_client_role.add_to_policy(
             aws_iam.PolicyStatement(
                 effect=aws_iam.Effect.ALLOW,
-                actions=["ssm:GetParameter", "ssm:PutParameter"],
-                resources=["*"],
+                actions=["ssm:GetParameter"],
+                resources=[
+                    service_now_instance_id_ssm.parameter_arn,
+                    service_now_client_id_ssm.parameter_arn,
+                    service_now_user_id_ssm.parameter_arn,
+                    private_key_asset_bucket_ssm.parameter_arn,
+                    private_key_asset_key_ssm.parameter_arn,
+                ],
+            )
+        )
+        
+        service_now_client_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                effect=aws_iam.Effect.ALLOW,
+                actions=["secretsmanager:GetSecretValue"],
+                resources=[service_now_client_secret_secret.secret_arn],
             )
         )
 
@@ -302,13 +315,13 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
         enable_poller_cr.node.add_dependency(service_now_client)
 
-        # Add suppressions for IAM5 findings related to wildcard resources
+        # Update suppressions for specific resources
         NagSuppressions.add_resource_suppressions(
             service_now_client_role,
             [
                 {
                     "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for security-ir and SSM actions",
+                    "reason": "Wildcard resources are required for security-ir actions which don't support resource-level permissions",
                     "applies_to": ["Resource::*"],
                 }
             ],
@@ -344,7 +357,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                     "logs:GetLogEvents",
                     "logs:FilterLogEvents",
                 ],
-                resources=[f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:*"],
+                resources=[
+                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/apigateway/*"
+                ],
             )
         )
 
@@ -406,7 +421,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                     "logs:PutLogEvents",
                 ],
                 resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
+                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_secret_rotation_handler.function_name}*"
                 ],
             )
         )
@@ -419,7 +434,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                     "secretsmanager:PutSecretValue",
                     "secretsmanager:UpdateSecretVersionStage",
                 ],
-                resources=["*"],
+                resources=[api_auth_secret.secret_arn],
             )
         )
 
@@ -458,14 +473,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             automatically_after=Duration.days(30),
         )
 
-        # Add suppression for rotation role
+        # Update suppressions for specific resources
         NagSuppressions.add_resource_suppressions(
             service_now_secret_rotation_handler_role,
             [
                 {
                     "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for Secrets Manager rotation",
-                    "applies_to": ["Resource::*"],
+                    "reason": "Removed - Secrets Manager permissions now use specific secret ARN",
+                    "applies_to": [],
                 }
             ],
             True,
@@ -492,7 +507,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                     "logs:PutLogEvents",
                 ],
                 resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
+                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_notifications_handler.function_name}*"
                 ],
             )
         )
@@ -506,23 +521,37 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             )
         )
 
-        # Grant permission to access SSM parameters
+        # Grant permission to access SSM parameters and secrets
         service_now_notifications_handler_role.add_to_policy(
             aws_iam.PolicyStatement(
                 effect=aws_iam.Effect.ALLOW,
                 actions=["ssm:GetParameter"],
-                resources=["*"],
+                resources=[
+                    service_now_instance_id_ssm.parameter_arn,
+                    service_now_client_id_ssm.parameter_arn,
+                    service_now_user_id_ssm.parameter_arn,
+                    private_key_asset_bucket_ssm.parameter_arn,
+                    private_key_asset_key_ssm.parameter_arn,
+                ],
+            )
+        )
+        
+        service_now_notifications_handler_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                effect=aws_iam.Effect.ALLOW,
+                actions=["secretsmanager:GetSecretValue"],
+                resources=[service_now_client_secret_secret.secret_arn],
             )
         )
 
-        # Add suppressions for IAM5 findings related to wildcard resources
+        # Update suppressions for specific resources
         NagSuppressions.add_resource_suppressions(
             service_now_notifications_handler_role,
             [
                 {
                     "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for SSM parameters",
-                    "applies_to": ["Resource::*"],
+                    "reason": "Removed - SSM permissions now use specific parameter ARNs",
+                    "applies_to": [],
                 }
             ],
             True,
@@ -546,7 +575,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
-                "SERVICE_NOW_CLIENT_SECRET_PARAM": service_now_client_secret_ssm_param.parameter_name,
+                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
                 "INCIDENTS_TABLE_NAME": table.table_name,
                 "EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
                 "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
@@ -599,7 +628,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                     "logs:PutLogEvents",
                 ],
                 resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
+                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_api_gateway_authorizer_lambda.function_name}*"
                 ],
             )
         )
@@ -655,14 +684,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             aws_iam.ServicePrincipal("apigateway.amazonaws.com")
         )
 
-        # Add suppression for authorizer role
+        # Update suppressions for CloudWatch Logs permissions
         NagSuppressions.add_resource_suppressions(
             service_now_api_gateway_authorizer_role,
             [
                 {
                     "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for CloudWatch Logs permissions",
-                    "applies_to": ["Resource::arn:*:logs:*:*:*"],
+                    "reason": "CloudWatch Logs permissions use specific Lambda function name with wildcard for log streams",
+                    "applies_to": [f"Resource::arn:*:logs:*:*:log-group:/aws/lambda/{service_now_api_gateway_authorizer_lambda.function_name}*"],
                 }
             ],
             True,
@@ -681,14 +710,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             True,
         )
 
-        # Add suppressions for API Gateway logging role
+        # Update suppressions for API Gateway logging role
         NagSuppressions.add_resource_suppressions(
             api_gateway_logging_role,
             [
                 {
                     "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for CloudWatch Logs permissions",
-                    "applies_to": ["Resource::arn:*:logs:*:*:*"],
+                    "reason": "CloudWatch Logs permissions narrowed to API Gateway log groups only",
+                    "applies_to": ["Resource::arn:*:logs:*:*:log-group:/aws/apigateway/*"],
                 }
             ],
             True,
@@ -715,21 +744,26 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                     "logs:PutLogEvents",
                 ],
                 resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
+                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_resource_setup_handler.function_name}*"
                 ],
             )
         )
 
-        # Add SSM permissions with full access to resolve permission issues
+        # Add SSM permissions with specific resources
         service_now_resource_setup_role.add_to_policy(
             aws_iam.PolicyStatement(
                 effect=aws_iam.Effect.ALLOW,
                 actions=[
                     "ssm:GetParameter",
                     "ssm:GetParameters",
-                    "ssm:DescribeParameters",
                 ],
-                resources=["*"],
+                resources=[
+                    service_now_instance_id_ssm.parameter_arn,
+                    service_now_client_id_ssm.parameter_arn,
+                    service_now_user_id_ssm.parameter_arn,
+                    private_key_asset_bucket_ssm.parameter_arn,
+                    private_key_asset_key_ssm.parameter_arn,
+                ],
             )
         )
 
@@ -743,7 +777,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                     "secretsmanager:PutSecretValue",
                     "secretsmanager:UpdateSecretVersionStage",
                 ],
-                resources=[api_auth_secret.secret_arn],
+                resources=[api_auth_secret.secret_arn, service_now_client_secret_secret.secret_arn],
             )
         )
 
@@ -753,14 +787,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         # Grant KMS permissions to decrypt S3 objects using specific key
         s3_kms_key.grant_decrypt(service_now_resource_setup_role)
 
-        # Add suppression for wildcard resource in SSM and Secrets Manager policies
+        # Update suppressions for specific resources
         NagSuppressions.add_resource_suppressions(
             service_now_resource_setup_role,
             [
                 {
                     "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resource is required for SSM parameter access and Secrets Manager rotation",
-                    "applies_to": ["Resource::*"],
+                    "reason": "Removed - SSM and Secrets Manager permissions now use specific resource ARNs",
+                    "applies_to": [],
                 }
             ],
             True,
@@ -788,7 +822,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
-                "SERVICE_NOW_CLIENT_SECRET_PARAM": service_now_client_secret_ssm_param.parameter_name,
+                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
                 "SERVICE_NOW_RESOURCE_PREFIX": service_now_api_gateway.rest_api_id,
                 "WEBHOOK_URL": f"{service_now_api_gateway.url.rstrip('/')}/webhook",
                 "API_AUTH_SECRET": api_auth_secret.secret_arn,
