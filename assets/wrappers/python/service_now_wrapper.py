@@ -141,7 +141,7 @@ class ServiceNowClient:
             )
             return response["Parameter"]["Value"]
         except Exception as e:
-            logger.error(f"Error retrieving parameter {param_name} from SSM: {str(e)}")
+            logger.error(f"Error retrieving parameter from SSM: {str(e)}")
             return None
 
     def __get_secret_value(self, secret_arn: str) -> Optional[str]:
