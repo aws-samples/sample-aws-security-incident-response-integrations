@@ -16,16 +16,17 @@ from aws_security_incident_response_sample_integrations.aws_security_incident_re
 app = cdk.App()
 
 # ServiceNow parameters for common stack
+# Note: client_secret_arn will be dynamically set by the ServiceNow integration stack
+# after it creates the Secrets Manager secret from the user-provided client secret value
 service_now_params = {
     "instance_id_param_name": "/SecurityIncidentResponse/serviceNowInstanceId",
     "client_id_param_name": "/SecurityIncidentResponse/serviceNowClientId",
-    "client_secret_param_name": "/SecurityIncidentResponse/serviceNowClientSecret",
     "user_id_param_name": "/SecurityIncidentResponse/serviceNowUserId",
     "private_key_asset_bucket_param_name": "/SecurityIncidentResponse/privateKeyAssetBucket",
     "private_key_asset_key_param_name": "/SecurityIncidentResponse/privateKeyAssetKey",
 }
 
-# Create common stack with ServiceNow parameters
+# Create common stack without ServiceNow secret ARN (will be handled in ServiceNow stack)
 common_stack = AwsSecurityIncidentResponseSampleIntegrationsCommonStack(
     app,
     "AwsSecurityIncidentResponseSampleIntegrationsCommonStack",
