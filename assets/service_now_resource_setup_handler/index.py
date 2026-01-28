@@ -448,16 +448,8 @@ class ServiceNowApiService:
                 else None
             )
 
-            # Create password2 type property in sys_properties table if token is available
+            # Create password type property in discovery_credentials table if token is available
             if auth_token:
-                # sys_property_payload = {
-                #     "name": apigw_api_key_property_name,
-                #     "value": auth_token,
-                #     "type": "password2",
-                #     "description": "Password for external API integration",
-                #     "ignore_cache": "true",
-                #     "write_roles": "business_rule_admin"
-                # }
                 sys_property_payload = {
                     "name": apigw_api_key_property_name,
                     "type": "basic_auth",
@@ -473,7 +465,9 @@ class ServiceNowApiService:
                     timeout=30,
                 )
 
-                logger.info(f"Discovery_credential {apigw_api_key_property_name} created successfully: {json.loads(response.text)}")
+                logger.info(
+                    f"Discovery_credential '{apigw_api_key_property_name}' created successfully "
+                )
                 return True
             else:
                 logger.error("No auth token available to create discovery_credential")
