@@ -993,7 +993,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
             private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
             logger.info(
-                f"Getting parameters: {instance_id_param}, {client_id_param_name}, {client_secret_arn}, {user_id_param_name}, {private_key_asset_bucket_param_name}, {private_key_asset_key_param_name}"
+                "Getting ServiceNow configuration parameters from SSM"
             )
 
             instance_id = parameter_service._get_parameter(instance_id_param)
