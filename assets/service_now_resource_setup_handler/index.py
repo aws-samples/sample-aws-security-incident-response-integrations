@@ -466,7 +466,7 @@ class ServiceNowApiService:
                 )
 
                 logger.info(
-                    f"Discovery_credential '{apigw_api_key_property_name}' created successfully "
+                    "Discovery_credential created successfully in ServiceNow"
                 )
                 return True
             else:
