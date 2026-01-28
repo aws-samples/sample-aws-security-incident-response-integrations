@@ -297,13 +297,14 @@ class TestEnhancedDynamoDBService:
         slack_channel_id = "C1234567890"
         items = [{"PK": "Case#12345", "SK": "latest", "slackChannelId": slack_channel_id}]
         
-        self.mock_table.scan.return_value = {"Items": items}
+        self.mock_table.query.return_value = {"Items": items}
         
         result = self.service.find_case_by_slack_channel(slack_channel_id)
         
         assert result == "12345"
-        self.mock_table.scan.assert_called_once_with(
-            FilterExpression="slackChannelId = :channel_id",
+        self.mock_table.query.assert_called_once_with(
+            IndexName="slack-channel-index",
+            KeyConditionExpression="slackChannelId = :channel_id",
             ExpressionAttributeValues={":channel_id": slack_channel_id}
         )
 
@@ -311,7 +312,7 @@ class TestEnhancedDynamoDBService:
         """Test case finding by Slack channel when not found"""
         slack_channel_id = "C1234567890"
         
-        self.mock_table.scan.return_value = {"Items": []}
+        self.mock_table.query.return_value = {"Items": []}
         
         result = self.service.find_case_by_slack_channel(slack_channel_id)
         
@@ -323,7 +324,7 @@ class TestEnhancedDynamoDBService:
         items = [{"PK": "Case#12345", "SK": "latest", "slackChannelId": slack_channel_id}]
         
         # First call returns with LastEvaluatedKey
-        self.mock_table.scan.side_effect = [
+        self.mock_table.query.side_effect = [
             {"Items": [], "LastEvaluatedKey": {"PK": "Case#12345"}},
             {"Items": items}
         ]
@@ -331,13 +332,13 @@ class TestEnhancedDynamoDBService:
         result = self.service.find_case_by_slack_channel(slack_channel_id)
         
         assert result == "12345"
-        assert self.mock_table.scan.call_count == 2
+        assert self.mock_table.query.call_count == 2
 
     def test_find_case_by_slack_channel_client_error(self):
         """Test case finding by Slack channel with ClientError"""
         slack_channel_id = "C1234567890"
         error_response = {"Error": {"Code": "ValidationException"}}
-        self.mock_table.scan.side_effect = ClientError(error_response, "Scan")
+        self.mock_table.query.side_effect = ClientError(error_response, "Query")
         
         result = self.service.find_case_by_slack_channel(slack_channel_id)
         
