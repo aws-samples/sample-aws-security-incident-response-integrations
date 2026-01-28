@@ -148,17 +148,9 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             description="Custom role for Security Incident Response Poller Lambda function",
         )
 
-        poller_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
-                ],
+        poller_role.add_managed_policy(
+            aws_iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
             )
         )
 
@@ -227,18 +219,10 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             description="Custom role for Security Incident Response Client Lambda function",
         )
 
-        # Add custom policy for CloudWatch Logs permissions
-        security_ir_client_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:aws:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
-                ],
+        # Add basic execution role permissions
+        security_ir_client_role.add_managed_policy(
+            aws_iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
             )
         )
 
@@ -259,7 +243,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                         "instance_id_param_name"
                     ],
                     "SERVICE_NOW_CLIENT_ID": service_now_params.get("client_id_param_name", ""),
-                    "SERVICE_NOW_CLIENT_SECRET_PARAM": service_now_params.get("client_secret_param_name", ""),
+                    "SERVICE_NOW_CLIENT_SECRET_ARN": "/SecurityIncidentResponse/serviceNowClientSecretArn",  # SSM param containing secret ARN
                     "SERVICE_NOW_USER_ID": service_now_params.get("user_id_param_name", ""),
                     "PRIVATE_KEY_ASSET_BUCKET": service_now_params.get("private_key_asset_bucket_param_name", ""),
                     "PRIVATE_KEY_ASSET_KEY": service_now_params.get("private_key_asset_key_param_name", ""),
@@ -329,16 +313,30 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         if service_now_params:
             ssm_resources = [f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params['instance_id_param_name']}"]
             
-            # Add OAuth parameters if they exist
-            for param_key in ['client_id_param_name', 'client_secret_param_name', 'user_id_param_name', 'private_key_asset_bucket_param_name', 'private_key_asset_key_param_name']:
+            # Add OAuth parameters if they exist (excluding client_secret which is now in Secrets Manager)
+            for param_key in ['client_id_param_name', 'user_id_param_name', 'private_key_asset_bucket_param_name', 'private_key_asset_key_param_name']:
                 if param_key in service_now_params and service_now_params[param_key]:
                     ssm_resources.append(f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params[param_key]}")
+            
+            # Add SSM parameter for client secret ARN
+            ssm_resources.append(f"arn:aws:ssm:{self.region}:{self.account}:parameter/SecurityIncidentResponse/serviceNowClientSecretArn")
             
             self.security_ir_client.add_to_role_policy(
                 aws_iam.PolicyStatement(
                     effect=aws_iam.Effect.ALLOW,
                     actions=["ssm:GetParameter"],
                     resources=ssm_resources,
+                )
+            )
+            
+            # Add Secrets Manager permissions with wildcard to avoid cyclic dependency
+            # Wildcard is required because the secret is created in ServiceNow stack, and referencing
+            # its specific ARN here would create a circular dependency between common and ServiceNow stacks
+            self.security_ir_client.add_to_role_policy(
+                aws_iam.PolicyStatement(
+                    effect=aws_iam.Effect.ALLOW,
+                    actions=["secretsmanager:GetSecretValue"],
+                    resources=[f"arn:aws:secretsmanager:{self.region}:{self.account}:secret:*"],
                 )
             )
             
@@ -388,15 +386,22 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
 
         # Add SSM suppression if ServiceNow parameters are provided
         if service_now_params:
-            suppressions.append(
+            suppressions.extend([
                 {
                     "id": "AwsSolutions-IAM5",
                     "reason": "SSM parameter access required for ServiceNow integration",
                     "applies_to": [
                         "Resource::arn:aws:ssm:*:*:parameter/SecurityIncidentResponse/*"
                     ],
+                },
+                {
+                    "id": "AwsSolutions-IAM5",
+                    "reason": "Secrets Manager wildcard required to avoid cyclic dependency between stacks",
+                    "applies_to": [
+                        "Resource::arn:aws:secretsmanager:*:*:secret:*"
+                    ],
                 }
-            )
+            ])
 
         NagSuppressions.add_resource_suppressions(
             self.security_ir_client,
@@ -422,12 +427,16 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             poller_role,
             [
                 {
-                    "id": "AwsSolutions-IAM5",
-                    "reason": "Poller role requires wildcard permissions for CloudWatch Logs and security-ir actions",
+                    "id": "AwsSolutions-IAM4",
+                    "reason": "Poller role requires AWSLambdaBasicExecutionRole managed policy for CloudWatch Logs",
                     "applies_to": [
-                        "Resource::*",
-                        "Resource::arn:aws:logs:*:*:log-group:/aws/lambda/*",
+                        "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
                     ],
+                },
+                {
+                    "id": "AwsSolutions-IAM5",
+                    "reason": "Wildcard resources are required for security-ir actions which don't support resource-level permissions",
+                    "applies_to": ["Resource::*"],
                 }
             ],
             True,
@@ -438,11 +447,17 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             security_ir_client_role,
             [
                 {
+                    "id": "AwsSolutions-IAM4",
+                    "reason": "Security IR client role requires AWSLambdaBasicExecutionRole managed policy for CloudWatch Logs",
+                    "applies_to": [
+                        "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+                    ],
+                },
+                {
                     "id": "AwsSolutions-IAM5",
-                    "reason": "Security IR client role requires wildcard permissions for CloudWatch Logs, security-ir actions, and S3 attachments",
+                    "reason": "Wildcard resources are required for security-ir actions and S3 attachments which don't support resource-level permissions",
                     "applies_to": [
                         "Resource::*",
-                        "Resource::arn:aws:logs:*:*:log-group:/aws/lambda/*",
                         "Resource::arn:aws:s3:::security-ir-*/*",
                     ],
                 }
@@ -465,8 +480,8 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 "SERVICE_NOW_CLIENT_ID", service_now_params.get("client_id_param_name", "")
             )
             self.security_ir_client.add_environment(
-                "SERVICE_NOW_CLIENT_SECRET_PARAM",
-                service_now_params.get("client_secret_param_name", ""),
+                "SERVICE_NOW_CLIENT_SECRET_ARN",
+                service_now_params.get("client_secret_arn", ""),
             )
             self.security_ir_client.add_environment(
                 "SERVICE_NOW_USER_ID", service_now_params.get("user_id_param_name", "")

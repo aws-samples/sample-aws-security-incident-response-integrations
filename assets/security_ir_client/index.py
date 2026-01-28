@@ -732,7 +732,12 @@ class ServiceNowService:
 
         Args:
             instance_id (str): ServiceNow instance ID
-            **kwargs: OAuth configuration parameters
+            **kwargs: OAuth configuration parameters including:
+                - client_id_param_name (str): SSM parameter name containing OAuth client ID
+                - client_secret_arn (str): Secret ARN containing OAuth client secret
+                - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+                - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
+                - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
 
         self.service_now_client = ServiceNowClient(instance_id, **kwargs)
@@ -1055,19 +1060,19 @@ class IncidentService:
                     
                 logger.info(f"instance: {instance_id}")
                 client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
-                client_secret_param_name = os.environ.get("SERVICE_NOW_CLIENT_SECRET_PARAM")
+                client_secret_arn = os.environ.get("SERVICE_NOW_CLIENT_SECRET_ARN")
                 user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
                 private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
                 private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
                 
-                if not all([client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
+                if not all([client_id_param_name, client_secret_arn, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
                     logger.error("Missing required ServiceNow environment variables")
                     return False
 
                 service_now_service = ServiceNowService(
                     instance_id,
                     client_id_param_name=client_id_param_name,
-                    client_secret_param_name=client_secret_param_name,
+                    client_secret_arn=client_secret_arn,
                     user_id_param_name=user_id_param_name,
                     private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
                     private_key_asset_key_param_name=private_key_asset_key_param_name

@@ -1,6 +1,8 @@
 """
 ServiceNow API wrapper for AWS Security Incident Response integration.
 This module provides a wrapper around the ServiceNow API for use in the Security Incident Response integration.
+
+Version: 1.1.1 - Fixed SSM parameter handling in both __get_jwt_oauth_access_token and __create_client methods
 """
 
 import logging
@@ -218,7 +220,14 @@ class ServiceNowClient:
                 return None
             
             # Get parameters for JWT OAuth
-            client_secret = self.__get_secret_value(self.client_secret_arn)
+            # Check if client_secret_arn is an SSM parameter name (starts with /)
+            if self.client_secret_arn and self.client_secret_arn.startswith('/'):
+                # It's an SSM parameter containing the secret ARN
+                actual_secret_arn = self.__get_parameter(self.client_secret_arn)
+                client_secret = self.__get_secret_value(actual_secret_arn) if actual_secret_arn else None
+            else:
+                # It's already a secret ARN
+                client_secret = self.__get_secret_value(self.client_secret_arn)
             client_id = self.__get_parameter(self.client_id_param_name)
             user_id = self.__get_parameter(self.user_id_param_name)
             
@@ -261,7 +270,14 @@ class ServiceNowClient:
 
             # OAuth2 authentication
             client_id = self.__get_parameter(self.client_id_param_name)
-            client_secret = self.__get_secret_value(self.client_secret_arn)
+            # Check if client_secret_arn is an SSM parameter name (starts with /)
+            if self.client_secret_arn and self.client_secret_arn.startswith('/'):
+                # It's an SSM parameter containing the secret ARN
+                actual_secret_arn = self.__get_parameter(self.client_secret_arn)
+                client_secret = self.__get_secret_value(actual_secret_arn) if actual_secret_arn else None
+            else:
+                # It's already a secret ARN
+                client_secret = self.__get_secret_value(self.client_secret_arn)
             user_id = self.__get_parameter(self.user_id_param_name)
             
             if not all([client_id, client_secret, user_id]):

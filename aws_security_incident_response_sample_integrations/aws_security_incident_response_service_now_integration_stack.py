@@ -119,13 +119,13 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
 
         # Store Service Now Client Secret in Secrets Manager
-        service_now_client_secret_secret = aws_secretsmanager.Secret(
+        self.service_now_client_secret_secret = aws_secretsmanager.Secret(
             self,
             "serviceNowClientSecretSecret",
             description="Service Now OAuth client secret",
             secret_string_value=SecretValue.cfn_parameter(service_now_client_secret_param),
         )
-        service_now_client_secret_secret.apply_removal_policy(RemovalPolicy.DESTROY)
+        self.service_now_client_secret_secret.apply_removal_policy(RemovalPolicy.DESTROY)
 
         service_now_client_id_ssm = aws_ssm.StringParameter(
             self,
@@ -187,6 +187,16 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
         service_now_instance_id_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
 
+        # Store ServiceNow client secret ARN in SSM for security_ir_client to access
+        service_now_client_secret_arn_ssm = aws_ssm.StringParameter(
+            self,
+            "serviceNowClientSecretArnSSM",
+            parameter_name="/SecurityIncidentResponse/serviceNowClientSecretArn",
+            string_value=self.service_now_client_secret_secret.secret_arn,
+            description="Service Now client secret ARN",
+        )
+        service_now_client_secret_arn_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
+
         """
         cdk for assets/service_now_client
         """
@@ -214,7 +224,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
                 "INCIDENTS_TABLE_NAME": table.table_name,
-                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
+                "SERVICE_NOW_CLIENT_SECRET_ARN": self.service_now_client_secret_secret.secret_arn,
                 "EVENT_SOURCE": SECURITY_IR_EVENT_SOURCE,
                 "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
                 "LOG_LEVEL": log_level_param.value_as_string,
@@ -222,18 +232,10 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             role=service_now_client_role,
         )
 
-        # Add custom policy for CloudWatch Logs permissions after Lambda is created
-        service_now_client_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_client.function_name}*"
-                ],
+        # Add basic execution role permissions
+        service_now_client_role.add_managed_policy(
+            aws_iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
             )
         )
 
@@ -279,13 +281,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             )
         )
         
-        service_now_client_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=["secretsmanager:GetSecretValue"],
-                resources=[service_now_client_secret_secret.secret_arn],
-            )
-        )
+        # Grant secrets access
+        self.service_now_client_secret_secret.grant_read(service_now_client_role)
 
         # Grant S3 permissions to read private key
         private_key_bucket.grant_read(service_now_client_role)
@@ -343,25 +340,6 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                     "service-role/AmazonAPIGatewayPushToCloudWatchLogs"
                 )
             ],
-        )
-
-        # Add CloudWatch Logs permissions to the role
-        api_gateway_logging_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:DescribeLogGroups",
-                    "logs:DescribeLogStreams",
-                    "logs:PutLogEvents",
-                    "logs:GetLogEvents",
-                    "logs:FilterLogEvents",
-                ],
-                resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/apigateway/*"
-                ],
-            )
         )
 
         # Create API Gateway
@@ -441,31 +419,16 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             role=service_now_secret_rotation_handler_role,
         )
 
-        service_now_secret_rotation_handler_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_secret_rotation_handler.function_name}*"
-                ],
+        # Add basic execution role permissions
+        service_now_secret_rotation_handler_role.add_managed_policy(
+            aws_iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
             )
         )
 
-        service_now_secret_rotation_handler_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "secretsmanager:GetSecretValue",
-                    "secretsmanager:PutSecretValue",
-                    "secretsmanager:UpdateSecretVersionStage",
-                ],
-                resources=[api_auth_secret.secret_arn],
-            )
-        )
+        # Grant secrets access
+        api_auth_secret.grant_read(service_now_secret_rotation_handler_role)
+        api_auth_secret.grant_write(service_now_secret_rotation_handler_role)
 
         # Configure rotation
         api_auth_secret.add_rotation_schedule(
@@ -516,7 +479,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
-                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
+                "SERVICE_NOW_CLIENT_SECRET_ARN": self.service_now_client_secret_secret.secret_arn,
                 "INCIDENTS_TABLE_NAME": table.table_name,
                 "EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
                 "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
@@ -525,18 +488,10 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             role=service_now_notifications_handler_role,
         )
 
-        # Add custom policy for CloudWatch Logs permissions
-        service_now_notifications_handler_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_notifications_handler.function_name}*"
-                ],
+        # Add basic execution role permissions
+        service_now_notifications_handler_role.add_managed_policy(
+            aws_iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
             )
         )
 
@@ -564,13 +519,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             )
         )
         
-        service_now_notifications_handler_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=["secretsmanager:GetSecretValue"],
-                resources=[service_now_client_secret_secret.secret_arn],
-            )
-        )
+        # Grant secrets access
+        self.service_now_client_secret_secret.grant_read(service_now_notifications_handler_role)
 
         # Update suppressions for specific resources
         NagSuppressions.add_resource_suppressions(
@@ -637,27 +587,15 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             role=service_now_api_gateway_authorizer_role,
         )
 
-        service_now_api_gateway_authorizer_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_api_gateway_authorizer_lambda.function_name}*"
-                ],
+        # Add basic execution role permissions
+        service_now_api_gateway_authorizer_role.add_managed_policy(
+            aws_iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
             )
         )
 
-        service_now_api_gateway_authorizer_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=["secretsmanager:GetSecretValue"],
-                resources=[api_auth_secret.secret_arn],
-            )
-        )
+        # Grant secrets access
+        api_auth_secret.grant_read(service_now_api_gateway_authorizer_role)
 
         # Create API Gateway authorizer
         service_now_api_gateway_token_authorizer = aws_apigateway.TokenAuthorizer(
@@ -754,7 +692,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "SERVICE_NOW_USER_ID": service_now_user_id_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_BUCKET": private_key_asset_bucket_ssm.parameter_name,
                 "PRIVATE_KEY_ASSET_KEY": private_key_asset_key_ssm.parameter_name,
-                "SERVICE_NOW_CLIENT_SECRET_ARN": service_now_client_secret_secret.secret_arn,
+                "SERVICE_NOW_CLIENT_SECRET_ARN": self.service_now_client_secret_secret.secret_arn,
                 "SERVICE_NOW_RESOURCE_PREFIX": service_now_api_gateway.rest_api_id,
                 "WEBHOOK_URL": f"{service_now_api_gateway.url.rstrip('/')}/webhook",
                 "API_AUTH_SECRET": api_auth_secret.secret_arn,
@@ -764,18 +702,10 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             role=service_now_resource_setup_role,
         )
 
-        # Add CloudWatch Logs permissions
-        service_now_resource_setup_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/{service_now_resource_setup_handler.function_name}*"
-                ],
+        # Add basic execution role permissions
+        service_now_resource_setup_role.add_managed_policy(
+            aws_iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AWSLambdaBasicExecutionRole"
             )
         )
 
@@ -797,19 +727,10 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             )
         )
 
-        # Add Secrets Manager permissions for rotation and secret access
-        service_now_resource_setup_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "secretsmanager:RotateSecret",
-                    "secretsmanager:GetSecretValue",
-                    "secretsmanager:PutSecretValue",
-                    "secretsmanager:UpdateSecretVersionStage",
-                ],
-                resources=[api_auth_secret.secret_arn, service_now_client_secret_secret.secret_arn],
-            )
-        )
+        # Grant secrets access
+        api_auth_secret.grant_read(service_now_resource_setup_role)
+        api_auth_secret.grant_write(service_now_resource_setup_role)
+        self.service_now_client_secret_secret.grant_read(service_now_resource_setup_role)
 
         # Grant S3 permissions to read private key
         private_key_bucket.grant_read(service_now_resource_setup_role)

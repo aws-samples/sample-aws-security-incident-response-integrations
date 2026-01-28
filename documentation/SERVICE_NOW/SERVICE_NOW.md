@@ -92,6 +92,7 @@ JWT (JSON Web Token) OAuth authentication uses RSA key pairs to generate signed 
    - `sn_si.integration_user` (for performing operations on Security Incidents)
    - `sn_si.manager` (for performing operations on Security Incidents)
    - `sn_si.read` (for performing operations on Security Incidents)
+   - `credential_admin` (for storing the sensitive APIKey as a `discovery_credential` encrypted password)
 
 ### Retrieve aws credentials for configuring profile
 

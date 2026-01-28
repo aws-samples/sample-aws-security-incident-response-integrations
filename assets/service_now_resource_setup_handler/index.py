@@ -110,6 +110,7 @@ class ServiceNowApiService:
                 - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
                 - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
+        # TODO: Make the usage of **kwargs consistent throughout the handlers. See related Asana task - https://app.asana.com/1/8442528107068/project/1209571477232011/task/1212993799709409?focus=true
         self.instance_id = instance_id
         self.client_id_param_name = kwargs.get('client_id_param_name')
         self.client_secret_arn = kwargs.get('client_secret_arn')
@@ -119,6 +120,29 @@ class ServiceNowApiService:
         self.secrets_manager_service = SecretsManagerService()
         self.s3_resource = boto3.resource('s3')
 
+    def __get_parameter(self, param_name: str) -> Optional[str]:
+        """
+        Fetch a parameter from SSM Parameter Store.
+
+        Args:
+            param_name (str): SSM parameter name
+
+        Returns:
+            Optional[str]: Parameter value or None if retrieval fails
+        """
+        try:
+            if not param_name:
+                logger.error("No parameter name provided")
+                return None
+
+            response = ssm_client.get_parameter(
+                Name=param_name, WithDecryption=True
+            )
+            return response["Parameter"]["Value"]
+        except Exception as e:
+            logger.error(f"Error retrieving parameter {param_name} from SSM: {str(e)}")
+            return None
+        
     def __get_secret_value(self, secret_arn: str) -> Optional[str]:
         """
         Fetch a secret value from AWS Secrets Manager.
@@ -342,57 +366,6 @@ class ServiceNowApiService:
         except Exception as e:
             logger.error(f"Error adding parameters to Http request function: {str(e)}")
 
-    def _create_system_property(self, apigw_api_key_property_name, api_auth_secret_arn):
-        """Create system property for API Gateway key in ServiceNow.
-
-        Args:
-            apigw_api_key_property_name (str): Name of the system property to create
-            api_auth_secret_arn (str): ARN of the API auth secret in Secrets Manager
-
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        try:
-            logger.info(
-                "Creating system property for API Gateway key in ServiceNow"
-            )
-
-            # Get headers and base URL for ServiceNow API requests
-            headers = self.__get_request_headers()
-            base_url = self.__get_request_base_url()
-
-            # Get API auth token from Secrets Manager
-            auth_token = (
-                self.secrets_manager_service.get_secret_value(api_auth_secret_arn)
-                if api_auth_secret_arn
-                else None
-            )
-
-            # Create password2 type property in sys_properties table if token is available
-            if auth_token:
-                sys_property_payload = {
-                    "name": apigw_api_key_property_name,
-                    "value": auth_token,
-                    "type": "password2",
-                    "description": "Password for external API integration",
-                    "ignore_cache": "true"
-                }
-
-                requests.post(
-                    f"{base_url}/api/now/table/sys_properties",
-                    json=sys_property_payload,
-                    headers=headers,
-                    timeout=30,
-                )
-                logger.info(f"System property {apigw_api_key_property_name} created successfully")
-                return True
-            else:
-                logger.error("No auth token available to create system property")
-                return False
-        except Exception as e:
-            logger.error(f"Error creating system property: {str(e)}")
-            return False
-
     def __create_outbound_rest_message_request_function(
         self,
         headers,
@@ -447,6 +420,66 @@ class ServiceNowApiService:
             return rest_message_post_function_sys_id
         except Exception as e:
             logger.error(f"Error creating Http request function: {str(e)}")
+            return None
+
+    def _create_discovery_credential(self, apigw_api_key_property_name, api_auth_secret_arn):
+        """Create a discovery_credential for API Gateway key in ServiceNow.
+
+        Args:
+            apigw_api_key_property_name (str): Name of the discovery_credential to create
+            api_auth_secret_arn (str): ARN of the API auth secret in Secrets Manager
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info(
+                "Creating a discovery_credential for API Gateway key in ServiceNow"
+            )
+
+            # Get headers and base URL for ServiceNow API requests
+            headers = self.__get_request_headers()
+            base_url = self.__get_request_base_url()
+
+            # Get API auth token from Secrets Manager
+            auth_token = (
+                self.secrets_manager_service.get_secret_value(api_auth_secret_arn)
+                if api_auth_secret_arn
+                else None
+            )
+
+            # Create password2 type property in sys_properties table if token is available
+            if auth_token:
+                # sys_property_payload = {
+                #     "name": apigw_api_key_property_name,
+                #     "value": auth_token,
+                #     "type": "password2",
+                #     "description": "Password for external API integration",
+                #     "ignore_cache": "true",
+                #     "write_roles": "business_rule_admin"
+                # }
+                sys_property_payload = {
+                    "name": apigw_api_key_property_name,
+                    "type": "basic_auth",
+                    "user_name": apigw_api_key_property_name,
+                    "password": auth_token,
+                    "active": "true"
+                }
+
+                response = requests.post(
+                    f"{base_url}/api/now/table/discovery_credentials",
+                    json=sys_property_payload,
+                    headers=headers,
+                    timeout=30,
+                )
+
+                logger.info(f"Discovery_credential {apigw_api_key_property_name} created successfully: {json.loads(response.text)}")
+                return True
+            else:
+                logger.error("No auth token available to create discovery_credential")
+                return None
+        except Exception as e:
+            logger.error(f"Error creating discovery_credential: {str(e)}")
             return None
 
     def _create_outbound_rest_message(
@@ -546,6 +579,7 @@ class ServiceNowApiService:
             outbound_rest_message_name (str): Name of the outbound REST message
             outbound_rest_message_request_function_name (str): Name of the request function
             resource_prefix (str): Prefix for ServiceNow resource naming
+            apigw_api_key_property_name (str): Name of the discovery_credential containing API key
 
         Returns:
             Optional[requests.Response]: Response from ServiceNow API or None if error
@@ -578,20 +612,29 @@ class ServiceNowApiService:
                     "incident_number": current.number.toString(),
                     "short_description": current.short_description.toString(),
                 }};
-                var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                var api_key = gs.getProperty('{apigw_api_key_property_name}');
-				request.setRequestHeader('Authorization', api_key);
-                request.setRequestBody(JSON.stringify(payload));
-                
-                var response = request.executeAsync();
-                gs.info('Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
-                var responseBody = response.getBody();
-                var httpStatus = response.getStatusCode();
-                gs.info("Incident Event Response: " + responseBody);
-                gs.info("Incident Event HTTP Status: " + httpStatus);
-                
+                var gr = new GlideRecord('discovery_credentials');
+                if (gr.get('name', '{apigw_api_key_property_name}')) {{
+                    credential_sys_id = gr.getUniqueValue();
+					var provider = new sn_cc.StandardCredentialsProvider();
+					var credential = provider.getCredentialByID(credential_sys_id);
+					var api_key = credential.getAttribute("password");
+                    
+                    var outbound_rest_message_name_str = "{outbound_rest_message_name}";
+                    var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
+                    var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                    request.setRequestHeader('Authorization', api_key);
+                    request.setRequestBody(JSON.stringify(payload));
+                    
+                    var response = request.executeAsync();
+                    gs.info('Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
+                    var responseBody = response.getBody();
+                    var httpStatus = response.getStatusCode();
+                    gs.info("Incident Event Response: " + responseBody);
+                    gs.info("Incident Event HTTP Status: " + httpStatus);
+                }}
+                else {{
+                    gs.info("Could not find API Key: {apigw_api_key_property_name}");
+                }}
             }} catch (error) {{
                 gs.error('Error sending incident event: ' + error.message);
             }}
@@ -631,6 +674,7 @@ class ServiceNowApiService:
             outbound_rest_message_name (str): Name of the outbound REST message
             outbound_rest_message_request_function_name (str): Name of the request function
             resource_prefix (str): Prefix for ServiceNow resource naming
+            apigw_api_key_property_name (str): Name of the discovery_credential containing API key
 
         Returns:
             Optional[requests.Response]: Response from ServiceNow API or None if error
@@ -663,20 +707,29 @@ class ServiceNowApiService:
                     "incident_number": current.number.toString(),
                     "short_description": current.short_description.toString(),
                 }};
-                var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                var api_key = gs.getProperty('{apigw_api_key_property_name}');
-				request.setRequestHeader('Authorization', api_key);
-                request.setRequestBody(JSON.stringify(payload));
-                
-                var response = request.executeAsync();
-                gs.info('Security Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
-                var responseBody = response.getBody();
-                var httpStatus = response.getStatusCode();
-                gs.info("Security Incident Event Response: " + responseBody);
-                gs.info("Security Incident Event HTTP Status: " + httpStatus);
-                
+                var gr = new GlideRecord('discovery_credentials');
+                if (gr.get('name', '{apigw_api_key_property_name}')) {{
+                    credential_sys_id = gr.getUniqueValue();
+					var provider = new sn_cc.StandardCredentialsProvider();
+					var credential = provider.getCredentialByID(credential_sys_id);
+					var api_key = credential.getAttribute("password");
+                    
+                    var outbound_rest_message_name_str = "{outbound_rest_message_name}";
+                    var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
+                    var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                    request.setRequestHeader('Authorization', api_key);
+                    request.setRequestBody(JSON.stringify(payload));
+                    
+                    var response = request.executeAsync();
+                    gs.info('Security Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
+                    var responseBody = response.getBody();
+                    var httpStatus = response.getStatusCode();
+                    gs.info("Security Incident Event Response: " + responseBody);
+                    gs.info("Security Incident Event HTTP Status: " + httpStatus);
+                }}
+                else {{
+                    gs.info("Could not find API Key: {apigw_api_key_property_name}");
+                }}
             }} catch (error) {{
                 gs.error('Error sending security incident event: ' + error.message);
             }}
@@ -716,7 +769,7 @@ class ServiceNowApiService:
             outbound_rest_message_name (str): Name of the outbound REST message
             outbound_rest_message_request_function_name (str): Name of the request function
             resource_prefix (str): Prefix for ServiceNow resource naming
-            apigw_api_key_property_name (str): Name of the system property containing API key
+            apigw_api_key_property_name (str): Name of the discovery_credential containing API key
 
         Returns:
             Optional[requests.Response]: Response from ServiceNow API or None if error
@@ -761,19 +814,29 @@ class ServiceNowApiService:
                         "short_description": incident.short_description.toString(),
                     }};
                     
-                    var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                    var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                    var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                    var api_key = gs.getProperty('{apigw_api_key_property_name}');
-				    request.setRequestHeader('Authorization', api_key);
-                    request.setRequestBody(JSON.stringify(payload));
-                    
-                    var response = request.executeAsync();
-                    gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
-                    var responseBody = response.getBody();
-                    var httpStatus = response.getStatusCode();
-                    gs.info("Attachment Event Response: " + responseBody);
-                    gs.info("Attachment Event HTTP Status: " + httpStatus);
+                    var gr = new GlideRecord('discovery_credentials');
+                    if (gr.get('name', '{apigw_api_key_property_name}')) {{
+                        credential_sys_id = gr.getUniqueValue();
+                        var provider = new sn_cc.StandardCredentialsProvider();
+                        var credential = provider.getCredentialByID(credential_sys_id);
+                        var api_key = credential.getAttribute("password");
+
+                        var outbound_rest_message_name_str = "{outbound_rest_message_name}";
+                        var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
+                        var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                        request.setRequestHeader('Authorization', api_key);
+                        request.setRequestBody(JSON.stringify(payload));
+                        
+                        var response = request.executeAsync();
+                        gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
+                        var responseBody = response.getBody();
+                        var httpStatus = response.getStatusCode();
+                        gs.info("Attachment Event Response: " + responseBody);
+                        gs.info("Attachment Event HTTP Status: " + httpStatus);
+                    }}
+                    else {{
+                        gs.info("Could not find API Key: {apigw_api_key_property_name}");
+                    }}
                 }} else {{
                     gs.warn('Could not find incident with sys_id: ' + incident_sys_id);
                 }}
@@ -817,6 +880,7 @@ class ServiceNowApiService:
             outbound_rest_message_name (str): Name of the outbound REST message
             outbound_rest_message_request_function_name (str): Name of the request function
             resource_prefix (str): Prefix for ServiceNow resource naming
+            apigw_api_key_property_name (str): Name of the discovery_credential containing API key
 
         Returns:
             Optional[requests.Response]: Response from ServiceNow API or None if error
@@ -861,19 +925,29 @@ class ServiceNowApiService:
                         "short_description": incident.short_description.toString(),
                     }};
                     
-                    var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                    var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                    var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                    var api_key = gs.getProperty('{apigw_api_key_property_name}');
-				    request.setRequestHeader('Authorization', api_key);
-                    request.setRequestBody(JSON.stringify(payload));
+                    var gr = new GlideRecord('discovery_credentials');
+                    if (gr.get('name', '{apigw_api_key_property_name}')) {{
+                        credential_sys_id = gr.getUniqueValue();
+                        var provider = new sn_cc.StandardCredentialsProvider();
+                        var credential = provider.getCredentialByID(credential_sys_id);
+                        var api_key = credential.getAttribute("password");
                     
-                    var response = request.executeAsync();
-                    gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
-                    var responseBody = response.getBody();
-                    var httpStatus = response.getStatusCode();
-                    gs.info("Attachment Event Response: " + responseBody);
-                    gs.info("Attachment Event HTTP Status: " + httpStatus);
+                        var outbound_rest_message_name_str = "{outbound_rest_message_name}";
+                        var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
+                        var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+                        request.setRequestHeader('Authorization', api_key);
+                        request.setRequestBody(JSON.stringify(payload));
+                        
+                        var response = request.executeAsync();
+                        gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
+                        var responseBody = response.getBody();
+                        var httpStatus = response.getStatusCode();
+                        gs.info("Attachment Event Response: " + responseBody);
+                        gs.info("Attachment Event HTTP Status: " + httpStatus);
+                    }}
+                    else {{
+                        gs.info("Could not find API Key: {apigw_api_key_property_name}");
+                    }}
                 }} else {{
                     gs.warn('Could not find incident with sys_id: ' + incident_sys_id);
                 }}
@@ -953,10 +1027,11 @@ def handler(event, context):
             private_key_asset_key_param_name=private_key_asset_key_param_name
         )
 
-        # Create system property for API Gateway key
+        # Create discovery_credential for API Gateway key
+        # TODO: replace the usage of APIGW Key for performing Auth from SNOW to AWS Security-IR, with OAuth 2 AuthN support. See related https://app.asana.com/1/8442528107068/project/1212385156858621/task/1212929737042140?focus=true 
         apigw_api_key_property_name = f"{service_now_resource_prefix}-aws-apigw-key"
-        if not service_now_api_service._create_system_property(apigw_api_key_property_name, api_auth_secret_arn):
-            logger.error("Failed to create system property for API Gateway key")
+        if not service_now_api_service._create_discovery_credential(apigw_api_key_property_name, api_auth_secret_arn):
+            logger.error("Failed to create discovery_credential for API Gateway key")
             return {"Status": "FAILED", "PhysicalResourceId": "service-now-api-setup"}
 
         outbound_rest_message_result = (
