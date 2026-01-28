@@ -161,9 +161,9 @@ class ServiceNowApiService:
             response = secrets_client.get_secret_value(SecretId=secret_arn)
             return response["SecretString"]
         except Exception as e:
-            logger.error(f"Error retrieving secret {secret_arn} from Secrets Manager: {str(e)}")
+            # Log the exception without exposing the secret ARN and return None if secret retrieval fails
+            logger.error(f"Error retrieving secret from Secrets Manager: {str(e)}")
             return None
-        
     def __get_request_base_url(self) -> Optional[str]:
         """Get base URL for ServiceNow API requests.
 
