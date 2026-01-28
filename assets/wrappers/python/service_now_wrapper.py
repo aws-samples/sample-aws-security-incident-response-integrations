@@ -1,6 +1,8 @@
 """
 ServiceNow API wrapper for AWS Security Incident Response integration.
 This module provides a wrapper around the ServiceNow API for use in the Security Incident Response integration.
+
+Version: 1.1.1 - Fixed SSM parameter handling in both __get_jwt_oauth_access_token and __create_client methods
 """
 
 import logging
@@ -21,6 +23,7 @@ logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
 ssm_client = boto3.client("ssm")
+secrets_client = boto3.client("secretsmanager")
 
 # Static variables
 CONTENT_TYPE = 'application/x-www-form-urlencoded; charset=UTF-8'
@@ -105,14 +108,14 @@ class ServiceNowClient:
             instance_id (str): ServiceNow instance ID
             **kwargs: OAuth configuration parameters including:
                 - client_id_param_name (str): SSM parameter name containing OAuth client ID
-                - client_secret_param_name (str): SSM parameter name containing OAuth client secret
+                - client_secret_arn (str): Secret ARN containing OAuth client secret
                 - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
                 - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
                 - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
         self.instance_id = instance_id
         self.client_id_param_name = kwargs.get('client_id_param_name')
-        self.client_secret_param_name = kwargs.get('client_secret_param_name')
+        self.client_secret_arn = kwargs.get('client_secret_arn')
         self.user_id_param_name = kwargs.get('user_id_param_name')
         self.private_key_asset_bucket_param_name = kwargs.get('private_key_asset_bucket_param_name')
         self.private_key_asset_key_param_name = kwargs.get('private_key_asset_key_param_name')
@@ -138,7 +141,27 @@ class ServiceNowClient:
             )
             return response["Parameter"]["Value"]
         except Exception as e:
-            logger.error(f"Error retrieving parameter {param_name} from SSM: {str(e)}")
+            logger.error(f"Error retrieving parameter from SSM: {str(e)}")
+            return None
+
+    def __get_secret_value(self, secret_arn: str) -> Optional[str]:
+        """Fetch a secret value from AWS Secrets Manager.
+
+        Args:
+            secret_arn (str): Secret ARN
+            
+        Returns:
+            Optional[str]: Secret value or None if retrieval fails
+        """
+        try:
+            if not secret_arn:
+                logger.error("No secret ARN provided")
+                return None
+
+            response = secrets_client.get_secret_value(SecretId=secret_arn)
+            return response["SecretString"]
+        except Exception as e:
+            logger.error(f"Error retrieving secret from Secrets Manager: {str(e)}")
             return None
 
     def __get_encoded_jwt(self, client_id: str, user_id: str) -> Optional[str]:
@@ -168,14 +191,13 @@ class ServiceNowClient:
             private_key = response['Body'].read().decode('utf-8')
             response['Body'].close()
             
-            # Create minimal JWT payload
             payload = {
-                "iss": client_id,
-                "sub": user_id,
-                "aud": client_id,
-                "iat": int(time.time()),
-                "exp": int(time.time()) + 3600,
-                "jti": str(uuid.uuid4())
+                "iss": client_id, # Issuer - OAuth client ID
+                "sub": user_id, # Subject - ServiceNow user ID
+                "aud": client_id, # Audience - OAuth client ID
+                "iat": int(time.time()), # Issued at - current timestamp
+                "exp": int(time.time()) + 3600, # Expiration - 1 hour from now
+                "jti": str(uuid.uuid4()) # JWT ID - unique identifier
             }
             
             # Encode JWT
@@ -198,7 +220,14 @@ class ServiceNowClient:
                 return None
             
             # Get parameters for JWT OAuth
-            client_secret = self.__get_parameter(self.client_secret_param_name)
+            # Check if client_secret_arn is an SSM parameter name (starts with /)
+            if self.client_secret_arn and self.client_secret_arn.startswith('/'):
+                # It's an SSM parameter containing the secret ARN
+                actual_secret_arn = self.__get_parameter(self.client_secret_arn)
+                client_secret = self.__get_secret_value(actual_secret_arn) if actual_secret_arn else None
+            else:
+                # It's already a secret ARN
+                client_secret = self.__get_secret_value(self.client_secret_arn)
             client_id = self.__get_parameter(self.client_id_param_name)
             user_id = self.__get_parameter(self.user_id_param_name)
             
@@ -241,7 +270,14 @@ class ServiceNowClient:
 
             # OAuth2 authentication
             client_id = self.__get_parameter(self.client_id_param_name)
-            client_secret = self.__get_parameter(self.client_secret_param_name)
+            # Check if client_secret_arn is an SSM parameter name (starts with /)
+            if self.client_secret_arn and self.client_secret_arn.startswith('/'):
+                # It's an SSM parameter containing the secret ARN
+                actual_secret_arn = self.__get_parameter(self.client_secret_arn)
+                client_secret = self.__get_secret_value(actual_secret_arn) if actual_secret_arn else None
+            else:
+                # It's already a secret ARN
+                client_secret = self.__get_secret_value(self.client_secret_arn)
             user_id = self.__get_parameter(self.user_id_param_name)
             
             if not all([client_id, client_secret, user_id]):
