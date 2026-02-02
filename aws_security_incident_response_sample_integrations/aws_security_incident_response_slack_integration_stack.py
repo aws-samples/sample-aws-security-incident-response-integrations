@@ -467,6 +467,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
                 resources=[
                     f"arn:{Aws.PARTITION}:ssm:{self.region}:{self.account}:parameter{SLACK_BOT_TOKEN_PARAMETER}",
                     f"arn:{Aws.PARTITION}:ssm:{self.region}:{self.account}:parameter{SLACK_SIGNING_SECRET_PARAMETER}",
+                    f"arn:{Aws.PARTITION}:ssm:{self.region}:{self.account}:parameter/SecurityIncidentResponse/slackPermissionConfig",
                 ],
             )
         )
@@ -513,6 +514,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
             environment={
                 "SLACK_BOT_TOKEN": SLACK_BOT_TOKEN_PARAMETER,
                 "SLACK_SIGNING_SECRET": SLACK_SIGNING_SECRET_PARAMETER,
+                "SLACK_PERMISSION_CONFIG": "/SecurityIncidentResponse/slackPermissionConfig",
                 "INCIDENTS_TABLE_NAME": table.table_name,
                 "LOG_LEVEL": log_level_param.value_as_string,
             },

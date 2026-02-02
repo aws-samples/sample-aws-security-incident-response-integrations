@@ -13,6 +13,13 @@ import requests
 import boto3
 from botocore.exceptions import ClientError
 
+try:
+    # Lambda layer import
+    from permission_models import PermissionConfig, PermissionMode, PermissionCheckResult
+except ImportError:
+    # Local development import
+    from ..domain.python.permission_models import PermissionConfig, PermissionMode, PermissionCheckResult
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
@@ -25,6 +32,7 @@ ssm_client = boto3.client("ssm")
 # Environment variables
 INCIDENTS_TABLE_NAME = os.environ.get("INCIDENTS_TABLE_NAME")
 SLACK_BOT_TOKEN_PARAM = os.environ.get("SLACK_BOT_TOKEN", "/SecurityIncidentResponse/slackBotToken")
+SLACK_PERMISSION_CONFIG_PARAM = os.environ.get("SLACK_PERMISSION_CONFIG", "/SecurityIncidentResponse/slackPermissionConfig")
 
 # Initialize DynamoDB table
 incidents_table = dynamodb.Table(INCIDENTS_TABLE_NAME) if INCIDENTS_TABLE_NAME else None
@@ -174,31 +182,159 @@ def parse_command(command_text: str) -> Tuple[str, str]:
     return subcommand, args
 
 
-def validate_user_permissions(user_id: str, case_id: str) -> bool:
+def get_permission_config() -> PermissionConfig:
+    """Get permission configuration from SSM Parameter Store.
+    
+    Returns:
+        PermissionConfig instance with current configuration
+    """
+    try:
+        # Try to get permission config from SSM
+        config_json = get_ssm_parameter(SLACK_PERMISSION_CONFIG_PARAM, with_decryption=False)
+        
+        if config_json:
+            config_dict = json.loads(config_json)
+            return PermissionConfig.from_dict(config_dict)
+        else:
+            # Default to allow-all mode if parameter doesn't exist
+            logger.info("Permission config not found in SSM, using default allow-all mode")
+            return PermissionConfig(permission_mode=PermissionMode.ALLOW_ALL)
+            
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing permission config JSON: {str(e)}")
+        return PermissionConfig(permission_mode=PermissionMode.ALLOW_ALL)
+    except Exception as e:
+        logger.error(f"Error retrieving permission config: {str(e)}")
+        return PermissionConfig(permission_mode=PermissionMode.ALLOW_ALL)
+
+
+def check_watcher_based_permission(slack_user_id: str, case_id: str, config: PermissionConfig) -> PermissionCheckResult:
+    """Check if user has permission based on case watcher list.
+    
+    Args:
+        slack_user_id: Slack user ID
+        case_id: AWS SIR case ID
+        config: Permission configuration
+        
+    Returns:
+        PermissionCheckResult with validation result
+    """
+    try:
+        # Get AWS identity for Slack user
+        aws_identity = config.get_aws_identity(slack_user_id)
+        if not aws_identity:
+            return PermissionCheckResult(
+                allowed=False,
+                reason=f"Slack user {slack_user_id} is not mapped to an AWS identity",
+                user_id=slack_user_id,
+                case_id=case_id,
+                command="unknown"
+            )
+        
+        # Get case details to check watchers
+        case_details = get_case_details(case_id)
+        if not case_details:
+            return PermissionCheckResult(
+                allowed=False,
+                reason=f"Could not retrieve case details for {case_id}",
+                user_id=slack_user_id,
+                case_id=case_id,
+                command="unknown"
+            )
+        
+        # Check if user is in watchers list
+        watchers = case_details.get("watchers", [])
+        for watcher in watchers:
+            watcher_arn = watcher.get("principal", {}).get("arn", "") if isinstance(watcher, dict) else str(watcher)
+            if aws_identity in watcher_arn or watcher_arn in aws_identity:
+                return PermissionCheckResult(
+                    allowed=True,
+                    reason=f"User is a case watcher (AWS identity: {aws_identity})",
+                    user_id=slack_user_id,
+                    case_id=case_id,
+                    command="unknown"
+                )
+        
+        return PermissionCheckResult(
+            allowed=False,
+            reason=f"User is not a case watcher (AWS identity: {aws_identity})",
+            user_id=slack_user_id,
+            case_id=case_id,
+            command="unknown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error checking watcher-based permission: {str(e)}")
+        return PermissionCheckResult(
+            allowed=False,
+            reason=f"Error during permission check: {str(e)}",
+            user_id=slack_user_id,
+            case_id=case_id,
+            command="unknown"
+        )
+
+
+def validate_user_permissions(user_id: str, case_id: str, command: str = "unknown") -> bool:
     """Validate that user has permissions to manage the case.
     
-    For now, this is a placeholder that returns True.
-    In a production environment, this should check:
-    - User's AWS IAM permissions
-    - Case watcher list
-    - Organization-specific access controls
+    This function implements a flexible permission system that supports:
+    1. Allow-all mode (backward compatibility)
+    2. Watcher-based validation (user must be a case watcher)
+    3. User-mapping mode (explicit Slack-to-AWS user mapping)
     
     Args:
         user_id: Slack user ID
         case_id: AWS SIR case ID
+        command: Command being executed
         
     Returns:
         True if user has permissions, False otherwise
     """
-    # TODO: Implement actual permission validation
-    # This could involve:
-    # 1. Mapping Slack user to AWS identity
-    # 2. Checking AWS IAM permissions
-    # 3. Verifying user is a case watcher
-    # 4. Checking organization-specific access controls
-    
-    logger.info(f"Permission check for user {user_id} on case {case_id} - currently allowing all")
-    return True
+    try:
+        # Get permission configuration
+        config = get_permission_config()
+        
+        # Check if user is an admin (always allowed)
+        if config.is_admin_user(user_id):
+            logger.info(f"Permission ALLOWED for admin user {user_id} on case {case_id} (command: {command})")
+            return True
+        
+        # Handle different permission modes
+        if config.permission_mode == PermissionMode.ALLOW_ALL:
+            logger.info(f"Permission ALLOWED for user {user_id} on case {case_id} (mode: allow-all, command: {command})")
+            return True
+        
+        elif config.permission_mode == PermissionMode.WATCHER_BASED:
+            # For read-only commands, allow all users
+            if config.is_read_only_command(command):
+                logger.info(f"Permission ALLOWED for user {user_id} on case {case_id} (read-only command: {command})")
+                return True
+            
+            # Check watcher-based permissions
+            result = check_watcher_based_permission(user_id, case_id, config)
+            result.command = command
+            logger.info(str(result))
+            return result.allowed
+        
+        elif config.permission_mode == PermissionMode.USER_MAPPING:
+            # Check if user has AWS identity mapping
+            aws_identity = config.get_aws_identity(user_id)
+            if aws_identity:
+                logger.info(f"Permission ALLOWED for user {user_id} on case {case_id} (mapped to: {aws_identity}, command: {command})")
+                return True
+            else:
+                logger.warning(f"Permission DENIED for user {user_id} on case {case_id} (no AWS identity mapping, command: {command})")
+                return False
+        
+        else:
+            # Unknown mode, default to deny
+            logger.warning(f"Permission DENIED for user {user_id} on case {case_id} (unknown mode: {config.permission_mode}, command: {command})")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error validating permissions for user {user_id} on case {case_id}: {str(e)}")
+        # Fail closed - deny access on error
+        return False
 
 
 def handle_status_command(case_id: str, response_url: str) -> bool:
@@ -498,8 +634,8 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
         logger.info(f"Processing command '{subcommand}' for case {case_id} from user {user_id}")
         
         # Validate user permissions
-        if not validate_user_permissions(user_id, case_id):
-            send_slack_response(response_url, "❌ Error: You do not have permission to manage this case.")
+        if not validate_user_permissions(user_id, case_id, subcommand):
+            send_slack_response(response_url, "❌ Error: You do not have permission to execute this command.")
             return False
         
         # Route to appropriate handler
