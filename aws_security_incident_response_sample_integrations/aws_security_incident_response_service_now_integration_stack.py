@@ -19,8 +19,9 @@ from aws_cdk import (
     aws_s3 as s3,
     aws_kms as kms,
     CustomResource,
-    custom_resources as cr,
+    custom_resources as cr, Tags,
 )
+from aws_cdk.aws_logs import LogGroup
 from cdk_nag import NagSuppressions
 from constructs import Construct
 from .constants import (
@@ -208,6 +209,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Custom role for Security Incident Response Service Now Client Lambda function",
         )
 
+        service_now_client_log_group = self.get_log_group('SecurityIncidentResponseServiceNowClientLogs', "service-now-client-logs")
+
         # create Lambda function for Service Now with custom role
         service_now_client = py_lambda.PythonFunction(
             self,
@@ -230,7 +233,10 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "LOG_LEVEL": log_level_param.value_as_string,
             },
             role=service_now_client_role,
+            log_group=service_now_client_log_group,
         )
+        service_now_client_log_group.grant_write(service_now_client.role)
+        Tags.of(service_now_client).add('purpose', 'service-now-client')
 
         # Add basic execution role permissions
         service_now_client_role.add_managed_policy(
@@ -405,6 +411,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Role for ServiceNow secret rotation Lambda function",
         )
 
+        service_now_secret_rotation_handler_logs = self.get_log_group(
+            "ServiceNowSecretRotationHandlerLogs", 'service-now-rotation-handler-logs' )
+
         # Create rotation Lambda function
         service_now_secret_rotation_handler = py_lambda.PythonFunction(
             self,
@@ -417,7 +426,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             runtime=aws_lambda.Runtime.PYTHON_3_13,
             timeout=Duration.minutes(LAMBDA_TIMEOUT_MINUTES),
             role=service_now_secret_rotation_handler_role,
+            log_group=service_now_secret_rotation_handler_logs,
         )
+        Tags.of(service_now_secret_rotation_handler_role).add('purpose', 'service-now-rotation-handler')
 
         # Add basic execution role permissions
         service_now_secret_rotation_handler_role.add_managed_policy(
@@ -461,6 +472,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Custom role for Service Now Notifications Handler Lambda function",
         )
 
+        service_now_notifications_handler_logs = self.get_log_group('ServiceNowNotificationsHandlerLogs', 'service-now-notifications-handler-logs')
+
         # Create Lambda function for Service Now Notifications handler with custom role
         service_now_notifications_handler = py_lambda.PythonFunction(
             self,
@@ -486,7 +499,10 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "LOG_LEVEL": log_level_param.value_as_string,
             },
             role=service_now_notifications_handler_role,
+            log_group=service_now_notifications_handler_logs,
         )
+        service_now_notifications_handler_logs.grant_write(service_now_notifications_handler.role)
+        Tags.of(service_now_notifications_handler_role).add('purpose', 'service-now-notifications-handler')
 
         # Add basic execution role permissions
         service_now_notifications_handler_role.add_managed_policy(
@@ -570,7 +586,9 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Role for ServiceNow API Gateway authorizer Lambda function",
         )
 
-        service_now_api_gateway_authorizer_lambda = py_lambda.PythonFunction(
+        service_now_api_gateway_authorizer_logs = self.get_log_group('ServiceNowApiGatewayAuthorizerLogs', 'service-now-api-gateway-authorizer-logs')
+
+        service_now_api_gateway_authorizer = py_lambda.PythonFunction(
             self,
             "ServiceNowApiGatewayAuthorizer",
             entry=path.join(
@@ -585,7 +603,10 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "LOG_LEVEL": log_level_param.value_as_string,
             },
             role=service_now_api_gateway_authorizer_role,
+            log_group=service_now_api_gateway_authorizer_logs,
         )
+        service_now_api_gateway_authorizer_logs.grant_write(service_now_api_gateway_authorizer.role)
+        Tags.of(service_now_api_gateway_authorizer).add('purpose', 'service-now-api-gateway-authorizer')
 
         # Add basic execution role permissions
         service_now_api_gateway_authorizer_role.add_managed_policy(
@@ -601,7 +622,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         service_now_api_gateway_token_authorizer = aws_apigateway.TokenAuthorizer(
             self,
             "ServiceNowTokenAuthorizer",
-            handler=service_now_api_gateway_authorizer_lambda,
+            handler=service_now_api_gateway_authorizer,
             identity_source="method.request.header.Authorization",
         )
 
@@ -630,7 +651,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 {
                     "id": "AwsSolutions-IAM5",
                     "reason": "CloudWatch Logs permissions use specific Lambda function name with wildcard for log streams",
-                    "applies_to": [f"Resource::arn:*:logs:*:*:log-group:/aws/lambda/{service_now_api_gateway_authorizer_lambda.function_name}*"],
+                    "applies_to": [f"Resource::arn:*:logs:*:*:log-group:/aws/lambda/{service_now_api_gateway_authorizer.function_name}*"],
                 }
             ],
             True,
@@ -673,8 +694,10 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             description="Role for ServiceNow Resource setup Lambda",
         )
 
+        service_now_resource_setup_logs = self.get_log_group('ServiceNowResourceSetupLogs','service-now-resource-setup-logs')
+
         # Create Lambda function for ServiceNow API setup
-        service_now_resource_setup_handler = py_lambda.PythonFunction(
+        service_now_resource_setup = py_lambda.PythonFunction(
             self,
             "ServiceNowResourceSetupLambda",
             entry=path.join(
@@ -700,7 +723,10 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
                 "LOG_LEVEL": log_level_param.value_as_string,
             },
             role=service_now_resource_setup_role,
+            log_group=service_now_resource_setup_logs,
         )
+        service_now_resource_setup_logs.grant_write(service_now_resource_setup.role)
+        Tags.of(service_now_resource_setup).add('purpose', 'service-now-resource-setup')
 
         # Add basic execution role permissions
         service_now_resource_setup_role.add_managed_policy(
@@ -755,7 +781,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         service_now_cr_provider = cr.Provider(
             self,
             "ServiceNowResourceSetupProvider",
-            on_event_handler=service_now_resource_setup_handler,
+            on_event_handler=service_now_resource_setup,
         )
 
         # Create custom resource
@@ -807,3 +833,8 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             value=f"{service_now_api_gateway.url.rstrip('/')}/webhook",
             description="ServiceNow Webhook API Gateway URL",
         )
+
+    def get_log_group(self, id, purpose: str) -> LogGroup:
+        ret = LogGroup(self, id, removal_policy=RemovalPolicy.DESTROY, retention=aws_logs.RetentionDays.ONE_WEEK)
+        Tags.of(ret).add('purpose', purpose)
+        return ret

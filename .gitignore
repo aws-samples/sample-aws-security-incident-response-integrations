@@ -55,4 +55,5 @@ venv.bak/
 # Following file is added in gitignore till we start adding service_now_client event processing implementation
 tests/assets/service_now_client/test_service_now_client.py
 cdk.out/*
+cdk.out*/*
 .kiro/specs
