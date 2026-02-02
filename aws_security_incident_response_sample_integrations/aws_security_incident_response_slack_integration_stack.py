@@ -190,6 +190,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
                 actions=[
                     "security-ir:GetCaseAttachmentDownloadUrl",
                     "security-ir:ListComments",
+                    "security-ir:CreateCaseComment",
                 ],
                 resources=["*"],
             )
@@ -202,6 +203,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
                 actions=["ssm:GetParameter"],
                 resources=[
                     f"arn:{Aws.PARTITION}:ssm:{self.region}:{self.account}:parameter{SLACK_BOT_TOKEN_PARAMETER}",
+                    f"arn:{Aws.PARTITION}:ssm:{self.region}:{self.account}:parameter{SLACK_SIGNING_SECRET_PARAMETER}",
                     f"arn:{Aws.PARTITION}:ssm:{self.region}:{self.account}:parameter/SecurityIncidentResponse/slackWorkspaceId",
                 ],
             )
@@ -387,7 +389,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
             [
                 {
                     "id": "AwsSolutions-IAM5",
-                    "reason": "Lambda invocation permission will be restricted after command handler is created",
+                    "reason": "Wildcard resources are required for Security IR and Lambda invocation permissions",
                     "applies_to": ["Resource::*"],
                 }
             ],
@@ -429,6 +431,21 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
             log_group=event_bus_logger.log_group
         )
         slack_notifications_rule.add_target(slack_notifications_target)
+
+
+
+        # Grant permission to create comments, upload attachments, and get case details in Security IR cases
+        slack_events_bolt_handler_role.add_to_policy(
+            aws_iam.PolicyStatement(
+                effect=aws_iam.Effect.ALLOW,
+                actions=[
+                    "security-ir:CreateCaseComment",
+                    "security-ir:GetCaseAttachmentUploadUrl",
+                    "security-ir:GetCase",
+                ],
+                resources=["*"],
+            )
+        )
 
         # Grant specific DynamoDB permissions instead of full access
         table.grant_read_write_data(slack_events_bolt_handler_role)
@@ -483,6 +500,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
                     "security-ir:CloseCase",
                     "security-ir:CreateCaseComment",
                     "security-ir:ListComments",
+                    "security-ir:ListInvestigations",
                 ],
                 resources=["*"],
             )
@@ -524,123 +542,22 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         # Grant specific DynamoDB permissions instead of full access
         table.grant_read_write_data(slack_command_handler_role)
 
-        # Update Slack Events Bolt Handler environment to include command handler ARN
+        # Update Slack Events Bolt Handler environment to include command handler function name
         slack_events_bolt_handler.add_environment(
-            "SLACK_COMMAND_HANDLER_ARN", slack_command_handler.function_arn
+            "SLACK_COMMAND_HANDLER_FUNCTION", slack_command_handler.function_name
         )
 
         # Grant Slack Events Bolt Handler permission to invoke Command Handler
         slack_command_handler.grant_invoke(slack_events_bolt_handler)
 
-        """
-        cdk for Slack API Gateway Authorizer
-        """
-        # Create IAM role for Slack API Gateway Authorizer
-        slack_authorizer_role = aws_iam.Role(
-            self,
-            "SlackApiGatewayAuthorizerRole",
-            assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
-            description="Role for Slack API Gateway Authorizer Lambda function",
-        )
-
-        # Add CloudWatch Logs permissions
-        slack_authorizer_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=[
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                ],
-                resources=[
-                    f"arn:{Aws.PARTITION}:logs:{self.region}:{self.account}:log-group:/aws/lambda/*"
-                ],
-            )
-        )
-
-        # Grant permission to read Slack signing secret from SSM
-        slack_authorizer_role.add_to_policy(
-            aws_iam.PolicyStatement(
-                effect=aws_iam.Effect.ALLOW,
-                actions=["ssm:GetParameter"],
-                resources=[
-                    f"arn:{Aws.PARTITION}:ssm:{self.region}:{self.account}:parameter{SLACK_SIGNING_SECRET_PARAMETER}",
-                ],
-            )
-        )
-
-        # Create Lambda authorizer function
-        slack_authorizer = py_lambda.PythonFunction(
-            self,
-            "SlackApiGatewayAuthorizer",
-            entry=path.join(
-                path.dirname(__file__), "..", "assets/slack_api_gateway_authorizer"
-            ),
-            runtime=aws_lambda.Runtime.PYTHON_3_13,
-            timeout=Duration.seconds(10),
-            environment={
-                "SLACK_SIGNING_SECRET": SLACK_SIGNING_SECRET_PARAMETER,
-                "LOG_LEVEL": log_level_param.value_as_string,
-            },
-            role=slack_authorizer_role,
-        )
+        # Note: API Gateway authorization removed - signature verification handled in Lambda function
 
         """
         cdk for API Gateway webhook endpoints
         """
-        # Create request validator for API Gateway
-        request_validator = aws_apigateway.RequestValidator(
-            self,
-            "SlackWebhookRequestValidator",
-            rest_api=slack_api_gateway,
-            request_validator_name="slack-webhook-validator",
-            validate_request_body=True,
-            validate_request_parameters=True,
-        )
+        # Note: Request validation removed to allow URL verification challenges
 
-        # Create request model for Slack events
-        slack_event_model = aws_apigateway.Model(
-            self,
-            "SlackEventModel",
-            rest_api=slack_api_gateway,
-            content_type="application/json",
-            model_name="SlackEventModel",
-            schema=aws_apigateway.JsonSchema(
-                schema=aws_apigateway.JsonSchemaVersion.DRAFT4,
-                title="Slack Event Schema",
-                type=aws_apigateway.JsonSchemaType.OBJECT,
-                properties={
-                    "type": aws_apigateway.JsonSchema(
-                        type=aws_apigateway.JsonSchemaType.STRING
-                    ),
-                    "token": aws_apigateway.JsonSchema(
-                        type=aws_apigateway.JsonSchemaType.STRING
-                    ),
-                    "challenge": aws_apigateway.JsonSchema(
-                        type=aws_apigateway.JsonSchemaType.STRING
-                    ),
-                    "event": aws_apigateway.JsonSchema(
-                        type=aws_apigateway.JsonSchemaType.OBJECT
-                    ),
-                    "command": aws_apigateway.JsonSchema(
-                        type=aws_apigateway.JsonSchemaType.STRING
-                    ),
-                },
-            ),
-        )
-
-        # Create Lambda authorizer for Slack signature verification
-        slack_lambda_authorizer = aws_apigateway.RequestAuthorizer(
-            self,
-            "SlackRequestAuthorizer",
-            handler=slack_authorizer,
-            identity_sources=[
-                aws_apigateway.IdentitySource.header("X-Slack-Request-Timestamp"),
-                aws_apigateway.IdentitySource.header("X-Slack-Signature"),
-            ],
-            authorizer_name="SlackSignatureAuthorizer",
-            results_cache_ttl=Duration.seconds(0),  # Disable caching for security
-        )
+        # Note: Signature verification is now handled directly in the Lambda function
 
         # Create /slack resource
         slack_resource = slack_api_gateway.root.add_resource("slack")
@@ -652,29 +569,15 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         events_integration = aws_apigateway.LambdaIntegration(
             slack_events_bolt_handler,
             proxy=True,
-            integration_responses=[
-                aws_apigateway.IntegrationResponse(
-                    status_code="200",
-                    response_parameters={
-                        "method.response.header.Content-Type": "'application/json'"
-                    },
-                )
-            ],
         )
 
-        # Add POST method to /slack/events with request validation and authorization
+        # Add POST method to /slack/events with minimal configuration for URL verification
         events_method = events_resource.add_method(
             "POST",
             events_integration,
-            authorizer=slack_lambda_authorizer,
-            request_validator=request_validator,
-            request_models={"application/json": slack_event_model},
             method_responses=[
                 aws_apigateway.MethodResponse(
-                    status_code="200",
-                    response_parameters={
-                        "method.response.header.Content-Type": True,
-                    },
+                    status_code="200"
                 )
             ],
         )

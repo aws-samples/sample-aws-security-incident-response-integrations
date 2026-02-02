@@ -28,7 +28,7 @@ except ImportError:
 
 
 class JiraClient:
-    """Class to handle Jira API interactions"""
+    """Class to handle Jira API interactions."""
 
     def __init__(self):
         """Initialize the Jira client."""

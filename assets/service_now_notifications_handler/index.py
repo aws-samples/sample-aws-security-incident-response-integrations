@@ -4,19 +4,15 @@ This module processes notifications from ServiceNow and publishes events to Even
 """
 
 import json
-import html
 import os
-import sys
 import datetime
 import time
-import re
 import traceback
 import logging
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List
 import boto3
 from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
-from aws_lambda_powertools import Logger
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 try:
@@ -31,11 +27,20 @@ EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "service-now")
 
 # Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.INFO)  # Set to INFO first
 
-# Configure logging with AWS Lambda Powertools
-log_level = os.environ.get("LOG_LEVEL", "error").lower()
-logger = Logger(service="service-now-notifications-handler", level=log_level)
+# Get log level from environment variable
+log_level = os.environ.get("LOG_LEVEL", "info").lower()
+print(f"LOG_LEVEL environment variable: {log_level}")  # Debug print
+if log_level == "debug":
+    logger.setLevel(logging.DEBUG)
+elif log_level == "info":
+    logger.setLevel(logging.INFO)
+else:
+    # Default to ERROR level
+    logger.setLevel(logging.ERROR)
+
+print(f"Logger level set to: {logger.level}")  # Debug print
 
 # Initialize AWS clients
 events_client = boto3.client("events")
@@ -43,37 +48,47 @@ dynamodb = boto3.resource("dynamodb")
 
 
 class DateTimeEncoder(json.JSONEncoder):
-    """Custom JSON encoder for datetime objects"""
+    """Custom JSON encoder for datetime objects."""
 
     def default(self, obj):
-        """Convert datetime objects to ISO format strings"""
+        """Convert datetime objects to ISO format strings.
+
+        Args:
+            obj: Object to encode
+
+        Returns:
+            str: ISO formatted datetime string or default encoding
+        """
         if isinstance(obj, (datetime.date, datetime.datetime)):
             return obj.isoformat()
         return super().default(obj)
 
 
 class BaseEvent:
-    """Base class for domain events"""
+    """Base class for domain events."""
 
     event_type = None
     event_source = EVENT_SOURCE
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert the event to a dictionary"""
+        """Convert the event to a dictionary.
+
+        Returns:
+            Dict[str, Any]: Dictionary representation of the event
+        """
         raise NotImplementedError("Subclasses must implement to_dict()")
 
 
 class IncidentCreatedEvent(BaseEvent):
-    """Domain event for incident creation"""
+    """Domain event for incident creation."""
 
     event_type = "IncidentCreated"
 
     def __init__(self, incident: Dict[str, Any]):
-        """
-        Initialize an IncidentCreatedEvent
+        """Initialize an IncidentCreatedEvent.
 
         Args:
-            incident: The incident details dictionary
+            incident (Dict[str, Any]): The incident details dictionary
         """
         self.incident = incident
 
@@ -121,16 +136,15 @@ class IncidentCreatedEvent(BaseEvent):
 
 
 class IncidentUpdatedEvent(BaseEvent):
-    """Domain event for incident update"""
+    """Domain event for incident update."""
 
     event_type = "IncidentUpdated"
 
     def __init__(self, incident: Dict[str, Any]):
-        """
-        Initialize an IncidentUpdatedEvent
+        """Initialize an IncidentUpdatedEvent.
 
         Args:
-            incident: The incident details dictionary
+            incident (Dict[str, Any]): The incident details dictionary
         """
         self.incident = incident
 
@@ -176,16 +190,15 @@ class IncidentUpdatedEvent(BaseEvent):
 
 
 class IncidentDeletedEvent(BaseEvent):
-    """Domain event for incident deletion"""
+    """Domain event for incident deletion."""
 
     event_type = "IncidentDeleted"
 
     def __init__(self, incident_id: str):
-        """
-        Initialize an IncidentDeletedEvent
+        """Initialize an IncidentDeletedEvent.
 
         Args:
-            incident_id: The ID of the incident that was deleted
+            incident_id (str): The ID of the incident that was deleted
         """
         self.incident_id = incident_id
 
@@ -204,21 +217,20 @@ class IncidentDeletedEvent(BaseEvent):
 
 
 class ParameterService:
-    """Class to handle parameter operations"""
+    """Class to handle parameter operations."""
 
     def __init__(self):
-        """Initialize the parameter service"""
+        """Initialize the parameter service."""
         self.ssm_client = boto3.client("ssm")
 
     def _get_parameter(self, parameter_name: str) -> Optional[str]:
-        """
-        Get a parameter from SSM Parameter Store
+        """Get a parameter from SSM Parameter Store.
 
         Args:
-            parameter_name: The name of the parameter to retrieve
+            parameter_name (str): The name of the parameter to retrieve
 
         Returns:
-            Parameter value or None if retrieval fails
+            Optional[str]: Parameter value or None if retrieval fails
         """
         if not parameter_name:
             logger.error("Parameter name is empty or None")
@@ -254,7 +266,7 @@ class ParameterService:
 
 
 class EventPublisherService:
-    """Service for publishing events to EventBridge"""
+    """Service for publishing events to EventBridge."""
 
     def __init__(self, event_bus_name: str):
         """
@@ -306,7 +318,7 @@ class EventPublisherService:
 
 
 class DatabaseService:
-    """Service for database operations"""
+    """Service for database operations."""
 
     def __init__(self, table_name):
         """Initialize the database service"""
@@ -513,84 +525,16 @@ class DatabaseService:
 
 
 class ServiceNowService:
-    """Service for ServiceNow operations"""
+    """Service for ServiceNow operations."""
 
-    def __init__(self, instance_id, username, password_param_name):
-        """Initialize the ServiceNow service"""
-        self.service_now_client = ServiceNowClient(
-            instance_id, username, password_param_name
-        )
-
-    def __extract_incident_details(
-        self, service_now_incident: Any, service_now_incident_attachments: Any
-    ) -> Dict[str, Any]:
-        """
-        Extract relevant details from a ServiceNow incident object into a serializable dictionary
-
+    def __init__(self, instance_id, **kwargs):
+        """Initialize the ServiceNow service
+        
         Args:
-            service_now_incident: ServiceNow incident object
-
-        Returns:
-            Dictionary with serializable ServiceNow incident details
+            instance_id (str): ServiceNow instance ID
+            **kwargs: OAuth configuration parameters
         """
-        try:
-            attachments_list = [
-                {
-                    "filename": attachment.file_name,
-                    "content_type": attachment.content_type,
-                }
-                for attachment in service_now_incident_attachments
-            ]
-
-            incident_dict = {
-                "sys_id": service_now_incident.sys_id.get_display_value(),
-                "number": service_now_incident.number.get_display_value(),
-                "short_description": service_now_incident.short_description.get_display_value(),
-                "description": service_now_incident.description.get_display_value(),
-                "sys_created_on": service_now_incident.sys_created_on.get_display_value(),
-                "sys_created_by": service_now_incident.sys_created_by.get_display_value(),
-                "resolved_by": service_now_incident.resolved_by.get_display_value(),
-                "resolved_at": service_now_incident.resolved_at.get_display_value(),
-                "opened_at": service_now_incident.opened_at.get_display_value(),
-                "closed_at": service_now_incident.closed_at.get_display_value(),
-                "state": service_now_incident.state.get_display_value(),
-                "impact": service_now_incident.impact.get_display_value(),
-                "active": service_now_incident.active.get_display_value(),
-                "priority": service_now_incident.priority.get_display_value(),
-                "caller_id": service_now_incident.caller_id.get_display_value(),
-                "urgency": service_now_incident.urgency.get_display_value(),
-                "severity": service_now_incident.severity.get_display_value(),
-                "comments": service_now_incident.comments.get_display_value(),
-                "work_notes": service_now_incident.work_notes.get_display_value(),
-                "comments_and_work_notes": service_now_incident.comments_and_work_notes.get_display_value(),
-                "close_code": service_now_incident.close_code.get_display_value(),
-                "close_notes": service_now_incident.close_notes.get_display_value(),
-                "closed_by": service_now_incident.closed_by.get_display_value(),
-                "reopened_by": service_now_incident.reopened_by.get_display_value(),
-                "assigned_to": service_now_incident.assigned_to.get_display_value(),
-                "due_date": service_now_incident.due_date.get_display_value(),
-                "sys_tags": service_now_incident.sys_tags.get_display_value(),
-                "category": service_now_incident.subcategory.get_display_value(),
-                "subcategory": service_now_incident.subcategory.get_display_value(),
-                "attachments": attachments_list,
-            }
-            return incident_dict
-        except Exception as e:
-            logger.error(f"Error extracting ServiceNow incident details: {str(e)}")
-            # Return minimal details if extraction fails
-            return {
-                "id": (
-                    service_now_incident.id
-                    if hasattr(service_now_incident, "id")
-                    else None
-                ),
-                "key": (
-                    service_now_incident.key
-                    if hasattr(service_now_incident, "key")
-                    else None
-                ),
-                "error": str(e),
-            }
+        self.service_now_client = ServiceNowClient(instance_id, **kwargs)
 
     def _get_incident_details(
         self, service_now_incident_id: str
@@ -605,11 +549,16 @@ class ServiceNowService:
             Dictionary of incident details or None if retrieval fails
         """
         try:
-            service_now_incident = self.service_now_client.get_incident(
-                service_now_incident_id
+            integration_module = os.environ.get("INTEGRATION_MODULE", "itsm")
+            service_now_incident = (
+                self.service_now_client.get_incident_with_display_values(
+                    service_now_incident_id, integration_module
+                )
             )
             service_now_incident_attachments = (
-                self.service_now_client.get_incident_attachments(service_now_incident)
+                self.service_now_client.get_incident_attachments_details(
+                    service_now_incident_id, integration_module
+                )
             )
             if not service_now_incident:
                 logger.error(
@@ -617,25 +566,29 @@ class ServiceNowService:
                 )
                 return None
 
-            return self.__extract_incident_details(
+            return self.service_now_client.extract_incident_details(
                 service_now_incident, service_now_incident_attachments
             )
+
         except Exception as e:
             logger.error(f"Error getting incident details from ServiceNow: {str(e)}")
             return None
 
 
 class ServiceNowMessageProcessorService:
-    """Class to handle ServiceNow message processing"""
+    """Class to handle ServiceNow message processing."""
 
-    def __init__(
-        self, instance_id, username, password_param_name, table_name, event_bus_name
-    ):
-        """Initialize the message processor"""
+    def __init__(self, instance_id, table_name, event_bus_name, **kwargs):
+        """Initialize the message processor
+        
+        Args:
+            instance_id (str): ServiceNow instance ID
+            table_name (str): DynamoDB table name
+            event_bus_name (str): EventBridge event bus name
+            **kwargs: OAuth configuration parameters
+        """
         self.db_service = DatabaseService(table_name)
-        self.service_now_service = ServiceNowService(
-            instance_id, username, password_param_name
-        )
+        self.service_now_service = ServiceNowService(instance_id, **kwargs)
         self.event_publisher_service = EventPublisherService(event_bus_name)
 
     def _extract_event_body(self, event):
@@ -912,7 +865,7 @@ class ServiceNowMessageProcessorService:
 
 
 class ResponseBuilderService:
-    """Class to handle response building"""
+    """Class to handle response building."""
 
     @staticmethod
     def _build_success_response(message: str) -> Dict[str, Any]:
@@ -1007,17 +960,19 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         try:
             parameter_service = ParameterService()
             instance_id_param = os.environ.get("SERVICE_NOW_INSTANCE_ID")
-            username_param = os.environ.get("SERVICE_NOW_USER")
-            password_param_name = os.environ.get("SERVICE_NOW_PASSWORD_PARAM")
+            client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
+            client_secret_param_name = os.environ.get("SERVICE_NOW_CLIENT_SECRET_PARAM")
+            user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+            private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
+            private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
             logger.info(
-                f"Getting parameters: {instance_id_param}, {username_param}, {password_param_name}"
+                f"Getting parameters: {instance_id_param}, {client_id_param_name}, {client_secret_param_name}, {user_id_param_name}, {private_key_asset_bucket_param_name}, {private_key_asset_key_param_name}"
             )
 
             instance_id = parameter_service._get_parameter(instance_id_param)
-            username = parameter_service._get_parameter(username_param)
 
-            if not instance_id or not username or not password_param_name:
+            if not all([instance_id, client_id_param_name, client_secret_param_name, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
                 logger.error("Failed to retrieve ServiceNow credentials from SSM")
                 return ResponseBuilderService._build_error_response(
                     "Failed to retrieve ServiceNow credentials"
@@ -1030,7 +985,14 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
 
         # Create processor
         processor = ServiceNowMessageProcessorService(
-            instance_id, username, password_param_name, table_name, event_bus_name
+            instance_id,
+            table_name,
+            event_bus_name,
+            client_id_param_name=client_id_param_name,
+            client_secret_param_name=client_secret_param_name,
+            user_id_param_name=user_id_param_name,
+            private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
+            private_key_asset_key_param_name=private_key_asset_key_param_name
         )
         processed_count = 0
 

@@ -127,16 +127,16 @@ class SlackParameterManager:
                     {"Key": "LastRotated", "Value": datetime.utcnow().isoformat()},
                 ],
             )
-            print(f"✅ Successfully created/updated parameter: {parameter_name}")
+            print("✅ Successfully created/updated parameter")
             return True
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
             if error_code == "ParameterAlreadyExists" and not overwrite:
                 print(
-                    f"⚠️  Parameter {parameter_name} already exists. Use --rotate to update."
+                    f"⚠️  Parameter already exists. Use --rotate to update."
                 )
             else:
-                print(f"❌ Error creating parameter {parameter_name}: {e}")
+                print(f"❌ Error creating parameter: {e}")
             return False
 
     def get_parameter(self, parameter_name: str) -> Optional[Dict]:
@@ -157,7 +157,7 @@ class SlackParameterManager:
         except ClientError as e:
             if e.response["Error"]["Code"] == "ParameterNotFound":
                 return None
-            print(f"❌ Error retrieving parameter {parameter_name}: {e}")
+            print(f"❌ Error retrieving parameter: {e}")
             return None
 
     def validate_existing_parameters(self) -> bool:
@@ -174,36 +174,27 @@ class SlackParameterManager:
         # Check bot token
         bot_token_param = self.get_parameter(self.SLACK_BOT_TOKEN_PARAMETER)
         if bot_token_param:
-            print(f"✅ Bot token parameter exists: {self.SLACK_BOT_TOKEN_PARAMETER}")
+            print("✅ Bot token parameter exists")
             print(f"   Last modified: {bot_token_param.get('LastModifiedDate')}")
         else:
-            print(f"❌ Bot token parameter not found: {self.SLACK_BOT_TOKEN_PARAMETER}")
+            print("❌ Bot token parameter not found")
             all_valid = False
 
         # Check signing secret
         signing_secret_param = self.get_parameter(self.SLACK_SIGNING_SECRET_PARAMETER)
         if signing_secret_param:
-            print(
-                f"✅ Signing secret parameter exists: {self.SLACK_SIGNING_SECRET_PARAMETER}"
-            )
-            print(f"   Last modified: {signing_secret_param.get('LastModifiedDate')}")
+            print("✅ Signing secret parameter exists")
         else:
-            print(
-                f"❌ Signing secret parameter not found: {self.SLACK_SIGNING_SECRET_PARAMETER}"
-            )
+            print("❌ Signing secret parameter not found")
             all_valid = False
 
         # Check workspace ID
         workspace_id_param = self.get_parameter(self.SLACK_WORKSPACE_ID_PARAMETER)
         if workspace_id_param:
-            print(
-                f"✅ Workspace ID parameter exists: {self.SLACK_WORKSPACE_ID_PARAMETER}"
-            )
+            print("✅ Workspace ID parameter exists")
             print(f"   Last modified: {workspace_id_param.get('LastModifiedDate')}")
         else:
-            print(
-                f"❌ Workspace ID parameter not found: {self.SLACK_WORKSPACE_ID_PARAMETER}"
-            )
+            print("❌ Workspace ID parameter not found")
             all_valid = False
 
         return all_valid

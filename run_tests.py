@@ -7,7 +7,7 @@ import zipfile
 
 from time import sleep
 
-cfn = boto3.client('cloudformation', region_name='us-east-1')
+cfn = boto3.client('cloudformation')
 codebuild = boto3.client('codebuild')
 logs = boto3.client('logs')
 s3 = boto3.client('s3')

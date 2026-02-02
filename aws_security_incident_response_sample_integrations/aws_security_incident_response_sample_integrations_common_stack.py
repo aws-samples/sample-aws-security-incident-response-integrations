@@ -13,7 +13,6 @@ from aws_cdk import (
     aws_dynamodb as dynamodb,
     aws_events as events,
     aws_logs,
-    aws_sqs,
 )
 from .event_bus_logger_construct import EventBusLoggerConstruct
 from cdk_nag import NagSuppressions
@@ -27,7 +26,23 @@ from .constants import (
 
 
 class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+    """AWS CDK Stack for common Security Incident Response integration resources.
+
+    This stack creates shared infrastructure components including DynamoDB table,
+    EventBridge event bus, Lambda layers, and the Security IR client Lambda function.
+    """
+
+    def __init__(
+        self, scope: Construct, construct_id: str, service_now_params=None, **kwargs
+    ) -> None:
+        """Initialize the common stack.
+
+        Args:
+            scope (Construct): The scope in which to define this construct
+            construct_id (str): The scoped construct ID
+            service_now_params (dict, optional): ServiceNow configuration parameters
+            **kwargs: Additional keyword arguments passed to Stack
+        """
         super().__init__(scope, construct_id, **kwargs)
 
         """
@@ -41,6 +56,16 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             description="The log level for Lambda functions (info or debug). Error logs are always enabled.",
             allowed_values=["info", "debug", "error"],
             default="error",
+        )
+
+        # Create integration module parameter
+        self.integration_module_param = CfnParameter(
+            self,
+            "integrationModule",
+            type="String",
+            description="Integration module type ('itsm' or 'ir')",
+            allowed_values=["itsm", "ir"],
+            default="itsm",
         )
 
         """
@@ -217,7 +242,31 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             )
         )
 
-        security_ir_client = py_lambda.PythonFunction(
+        # Build environment variables for security_ir_client
+        environment_vars = {
+            "JIRA_EVENT_SOURCE": JIRA_EVENT_SOURCE,
+            "SERVICE_NOW_EVENT_SOURCE": SERVICE_NOW_EVENT_SOURCE,
+            "INCIDENTS_TABLE_NAME": self.table.table_name,
+            "LOG_LEVEL": self.log_level_param.value_as_string,
+            "INTEGRATION_MODULE": self.integration_module_param.value_as_string,
+        }
+
+        # Add ServiceNow environment variables if provided
+        if service_now_params:
+            environment_vars.update(
+                {
+                    "SERVICE_NOW_INSTANCE_ID": service_now_params[
+                        "instance_id_param_name"
+                    ],
+                    "SERVICE_NOW_CLIENT_ID": service_now_params.get("client_id_param_name", ""),
+                    "SERVICE_NOW_CLIENT_SECRET_PARAM": service_now_params.get("client_secret_param_name", ""),
+                    "SERVICE_NOW_USER_ID": service_now_params.get("user_id_param_name", ""),
+                    "PRIVATE_KEY_ASSET_BUCKET": service_now_params.get("private_key_asset_bucket_param_name", ""),
+                    "PRIVATE_KEY_ASSET_KEY": service_now_params.get("private_key_asset_key_param_name", ""),
+                }
+            )
+
+        self.security_ir_client = py_lambda.PythonFunction(
             self,
             "SecurityIncidentResponseClient",
             entry=path.join(path.dirname(__file__), "..", "assets/security_ir_client"),
@@ -245,11 +294,11 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             event_bus=self.event_bus,
         )
         security_ir_client_rule.add_target(
-            aws_events_targets.LambdaFunction(security_ir_client)
+            aws_events_targets.LambdaFunction(self.security_ir_client)
         )
 
         # Add permissions for Security IR API
-        security_ir_client.add_to_role_policy(
+        self.security_ir_client.add_to_role_policy(
             aws_iam.PolicyStatement(
                 effect=aws_iam.Effect.ALLOW,
                 actions=[
@@ -267,26 +316,69 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             )
         )
 
+        # Add S3 permissions for attachment upload via presigned URLs
+        self.security_ir_client.add_to_role_policy(
+            aws_iam.PolicyStatement(
+                effect=aws_iam.Effect.ALLOW,
+                actions=[
+                    "s3:PutObject",
+                    "s3:PutObjectAcl",
+                ],
+                resources=["arn:aws:s3:::security-ir-*/*"],
+            )
+        )
+
+        # Add SSM permissions for ServiceNow parameters if provided
+        if service_now_params:
+            ssm_resources = [f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params['instance_id_param_name']}"]
+            
+            # Add OAuth parameters if they exist
+            for param_key in ['client_id_param_name', 'client_secret_param_name', 'user_id_param_name', 'private_key_asset_bucket_param_name', 'private_key_asset_key_param_name']:
+                if param_key in service_now_params and service_now_params[param_key]:
+                    ssm_resources.append(f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params[param_key]}")
+            
+            self.security_ir_client.add_to_role_policy(
+                aws_iam.PolicyStatement(
+                    effect=aws_iam.Effect.ALLOW,
+                    actions=["ssm:GetParameter"],
+                    resources=ssm_resources,
+                )
+            )
+
         # Grant specific DynamoDB permissions instead of full access
-        self.table.grant_read_write_data(security_ir_client)
+        self.table.grant_read_write_data(self.security_ir_client)
 
         CfnOutput(
             self,
             "SecurityIRClientLambdaArn",
-            value=security_ir_client.function_arn,
+            value=self.security_ir_client.function_arn,
             description="Security Incident Response Client Lambda Function ARN",
         )
 
         # Add suppressions for IAM5 findings related to wildcard resources
-        NagSuppressions.add_resource_suppressions(
-            security_ir_client,
-            [
+        suppressions = [
+            {
+                "id": "AwsSolutions-IAM5",
+                "reason": "Wildcard resources are required for security-ir actions",
+                "applies_to": ["Resource::*"],
+            }
+        ]
+
+        # Add SSM suppression if ServiceNow parameters are provided
+        if service_now_params:
+            suppressions.append(
                 {
                     "id": "AwsSolutions-IAM5",
-                    "reason": "Wildcard resources are required for security-ir actions",
-                    "applies_to": ["Resource::*"],
+                    "reason": "SSM parameter access required for ServiceNow integration",
+                    "applies_to": [
+                        "Resource::arn:aws:ssm:*:*:parameter/SecurityIncidentResponse/*"
+                    ],
                 }
-            ],
+            )
+
+        NagSuppressions.add_resource_suppressions(
+            self.security_ir_client,
+            suppressions,
             True,
         )
 
@@ -302,6 +394,71 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             ],
             True,
         )
+
+        # Add suppressions for poller role policy
+        NagSuppressions.add_resource_suppressions(
+            poller_role,
+            [
+                {
+                    "id": "AwsSolutions-IAM5",
+                    "reason": "Poller role requires wildcard permissions for CloudWatch Logs and security-ir actions",
+                    "applies_to": [
+                        "Resource::*",
+                        "Resource::arn:aws:logs:*:*:log-group:/aws/lambda/*",
+                    ],
+                }
+            ],
+            True,
+        )
+
+        # Add suppressions for security IR client role policy
+        NagSuppressions.add_resource_suppressions(
+            security_ir_client_role,
+            [
+                {
+                    "id": "AwsSolutions-IAM5",
+                    "reason": "Security IR client role requires wildcard permissions for CloudWatch Logs, security-ir actions, and S3 attachments",
+                    "applies_to": [
+                        "Resource::*",
+                        "Resource::arn:aws:logs:*:*:log-group:/aws/lambda/*",
+                        "Resource::arn:aws:s3:::security-ir-*/*",
+                    ],
+                }
+            ],
+            True,
+        )
+
+    def update_security_ir_client_env(self, service_now_params: dict) -> None:
+        """Update security_ir_client environment variables with ServiceNow parameters.
+
+        Args:
+            service_now_params (dict): ServiceNow configuration parameters
+        """
+        if service_now_params:
+            # Add ServiceNow environment variables to existing environment
+            self.security_ir_client.add_environment(
+                "SERVICE_NOW_INSTANCE_ID", service_now_params["instance_id_param_name"]
+            )
+            self.security_ir_client.add_environment(
+                "SERVICE_NOW_CLIENT_ID", service_now_params.get("client_id_param_name", "")
+            )
+            self.security_ir_client.add_environment(
+                "SERVICE_NOW_CLIENT_SECRET_PARAM",
+                service_now_params.get("client_secret_param_name", ""),
+            )
+            self.security_ir_client.add_environment(
+                "SERVICE_NOW_USER_ID", service_now_params.get("user_id_param_name", "")
+            )
+            self.security_ir_client.add_environment(
+                "PRIVATE_KEY_ASSET_BUCKET", service_now_params.get("private_key_asset_bucket_param_name", "")
+            )
+            self.security_ir_client.add_environment(
+                "PRIVATE_KEY_ASSET_KEY", service_now_params.get("private_key_asset_key_param_name", "")
+            )
+            self.security_ir_client.add_environment(
+                "INTEGRATION_MODULE",
+                service_now_params.get("integration_module", "itsm"),
+            )
 
         # Add stack-level suppressions for all resources
         NagSuppressions.add_stack_suppressions(
@@ -324,6 +481,46 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                     "id": "AwsSolutions-L1",
                     "reason": "Using the latest available runtime for Python (3.13)",
                 },
+            ],
+        )
+
+        # Add suppressions for the DLQ in EventBusLogger
+        NagSuppressions.add_resource_suppressions_by_path(
+            self,
+            f"/{self.stack_name}/SecurityIncidentEventBusLogger/deadletter-queue",
+            [
+                {
+                    "id": "AwsSolutions-SQS3",
+                    "reason": "This is a DLQ for EventBridge events and doesn't need its own DLQ",
+                }
+            ],
+        )
+
+        # Add suppressions for EventBridge custom resource policy
+        NagSuppressions.add_resource_suppressions_by_path(
+            self,
+            f"/{self.stack_name}/EventsLogGroupPolicysecurityteststackSecurityIncidentEventBusLoggerEventBusLoggerRule9FE75D93/CustomResourcePolicy",
+            [
+                {
+                    "id": "AwsSolutions-IAM5",
+                    "reason": "EventBridge custom resource requires wildcard permissions to manage log group policies",
+                    "applies_to": ["Resource::*"],
+                }
+            ],
+        )
+
+        # Add suppressions for AWS managed policy in custom resource
+        NagSuppressions.add_resource_suppressions_by_path(
+            self,
+            f"/{self.stack_name}/AWS679f53fac002430cb0da5b7982bd2287/ServiceRole",
+            [
+                {
+                    "id": "AwsSolutions-IAM4",
+                    "reason": "AWS CDK custom resource provider requires AWSLambdaBasicExecutionRole managed policy",
+                    "applies_to": [
+                        "Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+                    ],
+                }
             ],
         )
 

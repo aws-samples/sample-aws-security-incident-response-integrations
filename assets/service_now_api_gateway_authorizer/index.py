@@ -4,7 +4,16 @@ import os
 import logging
 
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+
+# Get log level from environment variable
+log_level = os.environ.get("LOG_LEVEL", "error").lower()
+if log_level == "debug":
+    logger.setLevel(logging.DEBUG)
+elif log_level == "info":
+    logger.setLevel(logging.INFO)
+else:
+    # Default to ERROR level
+    logger.setLevel(logging.ERROR)
 
 secrets_client = boto3.client("secretsmanager")
 

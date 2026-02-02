@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Dict, Any, Optional, Tuple
 import requests
 
@@ -52,7 +53,7 @@ COMMAND_HELP = """
 *Available /security-ir commands:*
 
 • `/security-ir status` - Get current case status and details
-• `/security-ir summarize` - Get a summary of the case
+• `/security-ir incident-details` - Get incident details
 • `/security-ir update-status <status>` - Update case status
 • `/security-ir update-description <description>` - Update case description
 • `/security-ir update-title <title>` - Update case title
@@ -85,7 +86,7 @@ def get_ssm_parameter(parameter_name: str, with_decryption: bool = True) -> Opti
         )
         return response["Parameter"]["Value"]
     except Exception as e:
-        logger.error(f"Error retrieving SSM parameter {parameter_name}: {str(e)}")
+        logger.error(f"Error retrieving SSM parameter: {str(e)}")
         return None
 
 
@@ -353,21 +354,8 @@ def handle_status_command(case_id: str, response_url: str) -> bool:
             send_slack_response(response_url, "❌ Error: Could not retrieve case details.")
             return False
         
-        # Format case details for Slack
-        title = case_details.get("title", "N/A")
         status = case_details.get("caseStatus", "N/A")
-        severity = case_details.get("severity", "N/A")
-        description = case_details.get("description", "N/A")
-        created_date = case_details.get("createdDate", "N/A")
-        
-        response_text = f"""*Case Status for {case_id}*
-
-*Title:* {title}
-*Status:* {status}
-*Severity:* {severity}
-*Created:* {created_date}
-*Description:* {description}
-"""
+        response_text = f"*Case {case_id} Status:* {status}"
         
         send_slack_response(response_url, response_text)
         return True
@@ -378,8 +366,8 @@ def handle_status_command(case_id: str, response_url: str) -> bool:
         return False
 
 
-def handle_summarize_command(case_id: str, response_url: str) -> bool:
-    """Handle the summarize command.
+def handle_incident_details_command(case_id: str, response_url: str) -> bool:
+    """Handle the incident-details command.
     
     Args:
         case_id: AWS SIR case ID
@@ -394,7 +382,7 @@ def handle_summarize_command(case_id: str, response_url: str) -> bool:
             send_slack_response(response_url, "❌ Error: Could not retrieve case details.")
             return False
         
-        # Get case comments for summary
+        # Get case details
         title = case_details.get("title", "N/A")
         status = case_details.get("caseStatus", "N/A")
         severity = case_details.get("severity", "N/A")
@@ -417,7 +405,29 @@ def handle_summarize_command(case_id: str, response_url: str) -> bool:
         except Exception as e:
             logger.warning(f"Could not get comment count: {str(e)}")
         
-        response_text = f"""*Case Summary for {case_id}*
+        # Get investigations for this case
+        investigations_text = ""
+        try:
+            investigations_response = security_incident_response_client.list_investigations(
+                caseId=case_id
+            )
+            investigations = investigations_response.get("investigations", [])
+            
+            if investigations:
+                investigations_text = f"\n*Investigations:* {len(investigations)}"
+                for i, investigation in enumerate(investigations[:3], 1):  # Show first 3
+                    inv_id = investigation.get("investigationId", "N/A")
+                    inv_status = investigation.get("status", "N/A")
+                    investigations_text += f"\n  {i}. {inv_id} - {inv_status}"
+                if len(investigations) > 3:
+                    investigations_text += f"\n  ... and {len(investigations) - 3} more"
+            else:
+                investigations_text = "\n*Investigations:* None"
+        except Exception as e:
+            logger.warning(f"Could not get investigations: {str(e)}")
+            investigations_text = "\n*Investigations:* Unable to retrieve"
+        
+        response_text = f"""*Incident Details for {case_id}*
 
 *Title:* {title}
 *Current Status:* {status}
@@ -425,6 +435,7 @@ def handle_summarize_command(case_id: str, response_url: str) -> bool:
 *Created:* {created_date}
 *Watchers:* {watcher_count}
 *Comments:* {comment_count}
+*Investigation details:* {investigations_text}
 
 This case is currently in *{status}* status. Use `/security-ir status` for full details.
 """
@@ -433,7 +444,7 @@ This case is currently in *{status}* status. Use `/security-ir status` for full 
         return True
         
     except Exception as e:
-        logger.error(f"Error handling summarize command: {str(e)}")
+        logger.error(f"Error handling incident-details command: {str(e)}")
         send_slack_response(response_url, f"❌ Error: {str(e)}")
         return False
 
@@ -471,7 +482,7 @@ def handle_update_status_command(case_id: str, new_status: str, response_url: st
         
         send_slack_response(
             response_url,
-            f"✅ Case status updated to *{new_status}*",
+            f"ℹ️ Case status updated to *{new_status}*",
             response_type="in_channel"
         )
         return True
@@ -485,6 +496,28 @@ def handle_update_status_command(case_id: str, new_status: str, response_url: st
         logger.error(f"Error handling update-status command: {str(e)}")
         send_slack_response(response_url, f"❌ Error: {str(e)}")
         return False
+
+
+def mark_slack_update(case_id: str) -> None:
+    """Mark a case update as originating from Slack to prevent notification loops.
+    
+    Args:
+        case_id: AWS SIR case ID
+    """
+    if not incidents_table:
+        return
+    
+    try:
+        incidents_table.put_item(
+            Item={
+                "PK": f"Case#{case_id}",
+                "SK": "slack_update_flag",
+                "timestamp": int(time.time()),
+                "ttl": int(time.time()) + 300  # Expire after 5 minutes
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Could not set Slack update flag for case {case_id}: {str(e)}")
 
 
 def handle_update_description_command(case_id: str, new_description: str, response_url: str) -> bool:
@@ -503,6 +536,9 @@ def handle_update_description_command(case_id: str, new_description: str, respon
             send_slack_response(response_url, "❌ Error: Description text is required.")
             return False
         
+        # Mark this as a Slack update to prevent notification loops
+        mark_slack_update(case_id)
+        
         # Update case description
         security_incident_response_client.update_case(
             caseId=case_id,
@@ -511,7 +547,7 @@ def handle_update_description_command(case_id: str, new_description: str, respon
         
         send_slack_response(
             response_url,
-            "✅ Case description updated successfully",
+            f"ℹ️ Case description updated to: *{new_description}*",
             response_type="in_channel"
         )
         return True
@@ -543,6 +579,9 @@ def handle_update_title_command(case_id: str, new_title: str, response_url: str)
             send_slack_response(response_url, "❌ Error: Title text is required.")
             return False
         
+        # Mark this as a Slack update to prevent notification loops
+        mark_slack_update(case_id)
+        
         # Update case title
         security_incident_response_client.update_case(
             caseId=case_id,
@@ -551,7 +590,7 @@ def handle_update_title_command(case_id: str, new_title: str, response_url: str)
         
         send_slack_response(
             response_url,
-            f"✅ Case title updated to: *{new_title}*",
+            f"ℹ️ Case title updated to: *{new_title}*",
             response_type="in_channel"
         )
         return True
@@ -578,15 +617,14 @@ def handle_close_command(case_id: str, response_url: str) -> bool:
         True if successful, False otherwise
     """
     try:
-        # Close the case by setting status to Resolved
-        security_incident_response_client.update_case_status(
-            caseId=case_id,
-            caseStatus="Resolved"
+        # Close the case using the close_case API
+        security_incident_response_client.close_case(
+            caseId=case_id
         )
         
         send_slack_response(
             response_url,
-            f"✅ Case {case_id} has been closed (status set to Resolved)",
+            f"✅ Case {case_id} has been closed successfully",
             response_type="in_channel"
         )
         return True
@@ -613,55 +651,69 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
     """
     try:
         # Extract command details
-        command_text = command_payload.get("text", "")
+        subcommand = command_payload.get("command", "")
+        args = command_payload.get("args", "")
         user_id = command_payload.get("user_id")
         channel_id = command_payload.get("channel_id")
         response_url = command_payload.get("response_url")
         case_id = command_payload.get("case_id")
         
+        logger.info(f"Processing command payload - subcommand: '{subcommand}', args: '{args}', case_id: '{case_id}', user_id: '{user_id}'")
+        
         if not response_url:
-            logger.error("No response URL provided")
+            logger.error("No response URL provided in command payload")
             return False
         
         if not case_id:
-            logger.error("No case ID provided")
+            logger.error("No case ID provided in command payload")
             send_slack_response(response_url, "❌ Error: Could not determine case ID for this channel.")
             return False
         
-        # Parse command
-        subcommand, args = parse_command(command_text)
+        if not user_id:
+            logger.error("No user ID provided in command payload")
+            send_slack_response(response_url, "❌ Error: Could not determine user for this command.")
+            return False
         
         logger.info(f"Processing command '{subcommand}' for case {case_id} from user {user_id}")
         
         # Validate user permissions
+<<<<<<< HEAD
         if not validate_user_permissions(user_id, case_id, subcommand):
             send_slack_response(response_url, "❌ Error: You do not have permission to execute this command.")
+=======
+        if not validate_user_permissions(user_id, case_id):
+            logger.warning(f"User {user_id} does not have permission to manage case {case_id}")
+            send_slack_response(response_url, "❌ Error: You do not have permission to manage this case.")
+>>>>>>> upstream/v4/slack-integration
             return False
         
         # Route to appropriate handler
-        if not subcommand or subcommand == "help":
-            send_slack_response(response_url, COMMAND_HELP)
-            return True
-        
-        elif subcommand == "status":
+        if subcommand == "status":
+            logger.info(f"Routing to status handler for case {case_id}")
             return handle_status_command(case_id, response_url)
         
-        elif subcommand == "summarize":
-            return handle_summarize_command(case_id, response_url)
+        elif subcommand == "incident-details":
+            logger.info(f"Routing to incident-details handler for case {case_id}")
+            return handle_incident_details_command(case_id, response_url)
         
         elif subcommand == "update-status":
+            logger.info(f"Routing to update-status handler for case {case_id} with args: '{args}'")
             return handle_update_status_command(case_id, args, response_url)
         
         elif subcommand == "update-description":
+            logger.info(f"Routing to update-description handler for case {case_id}")
             return handle_update_description_command(case_id, args, response_url)
         
         elif subcommand == "update-title":
+            logger.info(f"Routing to update-title handler for case {case_id}")
             return handle_update_title_command(case_id, args, response_url)
         
         elif subcommand == "close":
+            logger.info(f"Routing to close handler for case {case_id}")
             return handle_close_command(case_id, response_url)
         
         else:
+            logger.warning(f"Unknown subcommand '{subcommand}' for case {case_id}")
             send_slack_response(
                 response_url,
                 f"❌ Error: Unknown command '{subcommand}'.\n\n{COMMAND_HELP}"
@@ -669,13 +721,14 @@ def process_command(command_payload: Dict[str, Any]) -> bool:
             return False
         
     except Exception as e:
-        logger.error(f"Error processing command: {str(e)}")
+        logger.error(f"Unexpected error processing command: {str(e)}", exc_info=True)
+        response_url = command_payload.get("response_url")
         if response_url:
             send_slack_response(response_url, f"❌ Error: {str(e)}")
         return False
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Lambda handler for processing Slack slash commands.
     
@@ -687,20 +740,36 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         Dict containing status and response information
     """
     try:
-        logger.info("Processing Slack command")
-        logger.debug(f"Event: {json.dumps(event)}")
+        logger.info("Processing Slack command handler request")
+        logger.info(f"Received event keys: {list(event.keys())}")
+        logger.debug(f"Full event: {json.dumps(event, default=str)}")
+        
+        # Validate event structure
+        required_fields = ['command', 'case_id', 'user_id', 'response_url']
+        missing_fields = [field for field in required_fields if not event.get(field)]
+        
+        if missing_fields:
+            error_msg = f"Missing required fields: {missing_fields}"
+            logger.error(error_msg)
+            return {
+                "statusCode": 400,
+                "body": json.dumps({"error": error_msg, "success": False})
+            }
         
         # Process the command
         success = process_command(event)
         
-        return {
+        result = {
             "statusCode": 200 if success else 500,
             "body": json.dumps({"success": success})
         }
         
+        logger.info(f"Command processing completed with success: {success}")
+        return result
+        
     except Exception as e:
-        logger.error(f"Error in lambda handler: {str(e)}")
+        logger.error(f"Unexpected error in lambda handler: {str(e)}", exc_info=True)
         return {
             "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
+            "body": json.dumps({"error": str(e), "success": False})
         }

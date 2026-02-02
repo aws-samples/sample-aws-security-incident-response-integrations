@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-import os
+"""ServiceNow Integration CDK Application.
+
+This module defines the CDK application for deploying AWS Security Incident Response
+ServiceNow integration infrastructure. It creates the common stack with ServiceNow
+parameters and the ServiceNow-specific stack.
+"""
 import aws_cdk as cdk
 from aws_security_incident_response_sample_integrations.aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
@@ -10,9 +15,21 @@ from aws_security_incident_response_sample_integrations.aws_security_incident_re
 
 app = cdk.App()
 
-# Create common stack
+# ServiceNow parameters for common stack
+service_now_params = {
+    "instance_id_param_name": "/SecurityIncidentResponse/serviceNowInstanceId",
+    "client_id_param_name": "/SecurityIncidentResponse/serviceNowClientId",
+    "client_secret_param_name": "/SecurityIncidentResponse/serviceNowClientSecret",
+    "user_id_param_name": "/SecurityIncidentResponse/serviceNowUserId",
+    "private_key_asset_bucket_param_name": "/SecurityIncidentResponse/privateKeyAssetBucket",
+    "private_key_asset_key_param_name": "/SecurityIncidentResponse/privateKeyAssetKey",
+}
+
+# Create common stack with ServiceNow parameters
 common_stack = AwsSecurityIncidentResponseSampleIntegrationsCommonStack(
-    app, "AwsSecurityIncidentResponseSampleIntegrationsCommonStack"
+    app,
+    "AwsSecurityIncidentResponseSampleIntegrationsCommonStack",
+    service_now_params=service_now_params,
 )
 
 # Create ServiceNow integration stack

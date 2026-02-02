@@ -264,8 +264,8 @@ class TestGeneratePolicy:
         assert policy["context"]["verified"] == "true"
 
 
-class TestLambdaHandler:
-    """Tests for lambda_handler function."""
+class TestHandler:
+    """Tests for handler function."""
 
     def test_handler_valid_request(
         self, mock_ssm_client, valid_slack_request, setup_env
@@ -274,7 +274,7 @@ class TestLambdaHandler:
         # Clear cache
         index._signing_secret_cache.clear()
 
-        result = index.lambda_handler(valid_slack_request, None)
+        result = index.handler(valid_slack_request, None)
 
         assert result["principalId"] == "slack-user"
         assert result["policyDocument"]["Statement"][0]["Effect"] == "Allow"
@@ -290,7 +290,7 @@ class TestLambdaHandler:
         # Remove timestamp header
         del valid_slack_request["headers"]["X-Slack-Request-Timestamp"]
 
-        result = index.lambda_handler(valid_slack_request, None)
+        result = index.handler(valid_slack_request, None)
 
         assert result["principalId"] == "slack-user"
         assert result["policyDocument"]["Statement"][0]["Effect"] == "Deny"
@@ -305,7 +305,7 @@ class TestLambdaHandler:
         # Remove signature header
         del valid_slack_request["headers"]["X-Slack-Signature"]
 
-        result = index.lambda_handler(valid_slack_request, None)
+        result = index.handler(valid_slack_request, None)
 
         assert result["principalId"] == "slack-user"
         assert result["policyDocument"]["Statement"][0]["Effect"] == "Deny"
@@ -320,7 +320,7 @@ class TestLambdaHandler:
         # Modify signature to make it invalid
         valid_slack_request["headers"]["X-Slack-Signature"] = "v0=invalid_hash"
 
-        result = index.lambda_handler(valid_slack_request, None)
+        result = index.handler(valid_slack_request, None)
 
         assert result["principalId"] == "slack-user"
         assert result["policyDocument"]["Statement"][0]["Effect"] == "Deny"
@@ -341,7 +341,7 @@ class TestLambdaHandler:
             "x-slack-signature": signature,
         }
 
-        result = index.lambda_handler(valid_slack_request, None)
+        result = index.handler(valid_slack_request, None)
 
         assert result["principalId"] == "slack-user"
         assert result["policyDocument"]["Statement"][0]["Effect"] == "Allow"
@@ -355,7 +355,7 @@ class TestLambdaHandler:
 
         mock_ssm_client.get_parameter.side_effect = Exception("SSM error")
 
-        result = index.lambda_handler(valid_slack_request, None)
+        result = index.handler(valid_slack_request, None)
 
         assert result["principalId"] == "slack-user"
         assert result["policyDocument"]["Statement"][0]["Effect"] == "Deny"

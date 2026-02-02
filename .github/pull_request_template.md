@@ -24,6 +24,7 @@
 - [ ] I have performed a self-review of my code
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing tests pass locally with my changes
+- [ ] The code coverage difference report check has passed
 - [ ] Security considerations have been addressed
 
 ## New Integration Target Questions
@@ -35,7 +36,7 @@ For details on this review visit [Pull Request Review Rubric](../PR_REVIEW_RUBRI
 
 `Provide a brief description or attach an architecture diagram to this PR.`
 
-### How does the integration authenicated and authorize connections between the integration and the target
+### How does the integration authenticated and authorize connections between the integration and the target
 
 `Provide a brief description or attach a sequence diagram to this PR.`
 
@@ -53,6 +54,6 @@ For details on this review visit [Pull Request Review Rubric](../PR_REVIEW_RUBRI
 
 ### How much do you expect this integration to cost
 
-`Provide a brief set estimate or attact an estimate from https://calculator.aws/`
+`Provide a brief set estimate or attach an estimate from https://calculator.aws/`
 
 **By submitting this pull request, I confirm that my contribution is made under the terms of the MIT No Attribution license**

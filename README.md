@@ -6,7 +6,7 @@ AWS Security Incident Response helps you respond when it matters most. The servi
 
 ## Getting Started
 
-If you are looking to integrate AWS Security Incident Response with JIRA or ServiceNow, follow the steps below:
+If you are looking to integrate AWS Security Incident Response with JIRA, ServiceNow, or Slack, follow the steps below:
 
 ### Prerequisites
 
@@ -15,73 +15,20 @@ If you are looking to integrate AWS Security Incident Response with JIRA or Serv
   - Jira Cloud account
 - **For ServiceNow integration**
   - ServiceNow instance with admin access
-
-### Installation
-
-**Note: Please skip this section if you are using `CloudShell` as your development workspace**
-
-Install the following applications in your local development workstations or EC2 instances (if not installed already):
-
-- **AWS CDK v2.x**: Follow the installation steps in the [CDK documentation](https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html).
-- **Python v3.x**: Download and follow the instructions in the [Python documentation](https://www.python.org/downloads/).
-- **AWS CLI**: Configured with appropriate permissions. To install, follow the setup instructions in the [AWS CLI documentation](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
-- **NVM**: Use the install and update script command `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash` followed by `source ~/.bashrc`. For more details, see the Node Version Manager's README in [NVM's GitHub repo](https://github.com/nvm-sh/nvm?tab=readme-ov-file#installing-and-updating).
-- **Node**: Run `nvm install --lts` and `nvm use --lts` to install and use the latest Long Term Support (LTS) version of Node.js.
-- **PIP**: Should already be included with Python installation (for versions Python 3.4 and above). For more details, see [pip documentation](https://pip.pypa.io/en/stable/installation/)
-- **Docker**: For a complete guide on how to install/setup Docker engine on different OSs, see [Docker Engine documentation](https://docs.docker.com/engine/install/).
-  
-### Setup Solution Repository
-
-1. Clone the repository: `git clone https://github.com/aws-samples/sample-aws-security-incident-response-integrations.git`
-   1. If you had already cloned the repository before, make sure to pull the latest changes: `git pull`
-2. Install solution dependencies
-
-   ```
-   pip install -r requirements.txt
-   ```
-
-3. (Optional - for development purposes) Install development dependencies:
-
-   ```
-   pip install -r requirements-dev.txt
-   ```
+- **For Slack integration**
+  - Slack workspace with admin access
+- **Tooling**: AWS CDK, Python, AWS CLI, NVM, Node, PIP, Docker (one step installation instructions are available in the target specific documentations)
 
 ### Deployment
 
-For deployment of an integration pattern, install and use the `deploy-integrations-solution` supplementary python app
-in the command-line using the following steps:
-
-1. Make the `deploy-integrations-solution.py` script executable by using the following command:
-   ```
-   sudo chmod a+x ./deploy-integrations-solution.py
-   ```
-
-2. Verify if the `./deploy-integrations-solution.py` command works in the command-line by running:
-
-   ```
-   ./deploy-integrations-solution.py --help
-   ```
-
-   You should see the following output:
-
-   ```
-   usage: deploy-integrations-solution [-h] [--log-level {info,debug,error}] {jira,service-now} ...
-
-   Deploy AWS Security Incident Response Sample Integrations
-
-   positional arguments:
-   {jira,service-now}    Integration type
-      jira                Deploy Jira integration
-      service-now         Deploy ServiceNow integration
-
-   options:
-   -h, --help            show this help message and exit
-
 #### Integration Target Specific Instructions
 
-**See [JIRA documentation](documentation/JIRA/JIRA.md) for detailed instructions on how to deploy JIRA integration.**
+**See [JIRA documentation](documentation/JIRA/JIRA.md) for instructions on how to deploy JIRA integration.**
 
 **See [ServiceNow documentation](documentation/SERVICE_NOW/SERVICE_NOW.md) for detailed instructions on how to deploy ServiceNow integration.**
+**Note:** ServiceNow integration now supports both ITSM (IT Service Management) and IR (Incident Response) modules. Specify the appropriate module during deployment using the `--integration-module` parameter.
+
+**See [Slack documentation](documentation/SLACK/SLACK.md) for detailed instructions on how to deploy Slack integration.**
 
 #### Extending to Additional Integration Targets
 
@@ -95,6 +42,7 @@ This repository contains:
 
 - **Jira Integration**: Bidirectional integration between AWS Security Incident Response and Jira for issue tracking
 - **ServiceNow Integration**: Bidirectional integration between AWS Security Incident Response and ServiceNow for incident management
+- **Slack Integration**: Bidirectional integration between AWS Security Incident Response and Slack for real-time collaboration
 - **Common Infrastructure**: Shared components like EventBridge event bus, DynamoDB tables, and Lambda layers
 - **Deployment Scripts**: Easy-to-use deployment tools for quick setup
 
@@ -108,8 +56,14 @@ This repository contains:
   - [Detailed Jira integration documentation](documentation/JIRA/JIRA.md)
 - **Full-featured ServiceNow Integration**:
   - Create, update, and delete incidents in ServiceNow based on AWS Security Incident Response cases
+  - Support for both ITSM (IT Service Management) and IR (Incident Response) modules
   - Automatic setup of ServiceNow components (Business Rules, REST Messages)
   - [Detailed ServiceNow integration documentation](documentation/SERVICE_NOW/SERVICE_NOW.md)
+- **Real-time Slack Integration**:
+  - Create dedicated Slack channels for each AWS Security Incident Response case
+  - Bidirectional sync of messages, comments, and attachments
+  - Slash commands for case management directly from Slack
+  - [Detailed Slack integration documentation](documentation/SLACK/SLACK.md)
 - **Robust Error Handling**: Dead-letter queues, CloudWatch alarms, and comprehensive logging
 - **Secure by Design**: Least privilege permissions, secure credential storage, and encryption
 - **Extensible Framework**: Modular architecture makes it easy to add new integrations
@@ -157,6 +111,18 @@ To use the ServiceNow integration:
 
 For detailed instructions on setting up the ServiceNow integration, including business rules, outbound REST messages, and troubleshooting tips, refer to the [ServiceNow Integration Documentation](documentation/SERVICE_NOW/SERVICE_NOW.md).
 
+### Slack Integration
+
+To use the Slack integration:
+
+1. Deploy the integration using the instructions in the [Slack Integration Documentation](documentation/SLACK/SLACK.md)
+2. Configure your Slack app's Event Subscriptions and Slash Commands
+3. Test the integration by creating a security incident in AWS Security Incident Response
+4. Verify that a dedicated Slack channel is created with case details
+5. Test bidirectional sync by posting messages and using slash commands
+
+For detailed instructions on setting up the Slack integration, including Slack app configuration, webhook setup, and troubleshooting tips, refer to the [Slack Integration Documentation](documentation/SLACK/SLACK.md).
+
 ## Troubleshooting
 
 ### Common Issues
@@ -190,6 +156,7 @@ To process failed events in the DLQ:
 
 - For Jira integration issues, see the [Jira Integration Troubleshooting Guide](documentation/JIRA/JIRA.md#troubleshooting)
 - For ServiceNow integration issues, see the [ServiceNow Integration Troubleshooting Guide](documentation/SERVICE_NOW/SERVICE_NOW_TROUBLESHOOTING.md)
+- For Slack integration issues, see the [Slack Integration Troubleshooting Guide](documentation/SLACK/SLACK_TROUBLESHOOTING.md)
 
 ### Getting Help
 
@@ -273,8 +240,8 @@ We welcome contributions! Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file
 
 ### General Questions
 
-**Q: Can I use both Jira and ServiceNow integrations simultaneously?**  
-A: Yes, you can deploy both integrations to connect AWS Security Incident Response with both Jira and ServiceNow.
+**Q: Can I use multiple integrations simultaneously?**  
+A: Yes, you can deploy multiple integrations (Jira, ServiceNow, and Slack) to connect AWS Security Incident Response with multiple platforms simultaneously.
 
 **Q: How much does it cost to run these integrations?**  
 A: The cost depends on your usage of AWS services like Lambda, EventBridge, SNS, and DynamoDB. Most deployments will fall within the AWS Free Tier for these services with moderate usage.
@@ -291,13 +258,13 @@ A: The integrations follow AWS security best practices, including least privileg
 A: The integrations include error handling mechanisms like dead-letter queues and CloudWatch alarms. Failed events are stored for later processing.
 
 **Q: Can I deploy these integrations in multiple AWS regions?**  
-A: Yes, you can deploy the integrations in any AWS region where the required services are available.
+A: Yes, you can deploy the integrations in any AWS region where AWS Security Incident Response and the required services are available.
 
 **Q: How do I update an integration after deployment?**  
-A: You can update an integration by running the deployment command again with the same or updated parameters.
+A: You can update an integration by running the deployment command again with the same or updated parameters. For Slack, you can also use the parameter rotation scripts to update credentials.
 
 **Q: Where can I find detailed logs for troubleshooting?**  
-A: All Lambda functions write logs to CloudWatch Logs. You can find the log groups in the CloudWatch console or use the URLs provided in the CloudFormation outputs.
+A: All Lambda functions write logs to CloudWatch Logs. You can find the log groups in the CloudWatch console, use the URLs provided in the CloudFormation outputs, or use the verification scripts provided for each integration.
 
 ## Support
 

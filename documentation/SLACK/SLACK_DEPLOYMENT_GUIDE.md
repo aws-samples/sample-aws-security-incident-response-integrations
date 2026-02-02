@@ -274,7 +274,7 @@ Save these values for configuration and troubleshooting.
    - **Command**: `/security-ir`
    - **Request URL**: Your API Gateway endpoint (same as Event Subscriptions)
    - **Short Description**: `Manage AWS Security Incident Response cases`
-   - **Usage Hint**: `[status|update-status|update-description|update-title|close|summarize] [args]`
+   - **Usage Hint**: `[status|update-status|update-description|update-title|close|incident-details] [args]`
 
 3. **Save Command**:
    - Click "Save"
@@ -394,11 +394,11 @@ aws security-ir create-case \
    ```
    Expected: Case status updated, confirmation message
 
-3. **Summarize Command**:
+3. **Incident Details Command**:
    ```
-   /security-ir summarize
+   /security-ir incident-details
    ```
-   Expected: Case summary with key events
+   Expected: Incident details with key information
 
 #### Test 4: Attachment Sync
 

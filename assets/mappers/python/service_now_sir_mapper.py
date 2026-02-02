@@ -10,19 +10,21 @@ from typing import Dict, List, Tuple, Any, Optional
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-# Configuration-based field mappings
-STATUS_MAPPING = {
+
+# Configuration-based field mappings for Service Now ITSM module
+# ITSM module mappings
+ITSM_STATUS_MAPPING = {
     "Detection and Analysis": "2",  # For 'In Progress' state in Service Now
     "Containment, Eradication and Recovery": "2",  # For 'In Progress' state in Service Now
-    "Post-Incident Activity": "2",  # For 'In Progress' state in Service Now
+    "Post-incident Activities": "2",  # For 'In Progress' state in Service Now
     "Closed": "7",  # For 'Closed' state in Service Now
 }
 
 # Default status if no mapping exists
-DEFAULT_SERVICE_NOW_STATUS = "1"  # For 'New' state in Service Now
+ITSM_DEFAULT_SERVICE_NOW_STATUS = "1"  # For 'New' state in Service Now
 
 # Custom field mappings (Service Now field name to AWS Security Incident Response field)
-FIELD_MAPPING = {
+SNOW_FIELD_MAPPING = {
     "short_description": "title",
     "description": "description",
     "comments_and_work_notes": "caseComments",
@@ -32,7 +34,7 @@ FIELD_MAPPING = {
 
 # Mandatory fields required by ServiceNow data policy
 # Based on the error, Resolution code is mandatory even for new incidents
-MANDATORY_FIELDS = {
+ITSM_MANDATORY_FIELDS = {
     "close_code": "",  # Empty resolution code for new incidents - will be populated when closed
     "caller_id": "System Administrator",  # Default caller - adjust based on your ServiceNow setup
     "category": "inquiry",  # Default category
@@ -45,7 +47,7 @@ MANDATORY_FIELDS = {
 }
 
 # Resolution fields for closed incidents
-RESOLUTION_FIELDS = {
+ITSM_RESOLUTION_FIELDS = {
     # Standard ServiceNow resolution code field
     "close_code": "Solved (Work Around)",
     # Standard ServiceNow close notes field
@@ -55,11 +57,11 @@ RESOLUTION_FIELDS = {
 # Closure code mapping
 # Adjust based on actual Service Now configuration
 
-CLOSURE_CODE_FIELD = "u_closure_code"
-DEFAULT_CLOSURE_CODE = "Other"
+ITSM_CLOSURE_CODE_FIELD = "u_closure_code"
+ITSM_DEFAULT_CLOSURE_CODE = "Other"
 
 # Closure code values mapping
-CLOSURE_CODE_MAPPING = {
+ITSM_CLOSURE_CODE_MAPPING = {
     "false_positive": "False Positive",
     "resolved": "Resolved",
     "duplicate": "Duplicate",
@@ -68,25 +70,64 @@ CLOSURE_CODE_MAPPING = {
     # Add other mappings as needed
 }
 
+# Configuration-based field mappings for Service Now IR module
+# IR module mappings 10, 16, 18, 19, 20, 100, 3
+IR_STATUS_MAPPING = {
+    "Detection and Analysis": "16",  # For 'Analysis' state in Service Now
+    "Containment, Eradication and Recovery": "18",  # For 'Contain' state in Service Now. We will map AWS Security IR's status to Contain in SNOW. There are other states Eradicate, Recover separately in SNOW.
+    "Post-incident Activities": "100",  # For 'Review' state in Service Now
+    "Closed": "3",  # For 'Closed' state in Service Now
+}
 
-def map_case_status(sir_case_status: str) -> Tuple[str, Optional[str]]:
-    """Maps AWS Security Incident Response case status to Service Now workflow status.
+# Default status if no mapping exists
+IR_DEFAULT_SERVICE_NOW_STATUS = "10"  # For 'Draft' state in Service Now
+
+IR_MANDATORY_FIELDS = {
+    # "caller_id": "System Administrator",  # Default caller - adjust based on your ServiceNow setup
+    # "category": "inquiry",  # Default category
+    # "subcategory": "internal application",
+    "impact": "3",  # Default impact (1=Critical, 2=High, 3=Non-critical/Low)
+    "urgency": "3",  # Default urgency (1=High, 2=Medium, 3=Low)
+    "priority": "4",  # Default priority (1=Critical, 2=High, 3=Moderate, 4=Low, 5=Planning)
+    # "severity": "1",  # Default severity (1=High)
+    "comments_and_work_notes": "",  # Empty comments field required by ServiceNow
+}
+
+
+def map_case_status(
+    sir_case_status: str, integration_module: str = "itsm"
+) -> Tuple[str, Optional[str]]:
+    """Map AWS Security Incident Response case status to Service Now workflow status.
 
     Args:
         sir_case_status (str): Status from AWS Security Incident Response case
+        integration_module (str): Integration module type ('itsm' or 'ir')
 
     Returns:
         Tuple[str, Optional[str]]: Tuple containing:
         - Service Now status
         - Comment to add if the mapping is not direct (None if direct mapping)
     """
-    service_now_status = STATUS_MAPPING.get(sir_case_status, DEFAULT_SERVICE_NOW_STATUS)
+    if integration_module == "itsm":
+        status_mapping = ITSM_STATUS_MAPPING
+        default_status = ITSM_DEFAULT_SERVICE_NOW_STATUS
+    elif integration_module == "ir":
+        status_mapping = IR_STATUS_MAPPING
+        default_status = IR_DEFAULT_SERVICE_NOW_STATUS
+    else:
+        logger.error(
+            "No integration-module set for ServiceNow. Please re-deploy the solution with the integration module as either ITSM or IR"
+        )
+    #     status_mapping = ITSM_STATUS_MAPPING
+    #     default_status = ITSM_DEFAULT_SERVICE_NOW_STATUS
+
+    service_now_status = status_mapping.get(sir_case_status, default_status)
 
     # If the mapping is not direct (i.e., multiple AWS Security Incident Response statuses map to the same Service Now status),
     # provide a comment for additional context
     if (
-        sir_case_status in STATUS_MAPPING
-        and list(STATUS_MAPPING.values()).count(service_now_status) > 1
+        sir_case_status in status_mapping
+        and list(status_mapping.values()).count(service_now_status) > 1
     ):
         comment = f"[AWS Security Incident Response Update] Case status updated to '{sir_case_status}' (mapped to Service Now status '{service_now_status}')"
         return service_now_status, comment
@@ -94,59 +135,66 @@ def map_case_status(sir_case_status: str) -> Tuple[str, Optional[str]]:
     return service_now_status, None
 
 
-def map_sir_fields_to_service_now(sir_case: Dict[str, Any]) -> Dict[str, Any]:
-    """Maps AWS Security Incident Response case fields to Service Now fields.
+def map_sir_fields_to_service_now(
+    sir_case: Dict[str, Any], integration_module: str = "itsm"
+) -> Dict[str, Any]:
+    """Map AWS Security Incident Response case fields to Service Now fields.
 
     Args:
         sir_case (Dict[str, Any]): Dictionary containing AWS Security Incident Response case data
+        integration_module (str): Integration module type ('itsm' or 'ir')
 
     Returns:
         Dict[str, Any]: Dictionary with mapped fields for Service Now
     """
     service_now_fields = {}
 
-    # Add mandatory fields required by ServiceNow data policy
-    service_now_fields.update(MANDATORY_FIELDS)
+    if integration_module == "itsm":
+        # Add mandatory fields required by ServiceNow ITSM data policy
+        service_now_fields.update(ITSM_MANDATORY_FIELDS)
+
+        # Handle closure code if present
+        if "closureCode" in sir_case and sir_case.get("caseStatus") == "Closed":
+            closure_code = map_closure_code(sir_case["closureCode"])
+            service_now_fields[ITSM_CLOSURE_CODE_FIELD] = closure_code
+
+        # Add resolution fields only when incident is being closed/resolved
+        case_status = sir_case.get("caseStatus", "")
+        mapped_state = service_now_fields.get("state", "")
+
+        # Check if this is a closed/resolved incident
+        if (
+            case_status in ["Closed", "Resolved"]
+            or
+            # 6=Resolved, 7=Closed in ServiceNow
+            mapped_state in ["Resolved", "Closed", "6", "7"]
+        ):
+            service_now_fields.update(ITSM_RESOLUTION_FIELDS)
+    elif integration_module == "ir":
+        # Add mandatory fields required by ServiceNow IR data policy
+        service_now_fields.update(IR_MANDATORY_FIELDS)
 
     # Map fields according to configuration
-    for service_now_field, sir_field in FIELD_MAPPING.items():
+    for service_now_field, sir_field in SNOW_FIELD_MAPPING.items():
         if sir_field in sir_case:
             service_now_fields[service_now_field] = sir_case[sir_field]
-
-    # Handle closure code if present
-    if "closureCode" in sir_case and sir_case.get("caseStatus") == "Closed":
-        closure_code = map_closure_code(sir_case["closureCode"])
-        service_now_fields[CLOSURE_CODE_FIELD] = closure_code
-
-    # Add resolution fields only when incident is being closed/resolved
-    case_status = sir_case.get("caseStatus", "")
-    mapped_state = service_now_fields.get("state", "")
-
-    # Check if this is a closed/resolved incident
-    if (
-        case_status in ["Closed", "Resolved"]
-        or
-        # 6=Resolved, 7=Closed in ServiceNow
-        mapped_state in ["Resolved", "Closed", "6", "7"]
-    ):
-        service_now_fields.update(RESOLUTION_FIELDS)
 
     return service_now_fields
 
 
 def map_sir_case_comments_to_service_now_incident(
-    sir_case_comments, service_now_incident_comments
-):
-    """Maps AWS Security Incident Response case comments to Service Now incident comments.
+    sir_case_comments: List[Dict[str, Any]], service_now_incident_comments: str
+) -> List[str]:
+    """Map AWS Security Incident Response case comments to Service Now incident comments.
 
     Args:
         sir_case_comments (List[Dict[str, Any]]): List of comments from AWS Security Incident Response case
-        service_now_incident_comments (List[Dict[str, Any]]): List of comments from Service Now incident
+        service_now_incident_comments (str): Comments string from Service Now incident
 
     Returns:
         List[str]: List of comments to be added to Service Now incident
     """
-    UPDATE_TAG_TO_SKIP = "[Service Now Update]"
+    UPDATE_TAG_TO_SKIP = "[service-now Update]"
     comments_list = []
 
     logger.info("Preparing list of comments to be added in ServiceNow incident")
@@ -155,12 +203,16 @@ def map_sir_case_comments_to_service_now_incident(
 
     if sir_case_comments_bodies:
         # Extract ServiceNow comments once if they exist
+        logger.info(f"ServiceNow incident comments: {service_now_incident_comments}")
         service_now_incident_comments_list = []
         if service_now_incident_comments:
             service_now_incident_comments_list = convert_service_now_comments_to_list(
                 service_now_incident_comments
             )
 
+        logger.info(
+            f"ServiceNow incident comments as a list: {service_now_incident_comments_list}"
+        )
         for sir_case_comment in sir_case_comments_bodies:
             logger.info(f"Security IR case comment: {sir_case_comment}")
 
@@ -171,6 +223,11 @@ def map_sir_case_comments_to_service_now_incident(
             # Check if comment already exists in ServiceNow
             comment_exists = False
             for service_now_comment in service_now_incident_comments_list:
+                logger.info(
+                    "Validating if AWS Security Incident Response case comment already exists in ServiceNow incident"
+                )
+                logger.info(f"AWS Security IR comment: {str(sir_case_comment).strip()}")
+                logger.info(f"ServiceNow comment: {str(service_now_comment).strip()}")
                 if str(sir_case_comment).strip() == str(service_now_comment).strip():
                     comment_exists = True
                     break
@@ -190,7 +247,7 @@ def map_sir_case_comments_to_service_now_incident(
 def convert_unmapped_fields_to_string_for_snow_comments(
     sir_case: Dict[str, Any],
 ) -> str:
-    """Maps unmapped or additional AWS Security Incident Response case fields to Service Now comments.
+    """Map unmapped or additional AWS Security Incident Response case fields to Service Now comments.
 
     Args:
         sir_case (Dict[str, Any]): Dictionary containing AWS Security Incident Response case data
@@ -202,7 +259,7 @@ def convert_unmapped_fields_to_string_for_snow_comments(
 
     # Collect unmapped fields to include in description
     for key, value in sir_case.items():
-        if key not in FIELD_MAPPING.values():
+        if key not in SNOW_FIELD_MAPPING.values():
             # Skip complex objects, empty lists, and None values
             if value and not (isinstance(value, list) and len(value) == 0):
                 if isinstance(value, (str, int, float, bool)) or (
@@ -255,12 +312,13 @@ def convert_unmapped_fields_to_string_for_snow_comments(
 
 
 def map_service_now_fields_to_sir(
-    service_now_incident: Dict[str, Any],
+    service_now_incident: Dict[str, Any], integration_module: str = "itsm"
 ) -> Dict[str, Any]:
-    """Maps Service Now fields to AWS Security Incident Response case fields.
+    """Map Service Now fields to AWS Security Incident Response case fields.
 
     Args:
         service_now_incident (Dict[str, Any]): Dictionary containing Service Now incident data
+        integration_module (str): Integration module type ('itsm' or 'ir')
 
     Returns:
         Dict[str, Any]: Dictionary with mapped fields for AWS Security Incident Response
@@ -271,34 +329,35 @@ def map_service_now_fields_to_sir(
     # Reverse mapping
     reverse_mapping = {
         sir_field: service_now_field
-        for service_now_field, sir_field in FIELD_MAPPING.items()
+        for service_now_field, sir_field in SNOW_FIELD_MAPPING.items()
     }
 
     for sir_field, service_now_field in reverse_mapping.items():
         if service_now_field in service_now_incident:
             sir_fields[sir_field] = service_now_incident[service_now_field]
 
-    # Extract closure code if available
-    if CLOSURE_CODE_FIELD in service_now_incident:
-        service_now_closure = service_now_incident[CLOSURE_CODE_FIELD]
-        sir_closure = reverse_map_closure_code(service_now_closure)
-        if sir_closure:
-            sir_fields["closureCode"] = sir_closure
+    # Extract closure code if available - only for ITSM integration
+    if integration_module == "itsm":
+        if ITSM_CLOSURE_CODE_FIELD in service_now_incident:
+            service_now_closure = service_now_incident[ITSM_CLOSURE_CODE_FIELD]
+            sir_closure = reverse_map_closure_code(service_now_closure)
+            if sir_closure:
+                sir_fields["closureCode"] = sir_closure
 
     return sir_fields
 
 
 def map_service_now_incident_comments_to_sir_case(
-    service_now_incident_comments, sir_case_comments
-):
-    """Maps ServiceNow incident comments to Security IR case comments.
+    service_now_incident_comments: str, sir_case_comments: List[Dict[str, Any]]
+) -> List[str]:
+    """Map ServiceNow incident comments to Security IR case comments.
 
     Args:
         service_now_incident_comments (str): ServiceNow incident comments
-        sir_case_comments (dict): Security IR case comments
+        sir_case_comments (List[Dict[str, Any]]): Security IR case comments
 
     Returns:
-        List of comments
+        List[str]: List of comments to be added to Security IR case
     """
     UPDATE_TAG_TO_SKIP = "[AWS Security Incident Response Update]"
     comments_list = []
@@ -345,8 +404,7 @@ def map_service_now_incident_comments_to_sir_case(
 
 
 def convert_service_now_comments_to_list(comments: str) -> List[str]:
-    """
-    Converts ServiceNow comments to a list of strings.
+    """Convert ServiceNow comments to a list of strings.
 
     Extracts lines following specific phrases like '(Additional comments)' and '(Work notes)'.
 
@@ -356,6 +414,8 @@ def convert_service_now_comments_to_list(comments: str) -> List[str]:
     Returns:
         List[str]: List of extracted comment lines
     """
+    if not comments:
+        return []
 
     lines = comments.strip().split("\n")
     comments_list = []
@@ -378,7 +438,7 @@ def convert_service_now_comments_to_list(comments: str) -> List[str]:
 def validate_if_comment_needs_to_be_added(
     source_comment, dest_comment, tag_to_skip
 ) -> bool:
-    """Validates if a comment needs to be added to the destination.
+    """Validate if a comment needs to be added to the destination.
 
     Args:
         source_comment (str): The comment to be validated
@@ -402,7 +462,7 @@ def validate_if_comment_needs_to_be_added(
 def map_watchers(
     sir_watchers: List[Any], service_now_watchers: List[str]
 ) -> Tuple[List[Any], List[str]]:
-    """Maps watchers between AWS Security Incident Response and Service Now.
+    """Map watchers between AWS Security Incident Response and Service Now.
 
     Args:
         sir_watchers (List[Any]): List of watcher objects from AWS Security Incident Response (can be strings or dicts with email field)
@@ -451,7 +511,7 @@ def map_watchers(
 
 
 def map_closure_code(sir_closure_code: str) -> str:
-    """Maps AWS Security Incident Response closure code to Service Now field value.
+    """Map AWS Security Incident Response closure code to Service Now field value.
 
     Args:
         sir_closure_code (str): Closure code from AWS Security Incident Response
@@ -459,12 +519,14 @@ def map_closure_code(sir_closure_code: str) -> str:
     Returns:
         str: Service Now field value for closure code
     """
-    return CLOSURE_CODE_MAPPING.get(sir_closure_code.lower(), DEFAULT_CLOSURE_CODE)
+    return ITSM_CLOSURE_CODE_MAPPING.get(
+        sir_closure_code.lower(), ITSM_DEFAULT_CLOSURE_CODE
+    )
 
 
 # TODO: Move the below setup (for an integration target), which is being invoked from the handlers, outside of the lambdas to speed up processing like a pre-compute (see: https://app.asana.com/1/8442528107068/project/1209571477232011/task/1210991530761708)
 def reverse_map_closure_code(service_now_closure_code: str) -> Optional[str]:
-    """Maps Service Now closure code back to AWS Security Incident Response closure code.
+    """Map Service Now closure code back to AWS Security Incident Response closure code.
 
     Args:
         service_now_closure_code (str): Closure code from Service Now
@@ -473,5 +535,5 @@ def reverse_map_closure_code(service_now_closure_code: str) -> Optional[str]:
         Optional[str]: AWS Security Incident Response closure code or None if not found
     """
     # Create reverse mapping
-    reverse_mapping = {v: k for k, v in CLOSURE_CODE_MAPPING.items()}
+    reverse_mapping = {v: k for k, v in ITSM_CLOSURE_CODE_MAPPING.items()}
     return reverse_mapping.get(service_now_closure_code)

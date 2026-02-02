@@ -36,13 +36,13 @@ try:
     DatabaseService = index.DatabaseService
     SlackService = index.SlackService
     IncidentService = index.IncidentService
-    lambda_handler = index.lambda_handler
+    handler = index.handler
 except AttributeError as e:
     # If classes aren't available, create mock classes for testing
     DatabaseService = Mock
     SlackService = Mock
     IncidentService = Mock
-    lambda_handler = Mock
+    handler = Mock
 
 
 class TestDatabaseService:
@@ -953,12 +953,12 @@ class TestIncidentServiceHandlers:
         mock_slack_instance.sync_attachment_to_slack.assert_not_called()
 
 
-class TestLambdaHandler:
-    """Test cases for lambda_handler function"""
+class TestHandler:
+    """Test cases for handler function"""
 
     @patch('index.IncidentService')
-    def test_lambda_handler_success(self, mock_incident_service):
-        """Test successful lambda handler execution"""
+    def test_handler_success(self, mock_incident_service):
+        """Test successful handler execution"""
         # Setup
         mock_incident_instance = Mock()
         mock_incident_service.return_value = mock_incident_instance
@@ -974,7 +974,7 @@ class TestLambdaHandler:
         context = Mock()
         
         with patch.dict(os.environ, {"EVENT_SOURCE": "security-ir"}):
-            result = lambda_handler(event, context)
+            result = handler(event, context)
         
         # Assertions
         assert result["statusCode"] == 200
@@ -982,8 +982,8 @@ class TestLambdaHandler:
         assert response_body["message"] == "Event processed successfully"
 
     @patch('index.IncidentService')
-    def test_lambda_handler_wrong_source(self, mock_incident_service):
-        """Test lambda handler with wrong event source"""
+    def test_handler_wrong_source(self, mock_incident_service):
+        """Test handler with wrong event source"""
         # Setup
         event = {
             "source": "jira",
@@ -992,7 +992,7 @@ class TestLambdaHandler:
         context = Mock()
         
         with patch.dict(os.environ, {"EVENT_SOURCE": "security-ir"}):
-            result = lambda_handler(event, context)
+            result = handler(event, context)
         
         # Assertions
         assert result["statusCode"] == 200
@@ -1001,8 +1001,8 @@ class TestLambdaHandler:
         mock_incident_service.assert_not_called()
 
     @patch('index.IncidentService')
-    def test_lambda_handler_processing_failure(self, mock_incident_service):
-        """Test lambda handler with processing failure"""
+    def test_handler_processing_failure(self, mock_incident_service):
+        """Test handler with processing failure"""
         # Setup
         mock_incident_instance = Mock()
         mock_incident_service.return_value = mock_incident_instance
@@ -1018,7 +1018,7 @@ class TestLambdaHandler:
         context = Mock()
         
         with patch.dict(os.environ, {"EVENT_SOURCE": "security-ir"}):
-            result = lambda_handler(event, context)
+            result = handler(event, context)
         
         # Assertions
         assert result["statusCode"] == 500
@@ -1026,8 +1026,8 @@ class TestLambdaHandler:
         assert "Failed to process event" in response_body["error"]
 
     @patch('index.IncidentService')
-    def test_lambda_handler_exception(self, mock_incident_service):
-        """Test lambda handler with exception"""
+    def test_handler_exception(self, mock_incident_service):
+        """Test handler with exception"""
         # Setup
         mock_incident_service.side_effect = Exception("Test exception")
         
@@ -1038,7 +1038,7 @@ class TestLambdaHandler:
         context = Mock()
         
         with patch.dict(os.environ, {"EVENT_SOURCE": "security-ir"}):
-            result = lambda_handler(event, context)
+            result = handler(event, context)
         
         # Assertions
         assert result["statusCode"] == 500
@@ -1046,8 +1046,8 @@ class TestLambdaHandler:
         assert "Test exception" in response_body["error"]
 
     @patch('index.IncidentService')
-    def test_lambda_handler_records_format_success(self, mock_incident_service):
-        """Test lambda handler with Records format (SQS/SNS) containing EventBridge event"""
+    def test_handler_records_format_success(self, mock_incident_service):
+        """Test handler with Records format (SQS/SNS) containing EventBridge event"""
         # Setup
         mock_incident_instance = Mock()
         mock_incident_service.return_value = mock_incident_instance
@@ -1073,7 +1073,7 @@ class TestLambdaHandler:
         context = Mock()
         
         with patch.dict(os.environ, {"EVENT_SOURCE": "security-ir"}):
-            result = lambda_handler(event, context)
+            result = handler(event, context)
         
         # Assertions
         assert result["statusCode"] == 200
@@ -1084,8 +1084,8 @@ class TestLambdaHandler:
         mock_incident_instance.process_case_event.assert_called_once_with(eventbridge_event)
 
     @patch('index.IncidentService')
-    def test_lambda_handler_records_format_dict_body(self, mock_incident_service):
-        """Test lambda handler with Records format where body is already a dict"""
+    def test_handler_records_format_dict_body(self, mock_incident_service):
+        """Test handler with Records format where body is already a dict"""
         # Setup
         mock_incident_instance = Mock()
         mock_incident_service.return_value = mock_incident_instance
@@ -1111,7 +1111,7 @@ class TestLambdaHandler:
         context = Mock()
         
         with patch.dict(os.environ, {"EVENT_SOURCE": "security-ir"}):
-            result = lambda_handler(event, context)
+            result = handler(event, context)
         
         # Assertions
         assert result["statusCode"] == 200
@@ -1122,8 +1122,8 @@ class TestLambdaHandler:
         mock_incident_instance.process_case_event.assert_called_once_with(eventbridge_event)
 
     @patch('index.IncidentService')
-    def test_lambda_handler_records_format_wrong_source(self, mock_incident_service):
-        """Test lambda handler with Records format but wrong event source"""
+    def test_handler_records_format_wrong_source(self, mock_incident_service):
+        """Test handler with Records format but wrong event source"""
         # Setup
         eventbridge_event = {
             "source": "jira",  # Wrong source
@@ -1143,7 +1143,7 @@ class TestLambdaHandler:
         context = Mock()
         
         with patch.dict(os.environ, {"EVENT_SOURCE": "security-ir"}):
-            result = lambda_handler(event, context)
+            result = handler(event, context)
         
         # Assertions
         assert result["statusCode"] == 200
@@ -1153,8 +1153,8 @@ class TestLambdaHandler:
         mock_incident_service.assert_not_called()
 
     @patch('index.IncidentService')
-    def test_lambda_handler_records_format_invalid_json(self, mock_incident_service):
-        """Test lambda handler with Records format containing invalid JSON"""
+    def test_handler_records_format_invalid_json(self, mock_incident_service):
+        """Test handler with Records format containing invalid JSON"""
         # Setup
         event = {
             "Records": [
@@ -1166,7 +1166,7 @@ class TestLambdaHandler:
         context = Mock()
         
         with patch.dict(os.environ, {"EVENT_SOURCE": "security-ir"}):
-            result = lambda_handler(event, context)
+            result = handler(event, context)
         
         # Assertions
         assert result["statusCode"] == 500
@@ -1175,8 +1175,8 @@ class TestLambdaHandler:
         mock_incident_service.assert_not_called()
 
     @patch('index.IncidentService')
-    def test_lambda_handler_empty_records(self, mock_incident_service):
-        """Test lambda handler with empty Records array"""
+    def test_handler_empty_records(self, mock_incident_service):
+        """Test handler with empty Records array"""
         # Setup
         event = {
             "Records": []
@@ -1184,7 +1184,7 @@ class TestLambdaHandler:
         context = Mock()
         
         with patch.dict(os.environ, {"EVENT_SOURCE": "security-ir"}):
-            result = lambda_handler(event, context)
+            result = handler(event, context)
         
         # Assertions
         assert result["statusCode"] == 500

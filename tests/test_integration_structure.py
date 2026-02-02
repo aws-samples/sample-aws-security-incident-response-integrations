@@ -61,30 +61,7 @@ class TestIntegrationStructure:
                         assert os.path.exists(file_path), f"Missing required file: {file_path}"
                         assert os.path.isfile(file_path), f"Path exists but is not a file: {file_path}"
 
-    @pytest.mark.skip(reason="Temporarily disabled due to GitHub Actions cache issue")
-    def test_handler_index_files_have_lambda_handler_old(self, integration_patterns):
-        """Test that index.py files contain appropriate handler function.
-        
-        Production integrations (Jira/ServiceNow) use 'handler' function to maintain
-        compatibility with existing deployments. New integrations (Slack) use 'lambda_handler'.
-        """
-        # Define which integrations are production (use handler) vs new (use lambda_handler)
-        production_integrations = {'jira', 'service_now'}
-        
-        for integration, directories in integration_patterns.items():
-            for directory in directories:
-                index_path = os.path.join(directory, "index.py")
-                if os.path.exists(index_path):
-                    with open(index_path, 'r') as f:
-                        content = f.read()
-                        
-                    if integration in production_integrations:
-                        # Production integrations: accept either handler or lambda_handler
-                        has_valid_handler = "def handler" in content or "def lambda_handler" in content
-                        assert has_valid_handler, f"Missing handler or lambda_handler function in {index_path}"
-                    else:
-                        # New integrations: require lambda_handler
-                        assert "def lambda_handler" in content, f"Missing lambda_handler function in {index_path}"
+
 
     def test_handler_requirements_files_not_empty(self, integration_patterns):
         """Test that requirements.txt files are not empty."""
@@ -135,11 +112,8 @@ class TestIntegrationStructure:
     def test_lambda_entry_points_are_correct(self, integration_patterns):
         """Test that Lambda entry points are correctly defined for each integration type.
         
-        Production integrations (Jira/ServiceNow) use 'handler' function.
-        New integrations (Slack) use 'lambda_handler' function.
+        All integrations now use 'handler' function as the entry point.
         """
-        production_integrations = {'jira', 'service_now'}
-        
         for integration_type, directories in integration_patterns.items():
             for directory in directories:
                 index_file = os.path.join(directory, "index.py")
@@ -147,10 +121,4 @@ class TestIntegrationStructure:
                     with open(index_file, 'r') as f:
                         file_content = f.read()
                         
-                    if integration_type in production_integrations:
-                        # Production: accept either handler or lambda_handler
-                        has_entry_point = "def handler" in file_content or "def lambda_handler" in file_content
-                        assert has_entry_point, f"Missing entry point function in {index_file}"
-                    else:
-                        # New integrations: require lambda_handler
-                        assert "def lambda_handler" in file_content, f"Missing lambda_handler in {index_file}"
+                    assert "def handler" in file_content, f"Missing handler in {index_file}"

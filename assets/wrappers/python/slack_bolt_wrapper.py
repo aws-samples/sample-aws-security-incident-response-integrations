@@ -6,7 +6,7 @@ This module provides a wrapper around the Slack Bolt framework for use in the Se
 import os
 import logging
 import time
-from typing import List, Dict, Optional, Any, Union
+from typing import List, Dict, Optional, Any, Union, Tuple
 
 import boto3
 from slack_bolt import App
@@ -202,16 +202,29 @@ class SlackBoltClient:
             return None
 
         try:
-            channel_name = f"{SLACK_CHANNEL_PREFIX}{case_id}"
+            base_channel_name = f"{SLACK_CHANNEL_PREFIX}{case_id}"
+            channel_name = base_channel_name
+            suffix = 0
             
-            def _create_channel():
+            def _create_channel_with_name(name):
                 response = self.client.conversations_create(
-                    name=channel_name,
+                    name=name,
                     is_private=False
                 )
                 return response["channel"]["id"]
 
-            channel_id = self._retry_with_backoff(_create_channel)
+            while True:
+                try:
+                    channel_id = self._retry_with_backoff(_create_channel_with_name, channel_name)
+                    break
+                except SlackApiError as e:
+                    if e.response["error"] == "name_taken":
+                        suffix += 1
+                        channel_name = f"{base_channel_name}-{suffix}"
+                        logger.info(f"Channel name taken, trying: {channel_name}")
+                        continue
+                    else:
+                        raise
             
             if channel_id and case_title:
                 # Set channel topic
@@ -258,7 +271,7 @@ class SlackBoltClient:
             logger.error(f"Error posting message to channel {channel_id}: {str(e)}")
             return False
 
-    def add_users_to_channel(self, channel_id: str, user_ids: List[str]) -> bool:
+    def add_users_to_channel(self, channel_id: str, user_ids: List[str]) -> Tuple[bool, List[str]]:
         """Add users to a Slack channel.
 
         Args:
@@ -266,11 +279,14 @@ class SlackBoltClient:
             user_ids (List[str]): List of user IDs to add
 
         Returns:
-            bool: True if successful, False otherwise
+            tuple[bool, List[str]]: (success, failed_user_ids)
         """
         if not self.client or not user_ids:
-            return False
+            return False, []
 
+        failed_users = []
+        
+        # Try adding all users at once first
         try:
             def _invite_users():
                 return self.client.conversations_invite(
@@ -279,11 +295,42 @@ class SlackBoltClient:
                 )
 
             result = self._retry_with_backoff(_invite_users)
-            return result is not None
-            
+            if result:
+                return True, []
+                
+        except SlackApiError as e:
+            if e.response["error"] in ["org_user_not_in_team", "user_not_found"]:
+                # Try adding users individually to identify which ones failed
+                for user_id in user_ids:
+                    try:
+                        def _invite_single_user():
+                            return self.client.conversations_invite(
+                                channel=channel_id,
+                                users=user_id
+                            )
+                        
+                        self._retry_with_backoff(_invite_single_user)
+                        
+                    except SlackApiError as single_error:
+                        if single_error.response["error"] in ["org_user_not_in_team", "user_not_found", "already_in_channel"]:
+                            if single_error.response["error"] != "already_in_channel":
+                                failed_users.append(user_id)
+                            logger.warning(f"Could not add user {user_id}: {single_error.response['error']}")
+                        else:
+                            logger.error(f"Error adding user {user_id}: {single_error.response['error']}")
+                            failed_users.append(user_id)
+                    except Exception as single_error:
+                        logger.error(f"Error adding user {user_id}: {str(single_error)}")
+                        failed_users.append(user_id)
+                
+                # Return success if at least some users were added
+                return len(failed_users) < len(user_ids), failed_users
+            else:
+                logger.error(f"Error adding users to channel {channel_id}: {e.response['error']}")
+                return False, user_ids
         except Exception as e:
             logger.error(f"Error adding users to channel {channel_id}: {str(e)}")
-            return False
+            return False, user_ids
 
     def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
         """Get information about a Slack channel.
@@ -402,6 +449,59 @@ class SlackBoltClient:
             logger.error(f"Error updating channel topic for {channel_id}: {str(e)}")
             return False
 
+    def update_channel_description(self, channel_id: str, description: str) -> bool:
+        """Update the description (purpose) of a Slack channel.
+        
+        This is an alias for update_channel_purpose for backward compatibility.
+
+        Args:
+            channel_id (str): The Slack channel ID
+            description (str): New description text
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        return self.update_channel_purpose(channel_id, description)
+
+    def update_channel_purpose(self, channel_id: str, purpose: str) -> bool:
+        """Update the purpose of a Slack channel.
+
+        Args:
+            channel_id (str): The Slack channel ID
+            purpose (str): New purpose text
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.client:
+            logger.error("Slack client not initialized")
+            return False
+
+        try:
+            def _set_purpose():
+                return self.client.conversations_setPurpose(
+                    channel=channel_id,
+                    purpose=purpose
+                )
+
+            result = self._retry_with_backoff(_set_purpose)
+            return result is not None
+            
+        except Exception as e:
+            logger.error(f"Error updating channel purpose for {channel_id}: {str(e)}")
+            return False
+
+    def has_method(self, method_name: str) -> bool:
+        """Check if a method exists on this client.
+        
+        Args:
+            method_name (str): Name of the method to check
+            
+        Returns:
+            bool: True if method exists, False otherwise
+        """
+        return hasattr(self, method_name) and callable(getattr(self, method_name))
+
     def get_channel_members(self, channel_id: str) -> Optional[List[str]]:
         """Get list of members in a Slack channel.
 
@@ -505,4 +605,84 @@ class SlackBoltClient:
             
         except Exception as e:
             logger.error(f"Error getting messages from channel {channel_id}: {str(e)}")
+            return None
+
+    def get_file_info(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """Get information about a Slack file.
+
+        Args:
+            file_id (str): The Slack file ID
+
+        Returns:
+            Optional[Dict[str, Any]]: File information or None if retrieval fails
+        """
+        if not self.client:
+            logger.error("Slack client not initialized")
+            return None
+
+        try:
+            response = self.client.files_info(file=file_id)
+            return response["file"]
+            
+        except Exception as e:
+            logger.error(f"Error getting file info for {file_id}: {str(e)}")
+            return None
+
+    def find_user_by_email(self, email: str) -> Optional[str]:
+        """Find a Slack user ID by email address.
+
+        Args:
+            email (str): Email address to search for
+
+        Returns:
+            Optional[str]: User ID if found, None otherwise
+        """
+        if not self.client:
+            logger.error("Slack client not initialized")
+            return None
+
+        try:
+            def _lookup_user():
+                response = self.client.users_lookupByEmail(email=email)
+                return response["user"]["id"]
+
+            return self._retry_with_backoff(_lookup_user)
+            
+        except SlackApiError as e:
+            if e.response["error"] == "users_not_found":
+                logger.debug(f"User not found for email: {email}")
+                return None
+            else:
+                logger.error(f"Error looking up user by email {email}: {e.response['error']}")
+                return None
+        except Exception as e:
+            logger.error(f"Error looking up user by email {email}: {str(e)}")
+            return None
+
+    def list_files(self, channel: str = None, count: int = 100) -> Optional[List[Dict[str, Any]]]:
+        """List files in a Slack channel using files.list API.
+
+        Args:
+            channel (str, optional): Channel ID to filter files
+            count (int): Maximum number of files to retrieve
+
+        Returns:
+            Optional[List[Dict[str, Any]]]: List of files or None if retrieval fails
+        """
+        if not self.client:
+            logger.error("Slack client not initialized")
+            return None
+
+        try:
+            def _list_files():
+                response = self.client.files_list(
+                    channel=channel,
+                    count=count
+                )
+                return response["files"]
+
+            return self._retry_with_backoff(_list_files)
+            
+        except Exception as e:
+            logger.error(f"Error listing files for channel {channel}: {str(e)}")
             return None

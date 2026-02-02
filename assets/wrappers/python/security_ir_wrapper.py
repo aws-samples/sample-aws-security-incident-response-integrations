@@ -3,12 +3,10 @@ Security IR API wrapper for AWS Security Incident Response integration.
 This module provides a wrapper around the Jira API for use in the Security Incident Response integration.
 """
 
-import os
 import logging
-from typing import List, Dict, Optional, Any, Union
+from typing import Dict, Optional, Any
 
-import boto3
-from boto3 import client, resource
+from boto3 import client
 
 # Configure logging
 logger = logging.getLogger()
@@ -25,7 +23,7 @@ except ImportError:
 
 
 class SecurityIRClient:
-    """Class to handle Security IR API interactions"""
+    """Class to handle Security IR API interactions."""
 
     def __init__(self):
         """Initialize the Security IR client."""
@@ -44,36 +42,36 @@ class SecurityIRClient:
             logger.error(f"Error creating Security IR client: {str(e)}")
             return None
 
-    def get_case(self, case_id: str) -> dict:
+    def get_case(self, case_id: str) -> Optional[dict]:
         """Get a Security IR case by ID.
 
         Args:
             case_id (str): The Security IR case ID
 
         Returns:
-            dict: Security IR case object or None if retrieval fails
+            Optional[dict]: Security IR case object or None if retrieval fails
         """
         try:
             return self.client.get_case(case_id)
         except Exception as e:
             logger.error(
-                f"Error getting case %s from Security IR API: {str(e)}", case_id
+                f"Error getting case {case_id} from Security IR API: {str(e)}"
             )
             return None
 
-    def create_case(self, fields: Dict[str, Any]) -> Optional[Any]:
+    def create_case(self, fields: Dict[str, Any]) -> Optional[dict]:
         """Create a new Security IR case.
 
         Args:
             fields (Dict[str, Any]): Dictionary of case fields
 
         Returns:
-            Optional[Any]: Created Security IR case or None if creation fails
+            Optional[dict]: Created Security IR case or None if creation fails
         """
         try:
             return self.client.create_issue(fields=fields)
         except Exception as e:
-            logging.error("Error creating Security IR case: %s", str(e))
+            logger.error(f"Error creating Security IR case: {str(e)}")
 
             return None
 
@@ -92,7 +90,7 @@ class SecurityIRClient:
             case.update(fields=fields)
             return True
         except Exception as e:
-            logger.error(f"Error updating Security IR case %s: {str(e)}", case_id)
+            logger.error(f"Error updating Security IR case {case_id}: {str(e)}")
             return False
 
     def update_status(
@@ -124,5 +122,5 @@ class SecurityIRClient:
 
             return True
         except Exception as e:
-            logger.error(f"Error updating status for Jira issue %s: {str(e)}", case_id)
+            logger.error(f"Error updating status for Security IR case {case_id}: {str(e)}")
             return False
