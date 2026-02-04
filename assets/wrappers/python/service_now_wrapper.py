@@ -141,7 +141,7 @@ class ServiceNowClient:
             )
             return response["Parameter"]["Value"]
         except Exception as e:
-            logger.error(f"Error retrieving parameter {param_name} from SSM: {str(e)}")
+            logger.error(f"Error retrieving parameter from SSM: {str(e)}")
             return None
 
     def __get_secret_value(self, secret_arn: str) -> Optional[str]:
@@ -161,7 +161,7 @@ class ServiceNowClient:
             response = secrets_client.get_secret_value(SecretId=secret_arn)
             return response["SecretString"]
         except Exception as e:
-            logger.error(f"Error retrieving secret {secret_arn} from Secrets Manager: {str(e)}")
+            logger.error(f"Error retrieving secret from Secrets Manager: {str(e)}")
             return None
 
     def __get_encoded_jwt(self, client_id: str, user_id: str) -> Optional[str]:

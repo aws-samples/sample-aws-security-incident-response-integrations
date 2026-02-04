@@ -161,9 +161,9 @@ class ServiceNowApiService:
             response = secrets_client.get_secret_value(SecretId=secret_arn)
             return response["SecretString"]
         except Exception as e:
-            logger.error(f"Error retrieving secret {secret_arn} from Secrets Manager: {str(e)}")
+            # Log the exception without exposing the secret ARN and return None if secret retrieval fails
+            logger.error(f"Error retrieving secret from Secrets Manager: {str(e)}")
             return None
-        
     def __get_request_base_url(self) -> Optional[str]:
         """Get base URL for ServiceNow API requests.
 
@@ -448,16 +448,8 @@ class ServiceNowApiService:
                 else None
             )
 
-            # Create password2 type property in sys_properties table if token is available
+            # Create password type property in discovery_credentials table if token is available
             if auth_token:
-                # sys_property_payload = {
-                #     "name": apigw_api_key_property_name,
-                #     "value": auth_token,
-                #     "type": "password2",
-                #     "description": "Password for external API integration",
-                #     "ignore_cache": "true",
-                #     "write_roles": "business_rule_admin"
-                # }
                 sys_property_payload = {
                     "name": apigw_api_key_property_name,
                     "type": "basic_auth",
@@ -473,7 +465,9 @@ class ServiceNowApiService:
                     timeout=30,
                 )
 
-                logger.info(f"Discovery_credential {apigw_api_key_property_name} created successfully: {json.loads(response.text)}")
+                logger.info(
+                    "Discovery_credential created successfully in ServiceNow"
+                )
                 return True
             else:
                 logger.error("No auth token available to create discovery_credential")
