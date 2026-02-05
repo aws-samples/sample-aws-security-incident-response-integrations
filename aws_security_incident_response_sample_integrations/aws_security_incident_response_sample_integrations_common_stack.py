@@ -12,7 +12,8 @@ from aws_cdk import (
     aws_lambda_python_alpha as py_lambda,
     aws_dynamodb as dynamodb,
     aws_events as events,
-    aws_logs,
+    aws_logs, Tags,
+    custom_resources as cr
 )
 from .event_bus_logger_construct import EventBusLoggerConstruct
 from cdk_nag import NagSuppressions
@@ -154,6 +155,14 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             )
         )
 
+        poller_logs = aws_logs.LogGroup(
+            self,
+            "SecurityIncidentResponsePollerLogGroup",
+            retention=aws_logs.RetentionDays.ONE_WEEK,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        Tags.of(poller_logs).add('purpose', 'security-ir-poller-logs')
+
         self.poller = py_lambda.PythonFunction(
             self,
             "SecurityIncidentResponsePoller",
@@ -168,7 +177,10 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 "LOG_LEVEL": self.log_level_param.value_as_string,
             },
             role=poller_role,
+            log_group=poller_logs,
         )
+        poller_logs.grant_write(self.poller.role)
+        Tags.of(self.poller).add('purpose', 'security-ir-poller')
 
         self.poller_rule = aws_events.Rule(
             self,
@@ -177,6 +189,27 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             targets=[aws_events_targets.LambdaFunction(self.poller)],
             enabled=False,  # Start disabled
         )
+        # There's a bug in CDK where Tags.of(...) doesn't work for EB Rules https://github.com/aws/aws-cdk/issues/4907
+        tag_cr = cr.AwsCustomResource(self, 'TagPollerRule',
+                                      on_create={
+                                          "service": "EventBridge",
+                                          "action": "tagResource",
+                                          "parameters": {
+                                              "ResourceARN": self.poller_rule.rule_arn,
+                                              "Tags": [
+                                                  {
+                                                      "Key": "purpose",
+                                                      "Value": "security-ir-poller-rule"
+                                                  }
+                                              ]
+                                          },
+                                          "physical_resource_id": cr.PhysicalResourceId.of("TagPollerRule")
+                                      },
+                                      policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
+                                          resources=[self.poller_rule.rule_arn]
+                                      )
+                                      )
+        tag_cr.node.add_dependency(self.poller_rule)
 
         self.poller.add_to_role_policy(
             aws_iam.PolicyStatement(

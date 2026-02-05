@@ -3,14 +3,19 @@ from typing import Optional
 import boto3
 import requests
 import os
-from base64 import b64encode
 import logging
 from botocore.exceptions import ClientError
 import requests
-from requests.auth import AuthBase
 import time
 import uuid
 import jwt
+
+try:
+    # This import works for lambda function and imports the lambda layer at runtime
+    from service_now_wrapper import ServiceNowClient
+except ImportError:
+    # This import works for local development and imports locally from the file system
+    from ..wrappers.python.service_now_wrapper import ServiceNowClient
 
 # ServiceNowJWTAuth is not used in this file, removing the import
 
@@ -120,6 +125,18 @@ class ServiceNowApiService:
         self.secrets_manager_service = SecretsManagerService()
         self.s3_resource = boto3.resource('s3')
 
+        # Get Requests Session Object.
+        service_now_client = ServiceNowClient(
+            instance_id = self.instance_id,
+            client_id_param_name = self.client_id_param_name,
+            client_secret_arn = self.client_secret_arn,
+            user_id_param_name = self.user_id_param_name,
+            private_key_asset_bucket_param_name = self.private_key_asset_bucket_param_name,
+            private_key_asset_key_param_name = self.private_key_asset_key_param_name
+        )
+        snow_client = service_now_client.client
+        self.session = snow_client.session
+
     def __get_parameter(self, param_name: str) -> Optional[str]:
         """
         Fetch a parameter from SSM Parameter Store.
@@ -142,7 +159,7 @@ class ServiceNowApiService:
         except Exception as e:
             logger.error(f"Error retrieving parameter {param_name} from SSM: {str(e)}")
             return None
-        
+
     def __get_secret_value(self, secret_arn: str) -> Optional[str]:
         """
         Fetch a secret value from AWS Secrets Manager.
@@ -175,7 +192,7 @@ class ServiceNowApiService:
         except Exception as e:
             logger.error(f"Error getting base url: {str(e)}")
             return None
-        
+
     def __get_jwt_oauth_token_url(self) -> Optional[str]:
         """Get JWT OAuth token URL for ServiceNow.
 
@@ -202,19 +219,19 @@ class ServiceNowApiService:
             # Get S3 bucket and key from parameters
             bucket = self.__get_parameter(self.private_key_asset_bucket_param_name)
             key = self.__get_parameter(self.private_key_asset_key_param_name)
-            
+
             if not bucket or not key:
                 logger.error("Missing S3 bucket or key for private key asset")
                 return None
-            
+
             # Read private key using S3 resource
             s3_object = self.s3_resource.Object(bucket, key)
             private_key = s3_object.get()['Body'].read().decode('utf-8')
-            
+
             if not user_id or not client_id:
                 logger.error("Missing user ID or client ID for JWT")
                 return None
-            
+
             # Create JWT payload
             payload = {
                 "iss": client_id,  # Issuer - OAuth client ID
@@ -224,24 +241,27 @@ class ServiceNowApiService:
                 "exp": int(time.time()) + 3600,  # Expiration - 1 hour from now
                 "jti": str(uuid.uuid4())  # JWT ID - unique identifier
             }
-            
+            print('<PAYLOAD>')
+            print(json.dumps(payload, indent=4))
+            print('</PAYLOAD>')
+
             # Encode JWT
             encoded_jwt = jwt.encode(payload, private_key, algorithm=JWT_HEADER["alg"], headers=JWT_HEADER)
             return encoded_jwt
-            
-        except jwt.ExpiredSignatureError:  
-            logger.error("Token has expired")  
+
+        except jwt.ExpiredSignatureError:
+            logger.error("Token has expired")
             return None
-        except jwt.InvalidIssuerError:  
+        except jwt.InvalidIssuerError:
             logger.error("Invalid issuer")
             return None
-        except jwt.InvalidAudienceError:  
+        except jwt.InvalidAudienceError:
             logger.error("Invalid audience")
             return None
-        except jwt.InvalidTokenError:  
+        except jwt.InvalidTokenError:
             logger.error("Invalid token")
             return None
-        
+
     def __get_jwt_oauth_access_token(self) -> Optional[str]:
         """Get OAuth access token using JWT authentication.
 
@@ -252,12 +272,12 @@ class ServiceNowApiService:
             if not self.instance_id:
                 logger.error("No ServiceNow instance id provided")
                 return None
-            
+
             # Get parameters for JWT OAuth
             client_secret = self.__get_secret_value(self.client_secret_arn)
             client_id = self.__get_parameter(self.client_id_param_name)
             user_id = self.__get_parameter(self.user_id_param_name)
-            
+
             # Get encoded JWT
             encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
 
@@ -273,7 +293,7 @@ class ServiceNowApiService:
                 'client_id': client_id,
                 'client_secret': client_secret
             }
-            response = requests.post(token_url, headers=headers, data=data)
+            response = self.session.post(token_url, headers=headers, data=data)
             return (response.json())['access_token']
         except requests.exceptions.RequestException as e:
             logger.error(f"HTTP request failed: {str(e)}")
@@ -281,7 +301,7 @@ class ServiceNowApiService:
         except (KeyError, ValueError) as e:
             logger.error(f"Invalid response format: {str(e)}")
             return None
-        
+
     def __get_request_headers(self) -> Optional[dict]:
         """Get headers for ServiceNow API requests.
 
@@ -290,11 +310,15 @@ class ServiceNowApiService:
         """
         try:
             oauth_access_token = self.__get_jwt_oauth_access_token()
-            return {
+            ret = {
                 "Authorization": f"Bearer {oauth_access_token}",
                 "Content-Type": request_content,
                 "Accept": request_content,
             }
+            print('<HEADERS>')
+            print(json.dumps(ret, indent=4))
+            print('</HEADERS>')
+            return ret
         except Exception as e:
             logger.error(f"Error getting request headers: {str(e)}")
             return None
@@ -354,7 +378,7 @@ class ServiceNowApiService:
                     "name": f"{parameter}",
                     "rest_message_function": f"{outbound_rest_message_request_function_sys_id}",
                 }
-                requests.post(
+                self.session.post(
                     f"{base_url}/api/now/table/sys_rest_message_fn_parameters",
                     json=rest_message_post_function_parameters_payload,
                     headers=headers,
@@ -400,7 +424,7 @@ class ServiceNowApiService:
                 "content": request_content,
             }
 
-            rest_message_post_function_response = requests.post(
+            rest_message_post_function_response = self.session.post(
                 f"{base_url}/api/now/table/sys_rest_message_fn",
                 json=rest_message_post_function_payload,
                 headers=headers,
@@ -458,7 +482,7 @@ class ServiceNowApiService:
                     "active": "true"
                 }
 
-                response = requests.post(
+                response = self.session.post(
                     f"{base_url}/api/now/table/discovery_credentials",
                     json=sys_property_payload,
                     headers=headers,
@@ -509,7 +533,7 @@ class ServiceNowApiService:
                 "rest_endpoint": f"{webhook_url}",
             }
 
-            outbound_rest_message_response = requests.post(
+            outbound_rest_message_response = self.session.post(
                 f"{base_url}/api/now/table/sys_rest_message",
                 json=rest_message_payload,
                 headers=headers,
@@ -593,16 +617,13 @@ class ServiceNowApiService:
             rule_payload = {
                 "name": f"{resource_prefix}-business-rule",
                 "collection": "incident",
-                "when": "async",  # Fire asynchronously AFTER transaction commits
+                "when": "after",
                 "action_insert": True,
                 "action_update": True,
                 "active": True,
                 "script": f"""
         (function executeRule(current, previous) {{
             try {{
-                // Add 3-second delay to ensure transaction is committed
-                gs.sleep(3000);
-                
                 var event_type = current.operation() == 'insert' ? 'IncidentCreated' : 'IncidentUpdated';
                 var payload = {{
                     "event_type": event_type,
@@ -611,8 +632,10 @@ class ServiceNowApiService:
                 }};
                 var gr = new GlideRecord('discovery_credentials');
                 if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                    // Read password directly from GlideRecord (works with basic_auth type)
-                    var api_key = gr.getValue('password');
+                    credential_sys_id = gr.getUniqueValue();
+					var provider = new sn_cc.StandardCredentialsProvider();
+					var credential = provider.getCredentialByID(credential_sys_id);
+					var api_key = credential.getAttribute("password");
                     
                     var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                     var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
@@ -620,7 +643,7 @@ class ServiceNowApiService:
                     request.setRequestHeader('Authorization', api_key);
                     request.setRequestBody(JSON.stringify(payload));
                     
-                    var response = request.execute();
+                    var response = request.executeAsync();
                     gs.info('Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
                     var responseBody = response.getBody();
                     var httpStatus = response.getStatusCode();
@@ -637,44 +660,17 @@ class ServiceNowApiService:
         """,
             }
 
-            # Check if business rule already exists
-            check_response = requests.get(
+            # Create Business Rule resource in Service Now using REST API
+            response = self.session.post(
                 f"{base_url}/api/now/table/sys_script",
-                params={"sysparm_query": f"name={resource_prefix}-business-rule", "sysparm_fields": "sys_id"},
+                json=rule_payload,
                 headers=headers,
                 timeout=30,
             )
-            existing = check_response.json().get("result", [])
-            
-            if existing:
-                # Update existing business rule - deactivate first to force reload
-                br_sys_id = existing[0]["sys_id"]
-                # Deactivate
-                requests.patch(
-                    f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"active": "false"},
-                    headers=headers,
-                    timeout=30,
-                )
-                # Update script, when field, and reactivate
-                response = requests.patch(
-                    f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"script": rule_payload["script"], "when": "async", "active": "true"},
-                    headers=headers,
-                    timeout=30,
-                )
-                logger.info(f"ITSM Business Rule updated in Service Now: {br_sys_id}")
-            else:
-                # Create Business Rule resource in Service Now using REST API
-                response = requests.post(
-                    f"{base_url}/api/now/table/sys_script",
-                    json=rule_payload,
-                    headers=headers,
-                    timeout=30,
-                )
-                logger.info(
-                    f"ITSM Business Rule created in Service Now: {json.loads(response.text)}"
-                )
+
+            logger.info(
+                f"ITSM Business Rule created in Service Now: {json.loads(response.text)}"
+            )
 
             return response
         except Exception as e:
@@ -716,16 +712,13 @@ class ServiceNowApiService:
             rule_payload = {
                 "name": f"{resource_prefix}-ir-business-rule",
                 "collection": "sn_si_incident",
-                "when": "async",  # Fire asynchronously AFTER transaction commits
+                "when": "after",
                 "action_insert": True,
                 "action_update": True,
                 "active": True,
                 "script": f"""
         (function executeRule(current, previous) {{
             try {{
-                // Add 3-second delay to ensure transaction is committed
-                gs.sleep(3000);
-                
                 var event_type = current.operation() == 'insert' ? 'IncidentCreated' : 'IncidentUpdated';
                 var payload = {{
                     "event_type": event_type,
@@ -734,8 +727,10 @@ class ServiceNowApiService:
                 }};
                 var gr = new GlideRecord('discovery_credentials');
                 if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                    // Read password directly from GlideRecord (works with basic_auth type)
-                    var api_key = gr.getValue('password');
+                    credential_sys_id = gr.getUniqueValue();
+					var provider = new sn_cc.StandardCredentialsProvider();
+					var credential = provider.getCredentialByID(credential_sys_id);
+					var api_key = credential.getAttribute("password");
                     
                     var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                     var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
@@ -743,7 +738,7 @@ class ServiceNowApiService:
                     request.setRequestHeader('Authorization', api_key);
                     request.setRequestBody(JSON.stringify(payload));
                     
-                    var response = request.execute();
+                    var response = request.executeAsync();
                     gs.info('Security Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
                     var responseBody = response.getBody();
                     var httpStatus = response.getStatusCode();
@@ -760,44 +755,17 @@ class ServiceNowApiService:
         """,
             }
 
-            # Check if business rule already exists
-            check_response = requests.get(
-                f"{base_url}/api/now/table/sys_script",
-                params={"sysparm_query": f"name={resource_prefix}-ir-business-rule", "sysparm_fields": "sys_id"},
-                headers=headers,
-                timeout=30,
-            )
-            existing = check_response.json().get("result", [])
-            
-            if existing:
-                # Update existing business rule - deactivate first to force reload
-                br_sys_id = existing[0]["sys_id"]
-                # Deactivate
-                requests.patch(
-                    f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"active": "false"},
-                    headers=headers,
-                    timeout=30,
-                )
-                # Update script, when field, and reactivate
-                response = requests.patch(
-                    f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"script": rule_payload["script"], "when": "async", "active": "true"},
-                    headers=headers,
-                    timeout=30,
-                )
-                logger.info(f"IR Business Rule updated in Service Now: {br_sys_id}")
-            else:
-                # Create Business Rule resource in Service Now using REST API
-                response = requests.post(
+            # Create Business Rule resource in Service Now using REST API
+            response = self.session.post(
                 f"{base_url}/api/now/table/sys_script",
                 json=rule_payload,
                 headers=headers,
                 timeout=30,
             )
-                logger.info(
-                    f"IR Business Rule created in Service Now: {json.loads(response.text)}"
-                )
+
+            logger.info(
+                f"IR Business Rule created in Service Now: {json.loads(response.text)}"
+            )
 
             return response
         except Exception as e:
@@ -866,8 +834,10 @@ class ServiceNowApiService:
                     
                     var gr = new GlideRecord('discovery_credentials');
                     if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                        // Read password directly from GlideRecord (works with basic_auth type)
-                        var api_key = gr.getValue('password');
+                        credential_sys_id = gr.getUniqueValue();
+                        var provider = new sn_cc.StandardCredentialsProvider();
+                        var credential = provider.getCredentialByID(credential_sys_id);
+                        var api_key = credential.getAttribute("password");
 
                         var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                         var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
@@ -875,7 +845,7 @@ class ServiceNowApiService:
                         request.setRequestHeader('Authorization', api_key);
                         request.setRequestBody(JSON.stringify(payload));
                         
-                        var response = request.execute();
+                        var response = request.executeAsync();
                         gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
                         var responseBody = response.getBody();
                         var httpStatus = response.getStatusCode();
@@ -897,7 +867,7 @@ class ServiceNowApiService:
             }
 
             # Create Business Rule resource in Service Now using REST API
-            response = requests.post(
+            response = self.session.post(
                 f"{base_url}/api/now/table/sys_script",
                 json=rule_payload,
                 headers=headers,
@@ -975,8 +945,10 @@ class ServiceNowApiService:
                     
                     var gr = new GlideRecord('discovery_credentials');
                     if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                        // Read password directly from GlideRecord (works with basic_auth type)
-                        var api_key = gr.getValue('password');
+                        credential_sys_id = gr.getUniqueValue();
+                        var provider = new sn_cc.StandardCredentialsProvider();
+                        var credential = provider.getCredentialByID(credential_sys_id);
+                        var api_key = credential.getAttribute("password");
                     
                         var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                         var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
@@ -984,7 +956,7 @@ class ServiceNowApiService:
                         request.setRequestHeader('Authorization', api_key);
                         request.setRequestBody(JSON.stringify(payload));
                         
-                        var response = request.execute();
+                        var response = request.executeAsync();
                         gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
                         var responseBody = response.getBody();
                         var httpStatus = response.getStatusCode();
@@ -1006,7 +978,7 @@ class ServiceNowApiService:
             }
 
             # Create Business Rule resource in Service Now using REST API
-            response = requests.post(
+            response = self.session.post(
                 f"{base_url}/api/now/table/sys_script",
                 json=rule_payload,
                 headers=headers,
