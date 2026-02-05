@@ -41,8 +41,11 @@ from datetime import datetime, timedelta, timezone
 from mypy_boto3_security_ir.type_defs import CreateCaseResponseTypeDef, GetCaseResponseTypeDef
 
 # Test configuration
-SYNC_TIMEOUT_SECONDS = 30  # 30 seconds to allow for poller cycles
-POLL_INTERVAL_SECONDS = 10
+# Note: The notification handler has retry logic that can take up to 2-3 minutes
+# for new incidents when the webhook sends IncidentUpdated instead of IncidentCreated
+# (ServiceNow async business rules don't reliably detect insert operations)
+SYNC_TIMEOUT_SECONDS = 180  # 3 minutes to allow for notification handler retries
+POLL_INTERVAL_SECONDS = 15
 SERVICE_NOW_STACK_NAME = 'AwsSecurityIncidentResponseServiceNowIntegrationStack'
 
 @pytest.fixture(scope="module")
@@ -462,6 +465,8 @@ class ServiceNowOAuthSetup:
         # Roles required for the integration - aligned with SERVICE_NOW.md documentation
         # NOTE: 'admin' is intentionally excluded - OAuth blocks JWT grants to admin users
         required_roles = [
+            # ITSM Mode - incident table access
+            "itil",  # Base ITIL role - grants read/write access to incident table
             # REST/Web services (per documentation)
             "rest_api_explorer",  # or custom role with permissions to create Outbound REST Message
             "web_service_admin",  # or custom role with permissions to create Outbound REST Message
@@ -469,8 +474,8 @@ class ServiceNowOAuthSetup:
             "business_rule_admin",  # for performing operations on Business Rules
             # Incident management (per documentation)
             "incident_manager",  # for performing operations on Incidents
-            "snc_internal",
-            # Security Incident Response roles (per documentation)
+            "snc_internal",  # ServiceNow internal role
+            # IR Mode - Security Incident Response roles (per documentation)
             "sn_si.analyst",  # for performing operations on Security Incidents
             "sn_si.basic",  # for performing operations on Security Incidents
             "sn_si.external",  # for performing operations on Security Incidents
@@ -530,6 +535,379 @@ class ServiceNowOAuthSetup:
         
         return success
 
+    def create_custom_integration_role(self, role_name: str = "aws_sir_integration_admin") -> Optional[str]:
+        """Create a custom role for the AWS Security IR integration.
+        
+        This role will be granted write access to the tables needed by the setup handler:
+        - sys_rest_message (Outbound REST Message)
+        - sys_rest_message_fn (REST Message HTTP Methods)
+        - sys_script (Business Rules)
+        - discovery_credentials (Discovery Credentials)
+        
+        Args:
+            role_name: Name for the custom role
+            
+        Returns:
+            sys_id of the created role, or existing role's sys_id if it already exists
+        """
+        print(f"Creating custom integration role: {role_name}")
+        
+        role_endpoint = f"{self.url}/api/now/table/sys_user_role"
+        
+        # Check if role already exists
+        response = requests.get(
+            role_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            params={"sysparm_query": f"name={role_name}", "sysparm_limit": 1}
+        )
+        
+        existing = response.json().get("result", [])
+        if existing:
+            print(f"  Role '{role_name}' already exists: {existing[0]['sys_id']}")
+            return existing[0]["sys_id"]
+        
+        # Create the role
+        payload = {
+            "name": role_name,
+            "description": "Custom role for AWS Security IR integration - grants write access to REST message, business rule, and credential tables",
+        }
+        
+        response = requests.post(
+            role_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            json=payload
+        )
+        
+        if response.status_code == 201:
+            role_sys_id = response.json()["result"]["sys_id"]
+            self.created_resources.append(("sys_user_role", role_sys_id))
+            print(f"  Created role '{role_name}': {role_sys_id}")
+            return role_sys_id
+        else:
+            print(f"  Failed to create role: {response.status_code} - {response.text}")
+            return None
+
+    def create_acl_for_table(self, table_name: str, operation: str, role_sys_id: str) -> Optional[str]:
+        """Create an ACL granting a role access to a table operation.
+        
+        Args:
+            table_name: The table to grant access to (e.g., 'sys_rest_message')
+            operation: The operation to grant (e.g., 'create', 'write', 'read', 'delete')
+            role_sys_id: sys_id of the role to grant access to
+            
+        Returns:
+            sys_id of the created ACL, or None if creation failed
+        """
+        acl_endpoint = f"{self.url}/api/now/table/sys_security_acl"
+        acl_role_endpoint = f"{self.url}/api/now/table/sys_security_acl_role"
+        
+        # Check if ACL already exists for this table/operation with our role
+        response = requests.get(
+            acl_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            params={
+                "sysparm_query": f"name={table_name}^operation={operation}^type=record",
+                "sysparm_limit": 10
+            }
+        )
+        
+        existing_acls = response.json().get("result", [])
+        
+        # Check if any existing ACL already has our role
+        for acl in existing_acls:
+            acl_sys_id = acl["sys_id"]
+            # Check if this ACL has our role
+            role_check = requests.get(
+                acl_role_endpoint,
+                auth=self.auth,
+                headers=self.headers,
+                params={"sysparm_query": f"sys_security_acl={acl_sys_id}^sys_user_role={role_sys_id}"}
+            )
+            if role_check.json().get("result", []):
+                print(f"    ACL for {table_name}.{operation} already has role assigned")
+                return acl_sys_id
+        
+        # Create new ACL
+        acl_payload = {
+            "name": table_name,
+            "operation": operation,
+            "type": "record",
+            "active": "true",
+            "admin_overrides": "true",  # Allow admin to still override
+            "description": f"AWS SIR Integration - {operation} access to {table_name}",
+        }
+        
+        response = requests.post(
+            acl_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            json=acl_payload
+        )
+        
+        if response.status_code != 201:
+            print(f"    Failed to create ACL for {table_name}.{operation}: {response.status_code} - {response.text}")
+            return None
+        
+        acl_sys_id = response.json()["result"]["sys_id"]
+        self.created_resources.append(("sys_security_acl", acl_sys_id))
+        print(f"    Created ACL for {table_name}.{operation}: {acl_sys_id}")
+        
+        # Assign the role to the ACL
+        role_assignment_payload = {
+            "sys_security_acl": acl_sys_id,
+            "sys_user_role": role_sys_id,
+        }
+        
+        response = requests.post(
+            acl_role_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            json=role_assignment_payload
+        )
+        
+        if response.status_code == 201:
+            role_assignment_sys_id = response.json()["result"]["sys_id"]
+            self.created_resources.append(("sys_security_acl_role", role_assignment_sys_id))
+            print(f"    Assigned role to ACL: {role_assignment_sys_id}")
+        else:
+            print(f"    Failed to assign role to ACL: {response.status_code} - {response.text}")
+        
+        return acl_sys_id
+
+    def setup_integration_acls(self, username: str) -> bool:
+        """Set up custom ACLs to allow the integration user to create webhook resources.
+        
+        ServiceNow's out-of-box ACLs on sys_rest_message, sys_script, etc. only allow
+        admin role to write. Since JWT OAuth cannot authenticate as admin, we need to
+        create custom ACLs that grant a custom role write access to these tables.
+        
+        This method:
+        1. Creates a custom role (aws_sir_integration_admin)
+        2. Creates ACLs granting that role write access to required tables
+        3. Assigns the custom role to the integration user
+        
+        Args:
+            username: The integration user to grant permissions to
+            
+        Returns:
+            True if all ACLs were created successfully
+        """
+        print("Setting up custom ACLs for integration user...")
+        
+        # Tables that the setup handler needs to write to
+        # These have admin_overrides=true with no roles, so only admin can write by default
+        required_tables = [
+            "sys_rest_message",       # Outbound REST Message
+            "sys_rest_message_fn",    # REST Message HTTP Methods  
+            "sys_rest_message_fn_parameters",  # REST Message Function Parameters
+            "sys_script",             # Business Rules
+            "discovery_credentials",  # Discovery Credentials for API key storage
+        ]
+        
+        # Operations needed for each table
+        operations = ["create", "write", "read", "delete"]
+        
+        # Step 1: Create custom role
+        role_sys_id = self.create_custom_integration_role()
+        if not role_sys_id:
+            print("  Failed to create custom role")
+            return False
+        
+        # Step 2: Create ACLs for each table/operation
+        print("  Creating ACLs for required tables...")
+        success = True
+        for table in required_tables:
+            for operation in operations:
+                acl_sys_id = self.create_acl_for_table(table, operation, role_sys_id)
+                if not acl_sys_id:
+                    success = False
+        
+        # Step 3: Assign custom role to integration user
+        print(f"  Assigning custom role to user '{username}'...")
+        
+        # Get user sys_id
+        user_endpoint = f"{self.url}/api/now/table/sys_user"
+        response = requests.get(
+            user_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            params={"sysparm_query": f"user_name={username}", "sysparm_limit": 1}
+        )
+        
+        users = response.json().get("result", [])
+        if not users:
+            print(f"  User '{username}' not found")
+            return False
+        
+        user_sys_id = users[0]["sys_id"]
+        
+        # Check if user already has the role
+        has_role_endpoint = f"{self.url}/api/now/table/sys_user_has_role"
+        response = requests.get(
+            has_role_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            params={"sysparm_query": f"user={user_sys_id}^role={role_sys_id}", "sysparm_limit": 1}
+        )
+        
+        if response.json().get("result", []):
+            print(f"  User already has custom role")
+        else:
+            # Assign role to user
+            response = requests.post(
+                has_role_endpoint,
+                auth=self.auth,
+                headers=self.headers,
+                json={"user": user_sys_id, "role": role_sys_id}
+            )
+            
+            if response.status_code == 201:
+                sys_id = response.json()["result"]["sys_id"]
+                self.created_resources.append(("sys_user_has_role", sys_id))
+                print(f"  Assigned custom role to user: {sys_id}")
+            else:
+                print(f"  Failed to assign role to user: {response.status_code}")
+                success = False
+        
+        print(f"  ACL setup {'completed successfully' if success else 'completed with errors'}")
+        return success
+
+    def assign_auth_scope_to_oauth_entity(self, oauth_entity_sys_id: str, scope_name: str = "useraccount") -> bool:
+        """Assign an authentication scope to an OAuth entity via its profile.
+        
+        This creates a record in the oauth_m2m_scope_profile table to link
+        the OAuth entity's profile to the specified scope (e.g., 'useraccount').
+        
+        The relationship is:
+        - oauth_entity (or oauth_jwt) -> oauth_entity_profile (via oauth_entity field)
+        - oauth_entity_scope (contains scopes like 'useraccount')
+        - oauth_m2m_scope_profile (links profile to scope)
+        
+        The 'useraccount' scope grants the access token the same rights as the
+        user account that authorized the token.
+        
+        Args:
+            oauth_entity_sys_id: sys_id of the OAuth entity (oauth_jwt record)
+            scope_name: Name of the scope to assign (default: 'useraccount')
+            
+        Returns:
+            True if the scope was assigned successfully
+        """
+        print(f"Assigning '{scope_name}' scope to OAuth entity...")
+        
+        # Step 1: Find the oauth_entity_profile for this oauth_entity
+        profile_endpoint = f"{self.url}/api/now/table/oauth_entity_profile"
+        response = requests.get(
+            profile_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            params={"sysparm_query": f"oauth_entity={oauth_entity_sys_id}", "sysparm_limit": 1}
+        )
+        
+        if response.status_code != 200:
+            print(f"  Failed to query oauth_entity_profile: {response.status_code}")
+            return False
+        
+        profiles = response.json().get("result", [])
+        if not profiles:
+            print(f"  No oauth_entity_profile found for oauth_entity {oauth_entity_sys_id}")
+            # Profile should be auto-created, but if not, we can create one
+            print(f"  Creating oauth_entity_profile...")
+            response = requests.post(
+                profile_endpoint,
+                auth=self.auth,
+                headers=self.headers,
+                json={
+                    "oauth_entity": oauth_entity_sys_id,
+                    "name": f"Default Profile",
+                    "default": "true"
+                }
+            )
+            if response.status_code == 201:
+                profile_sys_id = response.json()["result"]["sys_id"]
+                self.created_resources.append(("oauth_entity_profile", profile_sys_id))
+                print(f"  Created oauth_entity_profile: {profile_sys_id}")
+            else:
+                print(f"  Failed to create profile: {response.status_code} - {response.text}")
+                return False
+        else:
+            profile_sys_id = profiles[0]["sys_id"]
+            print(f"  Found oauth_entity_profile: {profile_sys_id}")
+        
+        # Step 2: Find the oauth_entity_scope for the scope name
+        scope_endpoint = f"{self.url}/api/now/table/oauth_entity_scope"
+        response = requests.get(
+            scope_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            params={"sysparm_query": f"name={scope_name}", "sysparm_limit": 1}
+        )
+        
+        if response.status_code != 200:
+            print(f"  Failed to query oauth_entity_scope: {response.status_code}")
+            return False
+        
+        scopes = response.json().get("result", [])
+        if not scopes:
+            print(f"  Scope '{scope_name}' not found in oauth_entity_scope, creating it...")
+            response = requests.post(
+                scope_endpoint,
+                auth=self.auth,
+                headers=self.headers,
+                json={"name": scope_name, "oauth_entity": oauth_entity_sys_id}
+            )
+            if response.status_code == 201:
+                scope_sys_id = response.json()["result"]["sys_id"]
+                self.created_resources.append(("oauth_entity_scope", scope_sys_id))
+                print(f"  Created oauth_entity_scope '{scope_name}': {scope_sys_id}")
+            else:
+                print(f"  Failed to create scope: {response.status_code} - {response.text}")
+                return False
+        else:
+            scope_sys_id = scopes[0]["sys_id"]
+            print(f"  Found oauth_entity_scope '{scope_name}': {scope_sys_id}")
+        
+        # Step 3: Check if the mapping already exists in oauth_entity_profile_scope
+        m2m_endpoint = f"{self.url}/api/now/table/oauth_entity_profile_scope"
+        response = requests.get(
+            m2m_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            params={
+                "sysparm_query": f"oauth_entity_profile={profile_sys_id}^oauth_entity_scope={scope_sys_id}",
+                "sysparm_limit": 1
+            }
+        )
+        
+        if response.status_code == 200 and response.json().get("result", []):
+            print(f"  Profile already has '{scope_name}' scope assigned")
+            return True
+        
+        # Step 4: Create the m2m relationship
+        response = requests.post(
+            m2m_endpoint,
+            auth=self.auth,
+            headers=self.headers,
+            json={
+                "oauth_entity_profile": profile_sys_id,
+                "oauth_entity_scope": scope_sys_id
+            }
+        )
+
+        print(f"Created m2m relationship: {response.json()}")
+
+        if response.status_code == 201:
+            m2m_sys_id = response.json()["result"]["sys_id"]
+            self.created_resources.append(("oauth_entity_profile_scope", m2m_sys_id))
+            print(f"  Assigned '{scope_name}' scope to profile: {m2m_sys_id}")
+            return True
+        else:
+            print(f"  Failed to assign scope: {response.status_code} - {response.text}")
+            return False
+
     def create_oauth_application(
         self,
         certificate_sys_id: str,
@@ -570,7 +948,6 @@ class ServiceNowOAuthSetup:
             "active": "true",
             "access_token_lifespan": "3600",
             "refresh_token_lifespan": "8640000",
-            "scope_restriction_status": "unrestricted",
             # oauth_jwt specific fields - aligned with SERVICE_NOW.md documentation
             "user_field": "user_id",  # Look up user by User Id (per documentation)
             "sub_claim": "user_id",  # JWT sub claim contains user_id
@@ -615,11 +992,46 @@ class ServiceNowOAuthSetup:
             print(f"jwt_verifier_map creation failed: {response.status_code} - {response.text}")
             response.raise_for_status()
         
+        # Note: For inbound JWT bearer grants, the 'useraccount' scope is automatic.
+        # ServiceNow returns scope=useraccount in the token response, granting the
+        # access token the same rights as the user identified by the JWT sub claim.
+        
         return {
             "client_id": client_id,
             "client_secret": client_secret,
             "oauth_jwt_sys_id": oauth_jwt_sys_id,
             "kid": kid,
+        }
+
+    def verify_business_rule(self, business_rule_name: str) -> Dict[str, Any]:
+        """Verify that a business rule exists and is active.
+        
+        Args:
+            business_rule_name: Name of the business rule to verify
+            
+        Returns:
+            Dict with business rule details or None if not found
+        """
+        endpoint = f"{self.url}/api/now/table/sys_script"
+        response = requests.get(
+            endpoint,
+            params={"sysparm_query": f"name={business_rule_name}", "sysparm_fields": "sys_id,name,active,when,collection,script"},
+            auth=self.auth,
+            headers=self.headers
+        )
+        
+        results = response.json().get("result", [])
+        if not results:
+            return None
+        
+        rule = results[0]
+        return {
+            "sys_id": rule.get("sys_id"),
+            "name": rule.get("name"),
+            "active": rule.get("active") == "true",
+            "when": rule.get("when"),
+            "collection": rule.get("collection"),
+            "script_length": len(rule.get("script", "")),
         }
 
     def create_webhook_resources(self, webhook_url: str, api_auth_token: str, table: str = "incident") -> bool:
@@ -776,6 +1188,9 @@ class ServiceNowOAuthSetup:
         
         script = f'''(function executeRule(current, previous) {{
     try {{
+        // Add 3-second delay to ensure transaction is committed
+        gs.sleep(3000);
+        
         var event_type = current.operation() == 'insert' ? 'IncidentCreated' : 'IncidentUpdated';
         var payload = {{
             "event_type": event_type,
@@ -784,17 +1199,19 @@ class ServiceNowOAuthSetup:
         }};
         var gr = new GlideRecord('discovery_credentials');
         if (gr.get('name', '{credential_name}')) {{
-            credential_sys_id = gr.getUniqueValue();
-            var provider = new sn_cc.StandardCredentialsProvider();
-            var credential = provider.getCredentialByID(credential_sys_id);
-            var api_key = credential.getAttribute("password");
+            // Read password directly from GlideRecord (works with basic_auth type)
+            var api_key = gr.getValue('password');
             
             var request = new sn_ws.RESTMessageV2("{rest_message_name}", "{function_name}");
             request.setRequestHeader('Authorization', api_key);
             request.setRequestBody(JSON.stringify(payload));
             
-            var response = request.executeAsync();
+            var response = request.execute();
             gs.info('Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
+            var responseBody = response.getBody();
+            var httpStatus = response.getStatusCode();
+            gs.info("Incident Event Response: " + responseBody);
+            gs.info("Incident Event HTTP Status: " + httpStatus);
         }}
         else {{
             gs.info("Could not find API Key: {credential_name}");
@@ -814,20 +1231,28 @@ class ServiceNowOAuthSetup:
         
         if existing:
             br_sys_id = existing[0]["sys_id"]
+            # Deactivate first to force ServiceNow to reload the script
             requests.patch(
                 f"{script_endpoint}/{br_sys_id}",
-                json={"script": script, "active": "true"},
+                json={"active": "false"},
                 auth=self.auth,
                 headers=self.headers
             )
-            print(f"    Updated existing business rule: {br_sys_id}")
+            # Update script, when field, and reactivate
+            requests.patch(
+                f"{script_endpoint}/{br_sys_id}",
+                json={"script": script, "when": "async", "active": "true"},
+                auth=self.auth,
+                headers=self.headers
+            )
+            print(f"    Updated existing business rule: {br_sys_id} (deactivated/reactivated to force reload, set to async)")
         else:
             response = requests.post(
                 script_endpoint,
                 json={
                     "name": business_rule_name,
                     "collection": table,
-                    "when": "after",
+                    "when": "async",  # Fire AFTER transaction commits
                     "action_insert": "true",
                     "action_update": "true",
                     "active": "true",
@@ -844,6 +1269,27 @@ class ServiceNowOAuthSetup:
                 print(f"    Failed to create business rule: {response.status_code}")
                 return False
         
+        # Verify business rule was created/updated successfully
+        print(f"  Verifying business rule: {business_rule_name}")
+        rule_info = self.verify_business_rule(business_rule_name)
+        if not rule_info:
+            print(f"    ✗ Business rule not found after creation/update!")
+            return False
+        
+        print(f"    ✓ Business rule verified:")
+        print(f"      - sys_id: {rule_info['sys_id']}")
+        print(f"      - Active: {rule_info['active']}")
+        print(f"      - When: {rule_info['when']}")
+        print(f"      - Collection: {rule_info['collection']}")
+        print(f"      - Script length: {rule_info['script_length']} chars")
+        
+        if not rule_info['active']:
+            print(f"    ✗ Business rule is NOT active!")
+            return False
+        
+        if rule_info['when'] != 'async':
+            print(f"    ⚠ Warning: Business rule 'when' is '{rule_info['when']}', expected 'async'")
+        
         print("  All webhook resources created successfully")
         return True
 
@@ -859,6 +1305,21 @@ class ServiceNowOAuthSetup:
                 print(f"Warning: Failed to delete {table}/{sys_id}: {e}")
 
 
+class JWTBearerAuth:
+    """JWT Bearer authentication handler for ServiceNow OAuth.
+    
+    This class extends requests.auth.AuthBase to provide JWT Bearer token
+    authentication compatible with pysnc's ServiceNowClient.
+    """
+    
+    def __init__(self, token: str):
+        self.token = token
+    
+    def __call__(self, request):
+        request.headers['Authorization'] = f"Bearer {self.token}"
+        return request
+
+
 class ServiceNowClient:
     """Client for interacting with ServiceNow using pysnc."""
 
@@ -866,8 +1327,234 @@ class ServiceNowClient:
         from pysnc import ServiceNowClient as SnowClient
         
         self.url = url.rstrip("/")
+        self.username = username
+        self.password = password
         self.table = "incident" if integration_module == "itsm" else "sn_si_incident"
         self.client = SnowClient(self.url, (username, password)) # Usage of basic auth is to help developers easily test -- basic auth is not preferred in production usecases.
+        self.auth = (username, password)
+        self.headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        self._oauth_token = None  # For JWT OAuth clients
+
+    @classmethod
+    def from_jwt_oauth(
+        cls,
+        url: str,
+        client_id: str,
+        client_secret: str,
+        user_id: str,
+        private_key: str,
+        integration_module: str = "itsm"
+    ) -> "ServiceNowClient":
+        """Create a ServiceNowClient using JWT OAuth authentication.
+        
+        This factory method creates a client that authenticates as the specified
+        user using JWT OAuth, which is the same authentication method used by
+        the Lambda functions in production.
+        
+        Args:
+            url: ServiceNow instance URL
+            client_id: OAuth client ID
+            client_secret: OAuth client secret
+            user_id: ServiceNow user ID (e.g., 'aws_integration')
+            private_key: PEM-encoded private key for JWT signing
+            integration_module: 'itsm' or 'ir'
+            
+        Returns:
+            ServiceNowClient configured with JWT OAuth authentication
+        """
+        from pysnc import ServiceNowClient as SnowClient
+        from requests.auth import AuthBase
+        import jwt as pyjwt
+        
+        url = url.rstrip("/")
+        
+        # Create JWT assertion
+        payload = {
+            "iss": client_id,
+            "sub": user_id,
+            "aud": client_id,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+            "jti": str(uuid.uuid4())
+        }
+        
+        encoded_jwt = pyjwt.encode(payload, private_key, algorithm="RS256")
+        
+        # Exchange JWT for OAuth token
+        token_url = f"{url}/oauth_token.do"
+        headers = {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}
+        data = {
+            'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            'assertion': encoded_jwt,
+            'client_id': client_id,
+            'client_secret': client_secret
+        }
+        
+        response = requests.post(token_url, headers=headers, data=data)
+        if response.status_code != 200:
+            raise Exception(f"Failed to get OAuth token: {response.status_code} - {response.text}")
+        
+        token_data = response.json()
+        oauth_token = token_data['access_token']
+        
+        # Create a pre-configured requests session with the OAuth token
+        # pysnc accepts a requests.Session object directly
+        session = requests.Session()
+        session.headers.update({
+            'Authorization': f'Bearer {oauth_token}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        })
+        
+        # Create instance with OAuth authentication using the session
+        instance = cls.__new__(cls)
+        instance.url = url
+        instance.username = user_id
+        instance.password = None  # No password for OAuth
+        instance.table = "incident" if integration_module == "itsm" else "sn_si_incident"
+        instance.client = SnowClient(url, session)  # Pass session directly
+        instance._oauth_token = oauth_token
+        instance.auth = None  # No basic auth
+        instance.headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {oauth_token}"
+        }
+        
+        return instance
+
+    @classmethod
+    def from_ssm_parameters(
+        cls,
+        url: str,
+        integration_module: str = "itsm",
+        aws_profile: str = None
+    ) -> "ServiceNowClient":
+        """Create a ServiceNowClient using JWT OAuth credentials from SSM Parameter Store.
+        
+        This factory method retrieves OAuth credentials from AWS SSM Parameter Store
+        and creates a client that authenticates as the aws_integration user.
+        
+        Args:
+            url: ServiceNow instance URL
+            integration_module: 'itsm' or 'ir'
+            aws_profile: Optional AWS profile name to use
+            
+        Returns:
+            ServiceNowClient configured with JWT OAuth authentication
+        """
+        # Create boto3 session with optional profile
+        if aws_profile:
+            session = boto3.Session(profile_name=aws_profile)
+        else:
+            session = boto3.Session()
+        
+        ssm_client = session.client("ssm", region_name="us-east-1")
+        secrets_client = session.client("secretsmanager", region_name="us-east-1")
+        s3_resource = session.resource("s3", region_name="us-east-1")
+        
+        def get_param(name: str) -> str:
+            response = ssm_client.get_parameter(Name=name, WithDecryption=True)
+            return response["Parameter"]["Value"]
+        
+        def get_secret(arn: str) -> str:
+            response = secrets_client.get_secret_value(SecretId=arn)
+            return response["SecretString"]
+        
+        # Get OAuth parameters
+        client_id = get_param("/SecurityIncidentResponse/serviceNowClientId")
+        client_secret_arn = get_param("/SecurityIncidentResponse/serviceNowClientSecretArn")
+        client_secret = get_secret(client_secret_arn)
+        user_id = get_param("/SecurityIncidentResponse/serviceNowUserId")
+        bucket = get_param("/SecurityIncidentResponse/privateKeyAssetBucket")
+        key = get_param("/SecurityIncidentResponse/privateKeyAssetKey")
+        
+        # Get private key from S3
+        response = s3_resource.Object(bucket, key).get()
+        private_key = response['Body'].read().decode('utf-8')
+        response['Body'].close()
+        
+        print(f"Creating JWT OAuth client for user '{user_id}' with client_id '{client_id}'")
+        
+        return cls.from_jwt_oauth(
+            url=url,
+            client_id=client_id,
+            client_secret=client_secret,
+            user_id=user_id,
+            private_key=private_key,
+            integration_module=integration_module
+        )
+
+    def verify_table_permissions(self, table_name: str = None) -> Dict[str, bool]:
+        """Verify the user has read and write permissions on the incident table.
+        
+        Args:
+            table_name: Table to check permissions for (defaults to self.table)
+            
+        Returns:
+            Dict with 'can_read' and 'can_write' boolean flags
+        """
+        if table_name is None:
+            table_name = self.table
+            
+        print(f"Verifying permissions for user '{self.username}' on table '{table_name}'...")
+        
+        permissions = {"can_read": False, "can_write": False}
+        
+        # Determine auth method - use OAuth headers if available, otherwise basic auth
+        if self._oauth_token:
+            auth = None
+            headers = self.headers  # Already includes Authorization header
+        else:
+            auth = self.auth
+            headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        
+        # Test read permission by querying the table
+        try:
+            endpoint = f"{self.url}/api/now/table/{table_name}"
+            response = requests.get(
+                endpoint,
+                auth=auth,
+                headers=headers,
+                params={"sysparm_limit": 1}
+            )
+            if response.status_code == 200:
+                permissions["can_read"] = True
+                print(f"  ✓ User has READ permission on {table_name}")
+            else:
+                print(f"  ✗ User lacks READ permission on {table_name}: {response.status_code}")
+        except Exception as e:
+            print(f"  ✗ Error checking READ permission: {e}")
+        
+        # Test write permission by attempting to create a test record
+        try:
+            endpoint = f"{self.url}/api/now/table/{table_name}"
+            test_payload = {
+                "short_description": "Permission test - will be deleted",
+                "description": "Testing write permissions",
+            }
+            response = requests.post(
+                endpoint,
+                auth=auth,
+                headers=headers,
+                json=test_payload
+            )
+            if response.status_code in [200, 201]:
+                permissions["can_write"] = True
+                print(f"  ✓ User has WRITE permission on {table_name}")
+                # Clean up test record
+                test_sys_id = response.json()["result"]["sys_id"]
+                requests.delete(
+                    f"{endpoint}/{test_sys_id}",
+                    auth=auth,
+                    headers=headers
+                )
+            else:
+                print(f"  ✗ User lacks WRITE permission on {table_name}: {response.status_code}")
+        except Exception as e:
+            print(f"  ✗ Error checking WRITE permission: {e}")
+        
+        return permissions
 
     def create_incident(self, short_description: str, description: str) -> Dict[str, Any]:
         """Create an incident in ServiceNow."""
@@ -988,6 +1675,30 @@ class CDKDeployer:
         if not self.cloudformation_client.is_stack_stabilized(SERVICE_NOW_STACK_NAME):
             raise Exception(f"Stack {SERVICE_NOW_STACK_NAME} could not stabilize")
 
+    def get_resource_prefix(self) -> Optional[str]:
+        """Get the SERVICE_NOW_RESOURCE_PREFIX from the deployed stack.
+        
+        This is the API Gateway REST API ID used as a prefix for all ServiceNow resources.
+        
+        Returns:
+            The resource prefix (API Gateway ID) or None if not found
+        """
+        try:
+            cfn = boto3.client('cloudformation')
+            paginator = cfn.get_paginator('list_stack_resources')
+            
+            for page in paginator.paginate(StackName=SERVICE_NOW_STACK_NAME):
+                for resource in page['StackResourceSummaries']:
+                    # Find the ServiceNow API Gateway
+                    if 'ServiceNowWebhookApi' in resource['LogicalResourceId'] and resource['ResourceType'] == 'AWS::ApiGateway::RestApi':
+                        return resource['PhysicalResourceId']
+            
+            print("Warning: Could not find API Gateway resource in stack")
+            return None
+        except Exception as e:
+            print(f"Error getting resource prefix: {e}")
+            return None
+
     def get_webhook_url(self) -> Optional[str]:
         """Get the webhook URL from CloudFormation stack outputs."""
         try:
@@ -1002,15 +1713,35 @@ class CDKDeployer:
         return None
 
     def get_api_auth_token(self) -> Optional[str]:
-        """Get the API auth token from Secrets Manager."""
+        """Get the API auth token from Secrets Manager.
+        
+        Gets the secret ARN from the CloudFormation stack resources to ensure
+        we get the correct secret (not a stale one from a previous deployment).
+        """
         try:
+            # Get the secret ARN from the stack resources
+            cfn = boto3.client('cloudformation')
+            paginator = cfn.get_paginator('list_stack_resources')
+            secret_arn = None
+            
+            for page in paginator.paginate(StackName=SERVICE_NOW_STACK_NAME):
+                for resource in page['StackResourceSummaries']:
+                    # Look for the ApiAuthSecret resource (not the policy or rotation schedule)
+                    if resource['LogicalResourceId'] == 'ApiAuthSecret8046CF97':
+                        secret_arn = resource['PhysicalResourceId']
+                        break
+                if secret_arn:
+                    break
+            
+            if not secret_arn:
+                print("Error: ApiAuthSecret not found in stack resources")
+                return None
+            
+            print(f"Using API auth secret: {secret_arn}")
             secrets = boto3.client('secretsmanager')
-            response = secrets.list_secrets(Filters=[{'Key': 'name', 'Values': ['ApiAuthSecret']}])
-            if response['SecretList']:
-                secret_id = response['SecretList'][0]['ARN']
-                secret_response = secrets.get_secret_value(SecretId=secret_id)
-                secret_dict = json.loads(secret_response['SecretString'])
-                return secret_dict.get('token')
+            secret_response = secrets.get_secret_value(SecretId=secret_arn)
+            secret_dict = json.loads(secret_response['SecretString'])
+            return secret_dict.get('token')
         except Exception as e:
             print(f"Error getting API auth token: {e}")
         return None
@@ -1253,6 +1984,7 @@ class CDKDeployer:
             end_time = int(time.time() * 1000)
             start_time = end_time - (minutes * 60 * 1000)
 
+
             response = self.logs_client.filter_log_events(
                 logGroupName=log_group,
                 startTime=start_time,
@@ -1275,7 +2007,26 @@ class CDKDeployer:
 
 @pytest.fixture(scope="module")
 def deployed_integration(service_now_config, tmp_path_factory):
-    """Deploy the integration and yield config, then tear down."""
+    """Deploy the integration and yield config, then tear down.
+    
+    NOTE: The setup handler Lambda cannot create webhook resources (business rules,
+    REST messages, discovery credentials) automatically because:
+    
+    1. ServiceNow's out-of-box ACLs on sys_rest_message, sys_script, etc. have
+       admin_overrides=true with NO specific roles configured, meaning only users
+       with the 'admin' role can write to these tables.
+    
+    2. ServiceNow blocks JWT bearer grants to users with the 'admin' role for
+       security reasons, so the setup handler Lambda (using JWT OAuth) cannot
+       authenticate as admin.
+    
+    3. Creating custom ACLs to grant permissions requires the 'security_admin' role
+       with elevated privileges, which cannot be elevated via REST API - only
+       through the ServiceNow UI.
+    
+    As a workaround, this test creates the webhook resources directly using admin
+    basic auth credentials after the CDK stack is deployed.
+    """
     project_root = Path(__file__).parent.parent.parent
     deployer = CDKDeployer(project_root)
     if deployer.is_deployed:
@@ -1343,7 +2094,7 @@ def deployed_integration(service_now_config, tmp_path_factory):
 
     # Create ServiceNow webhook resources (business rule, REST message, etc.)
     # This is needed because the setup handler Lambda can't create these resources
-    # without admin role, which blocks OAuth JWT grants
+    # due to ServiceNow ACL restrictions (see docstring above for details)
     print("Creating ServiceNow webhook resources...")
     webhook_url = deployer.get_webhook_url()
     api_auth_token = deployer.get_api_auth_token()
@@ -1366,7 +2117,7 @@ def deployed_integration(service_now_config, tmp_path_factory):
     if 'SKIP_DESTROY' not in os.environ:
         print('Skipping Destroy for debugging')
         deployer.destroy()
-    oauth_setup.cleanup()
+    # oauth_setup.cleanup()
 
 
 class TestSecurityIRToServiceNow:
@@ -1455,93 +2206,192 @@ class TestSecurityIRToServiceNow:
             
         finally:
             # Cleanup
-            if created_case:
+            if created_case and 'SKIP_DESTROY' not in os.environ:
                 print(f"Cleaning up Security IR case: {created_case}")
                 sir_client.close_case(created_case)
-            if created_incident:
+            if created_incident and 'SKIP_DESTROY' not in os.environ:
                 print(f"Cleaning up ServiceNow incident: {created_incident}")
                 snow_client.delete_incident(created_incident)
 
 
-# class TestServiceNowToSecurityIR:
-#     """Test ServiceNow incident replication to AWS Security IR."""
+class TestServiceNowToSecurityIR:
+    """Test ServiceNow incident replication to AWS Security IR."""
 
-#     def test_service_now_incident_replicates_to_security_ir(self, deployed_integration):
-#         """
-#         Create an incident in ServiceNow and verify it replicates to Security IR.
+    def test_business_rule_exists(self, deployed_integration):
+        """
+        Verify that the setup Lambda created the business rule successfully.
         
-#         Flow:
-#         1. Create incident in ServiceNow
-#         2. Wait for sync to occur (via webhook -> EventBridge -> Security IR Client)
-#         3. Verify case appears in AWS Security Incident Response
-#         """
-#         # Arrange
-#         test_id = uuid.uuid4().hex[:8]
-#         incident_title = f"E2E Test Incident - {test_id}"
-#         incident_description = f"Acceptance test incident created at {datetime.now(timezone.utc).isoformat()} - ID: {test_id}"
+        This test ensures:
+        1. Business rule exists in ServiceNow
+        2. Business rule is active
+        3. Business rule is configured correctly (async, correct table)
+        """
+        print("\n" + "="*80)
+        print("Verifying ServiceNow Business Rule Setup")
+        print("="*80)
         
-#         sir_client = SecurityIRClient()
-#         snow_client = ServiceNowClient(
-#             deployed_integration["url"],
-#             deployed_integration["username"],
-#             deployed_integration["password"],
-#             deployed_integration["integration_module"],
-#         )
+        # Create admin client to query ServiceNow
+        admin_client = ServiceNowOAuthSetup(
+            deployed_integration["url"],
+            deployed_integration["username"],
+            deployed_integration["password"],
+        )
         
-#         created_incident = None
-#         created_case_id = None
+        # Get the resource prefix from the deployed stack
+        deployer: CDKDeployer = deployed_integration['deployer']
+        resource_prefix = deployer.get_resource_prefix()
         
-#         try:
-#             # Act: Create ServiceNow incident
-#             print(f"Creating ServiceNow incident: {incident_title}")
-#             incident = snow_client.create_incident(incident_title, incident_description)
-#             created_incident = incident["sys_id"]
-#             incident_number = incident["number"]
-#             print(f"Created ServiceNow incident: {incident_number}")
+        if not resource_prefix:
+            pytest.skip("Could not determine resource prefix from deployed stack")
+        
+        # Business rule name matches Lambda naming: {resource_prefix}-business-rule
+        business_rule_name = f"{resource_prefix}-business-rule"
+        
+        print(f"\nChecking for business rule: {business_rule_name}")
+        print(f"  (Resource prefix from stack: {resource_prefix})")
+        rule_info = admin_client.verify_business_rule(business_rule_name)
+        
+        # Assert business rule exists
+        assert rule_info is not None, (
+            f"Business rule '{business_rule_name}' not found in ServiceNow. "
+            f"The setup Lambda may have failed to create it."
+        )
+        
+        print(f"✓ Business rule found:")
+        print(f"  - sys_id: {rule_info['sys_id']}")
+        print(f"  - Active: {rule_info['active']}")
+        print(f"  - When: {rule_info['when']}")
+        print(f"  - Collection: {rule_info['collection']}")
+        print(f"  - Script length: {rule_info['script_length']} chars")
+        
+        # Assert business rule is active
+        assert rule_info['active'], (
+            f"Business rule '{business_rule_name}' exists but is NOT active. "
+            f"Incidents will not trigger webhooks."
+        )
+        
+        # Assert business rule is configured for async execution
+        assert rule_info['when'] == 'async', (
+            f"Business rule 'when' is '{rule_info['when']}', expected 'async'. "
+            f"This may cause race conditions."
+        )
+        
+        # Assert business rule is on the correct table
+        expected_table = "incident" if deployed_integration["integration_module"] == "itsm" else "sn_si_incident"
+        assert rule_info['collection'] == expected_table, (
+            f"Business rule is on table '{rule_info['collection']}', expected '{expected_table}'"
+        )
+        
+        print(f"\n✓ Business rule is correctly configured and active")
+        print("="*80 + "\n")
+
+    def test_service_now_incident_replicates_to_security_ir(self, deployed_integration):
+        """
+        Create an incident in ServiceNow and verify it replicates to Security IR.
+        
+        Flow:
+        1. Create incident in ServiceNow using integration user (aws_integration via JWT OAuth)
+        2. Wait for sync to occur (via webhook -> EventBridge -> Security IR Client)
+        3. Verify case appears in AWS Security Incident Response
+        
+        Note: The incident must be created by aws_integration user because ServiceNow
+        has a custom ACL that restricts incident visibility to opened_by, caller_id,
+        or watch_list members. Since the Lambda notification handler authenticates
+        as aws_integration, it can only see incidents where aws_integration is one
+        of these fields.
+        """
+        # Arrange
+        test_id = uuid.uuid4().hex[:8]
+        incident_title = f"E2E Test Incident - {test_id}"
+        incident_description = f"Acceptance test incident created at {datetime.now(timezone.utc).isoformat()} - ID: {test_id}"
+        
+        sir_client = SecurityIRClient()
+        
+        # Create ServiceNow client using JWT OAuth as aws_integration user
+        # This ensures the incident is created by the same user that will query it
+        # (the Lambda notification handler also authenticates as aws_integration)
+        print(f"Creating ServiceNow client with JWT OAuth as 'aws_integration'...")
+        snow_client = ServiceNowClient.from_ssm_parameters(
+            url=deployed_integration["url"],
+            integration_module=deployed_integration["integration_module"],
+        )
+        
+        # Also create admin client for cleanup (admin can delete any incident)
+        admin_client = ServiceNowClient(
+            deployed_integration["url"],
+            deployed_integration["username"],  # admin
+            deployed_integration["password"],
+            deployed_integration["integration_module"],
+        )
+        
+        # Verify permissions
+        permissions = snow_client.verify_table_permissions()
+        assert permissions["can_read"], "aws_integration must have READ permission on incident table"
+        assert permissions["can_write"], "aws_integration must have WRITE permission on incident table"
+        
+        created_incident = None
+        created_case_id = None
+        
+        try:
+            # Act: Create ServiceNow incident as aws_integration user
+            print(f"Creating ServiceNow incident as 'aws_integration': {incident_title}")
+            incident = snow_client.create_incident(incident_title, incident_description)
+            created_incident = incident["sys_id"]
+            incident_number = incident["number"]
+            print(f"Created ServiceNow incident: {incident_number} (sys_id: {created_incident})")
             
-#             # Wait for sync and poll for Security IR case
-#             print("Waiting for sync to Security IR...")
-#             found_case = None
-#             start_time = time.time()
-#             poll_count = 0
+            # Verify aws_integration can read the incident it just created
+            print(f"Verifying aws_integration can read incident {incident_number}...")
+            read_back = snow_client.get_incident(incident_number)
+            if read_back:
+                print(f"  ✓ aws_integration can read incident {incident_number}")
+            else:
+                print(f"  ✗ aws_integration CANNOT read incident {incident_number}")
+                raise Exception("aws_integration cannot read the incident it just created - ACL issue persists")
             
-#             while time.time() - start_time < SYNC_TIMEOUT_SECONDS:
-#                 poll_count += 1
-#                 cases = sir_client.list_cases()
-#                 print(f"  Poll {poll_count}: Found {len(cases)} cases")
-#                 for case in cases:
-#                     case_detail = sir_client.get_case(case["caseId"])
-#                     if case_detail and test_id in case_detail.get("description", ""):
-#                         found_case = case_detail
-#                         created_case_id = case["caseId"]
-#                         break
-#                 if found_case:
-#                     break
-#                 elapsed = int(time.time() - start_time)
-#                 print(f"  Poll {poll_count}: No matching case found yet ({elapsed}s elapsed)")
-#                 time.sleep(POLL_INTERVAL_SECONDS)
+            # Wait for sync and poll for Security IR case
+            print("Waiting for sync to Security IR...")
+            found_case = None
+            start_time = time.time()
+            poll_count = 0
             
-#             # Assert
-#             assert found_case is not None, (
-#                 f"Security IR case not found within {SYNC_TIMEOUT_SECONDS}s. "
-#                 f"Expected case with description containing: {test_id}"
-#             )
+            while time.time() - start_time < SYNC_TIMEOUT_SECONDS:
+                poll_count += 1
+                cases = sir_client.list_cases()
+                print(f"  Poll {poll_count}: Found {len(cases)} cases")
+                for case in cases:
+                    case_detail = sir_client.get_case(case["caseId"])
+                    if case_detail and test_id in case_detail.get("title", ""):
+                        found_case = case_detail
+                        created_case_id = case["caseId"]
+                        break
+                if found_case:
+                    break
+                elapsed = int(time.time() - start_time)
+                print(f"  Poll {poll_count}: No matching case found yet ({elapsed}s elapsed)")
+                time.sleep(POLL_INTERVAL_SECONDS)
             
-#             assert incident_title in found_case.get("title", ""), (
-#                 f"Case title mismatch. Expected '{incident_title}' in "
-#                 f"'{found_case.get('title')}'"
-#             )
+            # Assert
+            assert found_case is not None, (
+                f"Security IR case not found within {SYNC_TIMEOUT_SECONDS}s. "
+                f"Expected case with title containing: {test_id}"
+            )
             
-#             print(f"Successfully verified Security IR case: {created_case_id}")
+            assert incident_title in found_case.get("title", ""), (
+                f"Case title mismatch. Expected '{incident_title}' in "
+                f"'{found_case.get('title')}'"
+            )
             
-#         finally:
-#             # Cleanup
-#             if created_incident:
-#                 print(f"Cleaning up ServiceNow incident: {created_incident}")
-#                 snow_client.delete_incident(created_incident)
-#             if created_case_id:
-#                 print(f"Cleaning up Security IR case: {created_case_id}")
-#                 sir_client.close_case(created_case_id)
+            print(f"Successfully verified Security IR case: {created_case_id}")
+            
+        finally:
+            # Cleanup - use admin client which can delete any incident
+            if created_incident and 'SKIP_DESTROY' not in os.environ:
+                print(f"Cleaning up ServiceNow incident: {created_incident}")
+                admin_client.delete_incident(created_incident)
+            if created_case_id and 'SKIP_DESTROY' not in os.environ:
+                print(f"Cleaning up Security IR case: {created_case_id}")
+                sir_client.close_case(created_case_id)
 
 
 if __name__ == "__main__":

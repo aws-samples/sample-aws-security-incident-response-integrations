@@ -155,6 +155,14 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             )
         )
 
+        poller_logs = aws_logs.LogGroup(
+            self,
+            "SecurityIncidentResponsePollerLogGroup",
+            retention=aws_logs.RetentionDays.ONE_WEEK,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        Tags.of(poller_logs).add('purpose', 'security-ir-poller-logs')
+
         self.poller = py_lambda.PythonFunction(
             self,
             "SecurityIncidentResponsePoller",
@@ -169,7 +177,9 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 "LOG_LEVEL": self.log_level_param.value_as_string,
             },
             role=poller_role,
+            log_group=poller_logs,
         )
+        poller_logs.grant_write(self.poller.role)
         Tags.of(self.poller).add('purpose', 'security-ir-poller')
 
         self.poller_rule = aws_events.Rule(

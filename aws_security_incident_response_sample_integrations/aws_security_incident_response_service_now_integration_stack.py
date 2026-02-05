@@ -792,6 +792,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             properties={
                 "WebhookUrl": f"{service_now_api_gateway.url.rstrip('/')}/webhook",
                 "IntegrationModule": self.integration_module_param.value_as_string,
+                "Version": "3"
             },
         )
 
