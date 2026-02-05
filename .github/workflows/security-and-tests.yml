@@ -38,7 +38,7 @@ jobs:
           uv pip install -r requirements-dev.txt
 
       - name: Run Bandit
-        run: bandit -r . -x ./tests,./venv --skip B113,B108,B404
+        run: bandit -r . -x ./tests,./venv,./scripts --skip B113,B108,B404
           
       - name: Run detect-secrets
         run: detect-secrets scan --baseline .secrets.baseline

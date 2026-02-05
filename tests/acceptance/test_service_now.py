@@ -111,7 +111,8 @@ class KeyGenerator:
     """Generate RSA key pair and JKS keystore for JWT OAuth."""
 
     # Default keystore password - used for both keystore and key entry
-    DEFAULT_KEYSTORE_PASSWORD = "changeit"
+    # This is the well-known default JKS keystore password, not a real secret
+    DEFAULT_KEYSTORE_PASSWORD = "changeit"  # nosec B105 # pragma: allowlist secret
     DEFAULT_KEY_ALIAS = "awssirkey"
 
     @staticmethod
@@ -248,6 +249,9 @@ class KeyGenerator:
 class ServiceNowOAuthSetup:
     """Set up OAuth application in ServiceNow for JWT authentication."""
 
+    # Default timeout for HTTP requests (30 seconds)
+    REQUEST_TIMEOUT = 30
+
     def __init__(self, url: str, username: str, password: str):
         self.url = url.rstrip("/")
         self.auth = (username, password)
@@ -270,7 +274,7 @@ class ServiceNowOAuthSetup:
         }
         
         response = requests.post(
-            endpoint, auth=self.auth, headers=self.headers, json=payload
+            endpoint, auth=self.auth, headers=self.headers, json=payload, timeout=self.REQUEST_TIMEOUT
         )
         response.raise_for_status()
         sys_id = response.json()["result"]["sys_id"]
@@ -310,7 +314,7 @@ class ServiceNowOAuthSetup:
         }
         
         response = requests.post(
-            endpoint, auth=self.auth, headers=self.headers, json=payload
+            endpoint, auth=self.auth, headers=self.headers, json=payload, timeout=self.REQUEST_TIMEOUT
         )
         
         if response.status_code != 201:
