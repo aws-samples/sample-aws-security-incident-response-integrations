@@ -1,3 +1,5 @@
+.secrets.baseline
+
 .idea
 node_modules
 package.json
