@@ -41,7 +41,7 @@ jobs:
         run: bandit -r . -x ./tests,./venv,./scripts --skip B113,B108,B404
           
       - name: Run detect-secrets
-        run: detect-secrets scan --baseline .secrets.baseline
+        run: detect-secrets scan
 
       - name: Install Syft & Grype
         uses: anchore/sbom-action@v0
