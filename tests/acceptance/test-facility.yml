@@ -1,8 +1,10 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: >-
   TEST FACILITY ONLY - NOT FOR PRODUCTION USE. This template provisions AWS Organizations, 
-  Control Tower, GuardDuty, SecurityHub, and Security Incident Response infrastructure for 
+  GuardDuty, SecurityHub, and Security Incident Response infrastructure for 
   testing and development purposes. Licensed under MIT-0 (https://github.com/aws/mit-0).
+  For guidance on producing product quality foundational security visit the
+  AWS Security Reference Architecture
 
 Metadata:
   cfn-lint:
