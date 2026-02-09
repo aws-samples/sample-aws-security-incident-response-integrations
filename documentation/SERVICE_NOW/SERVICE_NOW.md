@@ -303,7 +303,7 @@ The ServiceNow integration stack requires the following parameters during deploy
 | `serviceNowInstanceId` | The ServiceNow instance ID (subdomain of your ServiceNow URL) | String | Yes | `dev12345` (from dev12345.service-now.com) |
 | `serviceNowClientId` | The OAuth client ID from ServiceNow OAuth application | String | Yes | `abc123def456` |
 | `serviceNowClientSecret` | The OAuth client secret from ServiceNow OAuth application | String | Yes | `********` |
-| `serviceNowUserId` | The ServiceNow user ID for JWT authentication | String | Yes | `aws_integration` |
+| `serviceNowUserId` | The ServiceNow user's sys_id for JWT authentication. **Important:** This must be the user's `sys_id` (e.g., `a1b2c3d4e5f6g7h8i9j0`), not the username. ServiceNow's JWT OAuth uses `sys_id` as the subject claim identifier. You can find the sys_id in ServiceNow by navigating to User Administration > Users, selecting the user, and copying the sys_id from the URL or record. | String | Yes | `a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6` |
 | `privateKeyAssetPath` | Local path to the RSA private key file for JWT signing | String | Yes | `./private.key` |
 | `integrationModule` | ServiceNow integration module type | String | Yes | `itsm` (IT Service Management) or `ir` (Incident Response) |
 | `logLevel` | The log level for Lambda functions | String | No | `info`, `debug`, or `error` (default) |

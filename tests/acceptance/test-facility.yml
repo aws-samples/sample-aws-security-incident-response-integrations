@@ -23,7 +23,7 @@ Resources:
   ###################################
   ## Lambda Role for custom resources
   ###################################
-  rReinventC2Role:
+  rCustomResourceLambdaRole:
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -67,7 +67,7 @@ Resources:
       # amazonq-ignore-next-line
       Runtime: python3.13
       Timeout: 30
-      Role: !GetAtt rReinventC2Role.Arn
+      Role: !GetAtt rCustomResourceLambdaRole.Arn
       Code:
         ZipFile: |
           import cfnresponse
@@ -106,7 +106,7 @@ Resources:
       AccountId: !Ref AWS::AccountId
 
   ############################
-  ## Ensures
+  ## GET ORGANIZATIONAL PROPS THAT AREN'T RETURN VALUES
   ############################
   rInventoryCustomResource:
     DependsOn:
@@ -133,7 +133,7 @@ Resources:
       # amazonq-ignore-next-line
       Runtime: python3.13
       Timeout: 300
-      Role: !GetAtt rReinventC2Role.Arn
+      Role: !GetAtt rCustomResourceLambdaRole.Arn
       Code:
         ZipFile: |
           import json
@@ -183,7 +183,7 @@ Resources:
   ############################
 
   ###############################
-  # ENABLE ORG SERVICES
+  # ENABLE DELEGATE ADMIN ACCOUNTS
   ###############################
   EnableTrustedAccess:
     Type: Custom::EnableTrustedAccess
@@ -209,7 +209,7 @@ Resources:
       # amazonq-ignore-next-line
       Runtime: python3.13
       Timeout: 60
-      Role: !GetAtt rReinventC2Role.Arn
+      Role: !GetAtt rCustomResourceLambdaRole.Arn
       Code:
         ZipFile: |
           import boto3
@@ -259,7 +259,7 @@ Resources:
               cfnresponse.send(event, context, cfnresponse.FAILED, {}, event["LogicalResourceId"])
 
   #########################
-  # CLOUDFORMATION SETUP
+  # CLOUDFORMATION STACKSET SETUP
   #########################
   rAWSCloudFormationStackSetExecutionRole: # pStackExecutionRole
     Metadata:
@@ -311,9 +311,6 @@ Resources:
               Resource: arn:*:iam::*:role/AWSCloudFormationStackSetExecutionRole
             Version: '2012-10-17'
 
-  #########################
-  # Member Account Execution Role StackSet
-  #########################
   rMemberAccountExecutionRoleStackSet:
     Type: AWS::CloudFormation::StackSet
     DependsOn:
@@ -367,7 +364,7 @@ Resources:
                 - !Sub arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess
 
   #########################
-  # GuardDuty SETUP
+  # GUARDDUTY SETUP
   #########################
   rGuardDutyServiceLinkedRoles:
     Type: Custom::GuardDutyServiceLinkedRoles
@@ -390,7 +387,7 @@ Resources:
       # amazonq-ignore-next-line
       Runtime: python3.13
       Timeout: 60
-      Role: !GetAtt rReinventC2Role.Arn
+      Role: !GetAtt rCustomResourceLambdaRole.Arn
       Code:
         ZipFile: |
           import boto3
@@ -852,7 +849,7 @@ Resources:
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess"
 
-  # Lambda for Delegate Admin Custom Resource. Only triggers if in the Security Account
+  # Tells GuardDuty to act as a Delegate Admin Account
   rEnableDelegatedAdminLambdaGD:
     Metadata:
       cfn_nag:
@@ -917,14 +914,14 @@ Resources:
               cfnresponse.send(event, context, cfnresponse.FAILED, {}, event["LogicalResourceId"])
 
   #######################################
-  ## CONTROL TOWER
+  ## ORGANIZATIONS AND ACCOUNTS
   ######################################
-  rOrganization: # pOrganizationId
+  rOrganization: 
     Type: 'AWS::Organizations::Organization'
     Properties:
       FeatureSet: ALL
 
-  rLoggingAccount: # pLogArchiveAccountId
+  rLoggingAccount: 
     Type: 'AWS::Organizations::Account'
     DependsOn:
       - rOrganization
@@ -934,7 +931,7 @@ Resources:
       AccountName: "Log Archive"
       Email: !GetAtt rEmailGenerator.LogArchiveEmail
 
-  rSecurityAccount: # pAuditAccountId
+  rSecurityAccount: 
     Type: 'AWS::Organizations::Account'
     DependsOn:
       - rOrganization
@@ -945,7 +942,7 @@ Resources:
       Email: !GetAtt rEmailGenerator.AuditEmail
 
   #########################
-  # SecurityHub SETUP
+  # SECURITYHUB CSPM SETUP
   #########################
   rSecurityHub:
     Type: AWS::SecurityHub::Hub
@@ -989,7 +986,7 @@ Resources:
               AutoEnable: true
   
   #########################
-  # Security Incident Response SETUP
+  # SECURITY INCIDENT RESPONSE SETUP
   #########################
   rSirServiceLinkedRoles:
     Type: Custom::SirServiceLinkedRoles
@@ -1012,7 +1009,7 @@ Resources:
       # amazonq-ignore-next-line
       Runtime: python3.13
       Timeout: 60
-      Role: !GetAtt rReinventC2Role.Arn
+      Role: !GetAtt rCustomResourceLambdaRole.Arn
       Code:
         ZipFile: |
           import boto3
@@ -1080,7 +1077,7 @@ Resources:
       # amazonq-ignore-next-line
       Runtime: python3.13
       Timeout: 300
-      Role: !GetAtt rReinventC2Role.Arn
+      Role: !GetAtt rCustomResourceLambdaRole.Arn
       Code:
         ZipFile: |
           import json
@@ -1156,7 +1153,7 @@ Resources:
             Type: String
 
         Resources:
-          rReinventC2Role:
+          rCustomResourceLambdaRole:
             Metadata:
               cfn_nag:
                 rules_to_suppress:
@@ -1193,7 +1190,7 @@ Resources:
               Handler: index.handler
               Runtime: python3.13
               Timeout: 300
-              Role: !GetAtt rReinventC2Role.Arn
+              Role: !GetAtt rCustomResourceLambdaRole.Arn
               Code:
                 ZipFile: |
                   import json

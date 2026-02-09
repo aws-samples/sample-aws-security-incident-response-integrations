@@ -191,9 +191,12 @@ class ServiceNowClient:
             private_key = response['Body'].read().decode('utf-8')
             response['Body'].close()
             
+            # NOTE: sub must contain the user's sys_id, not username
+            # ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id' and cannot be changed via API
+            # The user_id parameter should store the sys_id value for uniqueness
             payload = {
                 "iss": client_id, # Issuer - OAuth client ID
-                "sub": user_id, # Subject - ServiceNow user ID
+                "sub": user_id, # Subject - ServiceNow user sys_id (NOT username)
                 "aud": client_id, # Audience - OAuth client ID
                 "iat": int(time.time()), # Issued at - current timestamp
                 "exp": int(time.time()) + 3600, # Expiration - 1 hour from now

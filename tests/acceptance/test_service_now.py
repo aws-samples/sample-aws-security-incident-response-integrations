@@ -1044,274 +1044,6 @@ class ServiceNowOAuthSetup:
             "script_length": len(rule.get("script", "")),
         }
 
-    def create_webhook_resources(self, webhook_url: str, api_auth_token: str, table: str = "incident") -> bool:
-        """Create or update ServiceNow resources for webhook integration.
-        
-        Updates existing resources created by the Setup Lambda:
-        - Discovery credential to store API Gateway auth token
-        - Outbound REST Message pointing to webhook URL
-        - REST Message HTTP Method (POST function)
-        - Business Rule to trigger on incident create/update
-        
-        The resource prefix is extracted from the webhook URL (API Gateway ID)
-        to match the naming convention used by the Setup Lambda.
-        
-        Args:
-            webhook_url: The API Gateway webhook URL
-            api_auth_token: The API Gateway authorization token
-            table: The ServiceNow table to monitor (default: incident)
-            
-        Returns:
-            True if all resources were created/updated successfully
-        """
-        # Extract API Gateway ID from webhook URL to match Setup Lambda naming
-        # URL format: https://{api-id}.execute-api.{region}.amazonaws.com/prod/webhook
-        import re
-        match = re.search(r'https://([^.]+)\.execute-api', webhook_url)
-        if match:
-            resource_prefix = match.group(1)
-        else:
-            resource_prefix = "aws-security-ir"  # Fallback
-        
-        credential_name = f"{resource_prefix}-aws-apigw-key"
-        rest_message_name = f"{resource_prefix}-outbound-rest-message"
-        function_name = f"{rest_message_name}-POST-function"
-        business_rule_name = f"{resource_prefix}-business-rule"
-        
-        print(f"Creating ServiceNow webhook resources for {webhook_url}...")
-        print(f"  Using resource prefix: {resource_prefix}")
-        
-        # 1. Create or update discovery credential
-        print(f"  Creating discovery credential: {credential_name}")
-        cred_endpoint = f"{self.url}/api/now/table/discovery_credentials"
-        
-        # Check if exists
-        response = requests.get(
-            cred_endpoint,
-            params={"sysparm_query": f"name={credential_name}", "sysparm_fields": "sys_id"},
-            auth=self.auth,
-            headers=self.headers
-        )
-        existing = response.json().get("result", [])
-        
-        if existing:
-            # Update existing
-            cred_sys_id = existing[0]["sys_id"]
-            requests.patch(
-                f"{cred_endpoint}/{cred_sys_id}",
-                json={"password": api_auth_token},
-                auth=self.auth,
-                headers=self.headers
-            )
-            print(f"    Updated existing credential: {cred_sys_id}")
-        else:
-            # Create new
-            response = requests.post(
-                cred_endpoint,
-                json={
-                    "name": credential_name,
-                    "type": "basic_auth",
-                    "user_name": credential_name,
-                    "password": api_auth_token,
-                    "active": "true"
-                },
-                auth=self.auth,
-                headers=self.headers
-            )
-            if response.status_code in [200, 201]:
-                cred_sys_id = response.json()["result"]["sys_id"]
-                self.created_resources.append(("discovery_credentials", cred_sys_id))
-                print(f"    Created credential: {cred_sys_id}")
-            else:
-                print(f"    Failed to create credential: {response.status_code}")
-                return False
-        
-        # 2. Create or update REST message
-        print(f"  Creating REST message: {rest_message_name}")
-        rest_endpoint = f"{self.url}/api/now/table/sys_rest_message"
-        
-        response = requests.get(
-            rest_endpoint,
-            params={"sysparm_query": f"name={rest_message_name}", "sysparm_fields": "sys_id"},
-            auth=self.auth,
-            headers=self.headers
-        )
-        existing = response.json().get("result", [])
-        
-        if existing:
-            rest_sys_id = existing[0]["sys_id"]
-            requests.patch(
-                f"{rest_endpoint}/{rest_sys_id}",
-                json={"rest_endpoint": webhook_url},
-                auth=self.auth,
-                headers=self.headers
-            )
-            print(f"    Updated existing REST message: {rest_sys_id}")
-        else:
-            response = requests.post(
-                rest_endpoint,
-                json={"name": rest_message_name, "rest_endpoint": webhook_url},
-                auth=self.auth,
-                headers=self.headers
-            )
-            if response.status_code in [200, 201]:
-                rest_sys_id = response.json()["result"]["sys_id"]
-                self.created_resources.append(("sys_rest_message", rest_sys_id))
-                print(f"    Created REST message: {rest_sys_id}")
-            else:
-                print(f"    Failed to create REST message: {response.status_code}")
-                return False
-        
-        # 3. Create or update REST message function
-        print(f"  Creating REST message function: {function_name}")
-        fn_endpoint = f"{self.url}/api/now/table/sys_rest_message_fn"
-        
-        response = requests.get(
-            fn_endpoint,
-            params={"sysparm_query": f"function_name={function_name}", "sysparm_fields": "sys_id"},
-            auth=self.auth,
-            headers=self.headers
-        )
-        existing = response.json().get("result", [])
-        
-        if existing:
-            fn_sys_id = existing[0]["sys_id"]
-            requests.patch(
-                f"{fn_endpoint}/{fn_sys_id}",
-                json={"rest_endpoint": webhook_url},
-                auth=self.auth,
-                headers=self.headers
-            )
-            print(f"    Updated existing function: {fn_sys_id}")
-        else:
-            response = requests.post(
-                fn_endpoint,
-                json={
-                    "rest_message": rest_message_name,
-                    "function_name": function_name,
-                    "http_method": "POST",
-                    "rest_endpoint": webhook_url,
-                    "content": '{"event_type":"${event_type}","incident_number":"${incident_number}","short_description":"${short_description}"}'
-                },
-                auth=self.auth,
-                headers=self.headers
-            )
-            if response.status_code in [200, 201]:
-                fn_sys_id = response.json()["result"]["sys_id"]
-                self.created_resources.append(("sys_rest_message_fn", fn_sys_id))
-                print(f"    Created function: {fn_sys_id}")
-            else:
-                print(f"    Failed to create function: {response.status_code}")
-                return False
-        
-        # 4. Create or update business rule
-        print(f"  Creating business rule: {business_rule_name}")
-        script_endpoint = f"{self.url}/api/now/table/sys_script"
-        
-        script = f'''(function executeRule(current, previous) {{
-    try {{
-        var event_type = current.operation() == 'insert' ? 'IncidentCreated' : 'IncidentUpdated';
-        var payload = {{
-            "event_type": event_type,
-            "incident_number": current.number.toString(),
-            "short_description": current.short_description.toString(),
-        }};
-        var gr = new GlideRecord('discovery_credentials');
-        if (gr.get('name', '{credential_name}')) {{
-            // Read password directly from GlideRecord (works with basic_auth type)
-            var api_key = gr.getValue('password');
-            
-            var request = new sn_ws.RESTMessageV2("{rest_message_name}", "{function_name}");
-            request.setRequestHeader('Authorization', api_key);
-            request.setRequestBody(JSON.stringify(payload));
-            
-            var response = request.execute();
-            gs.info('Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
-            var responseBody = response.getBody();
-            var httpStatus = response.getStatusCode();
-            gs.info("Incident Event Response: " + responseBody);
-            gs.info("Incident Event HTTP Status: " + httpStatus);
-        }}
-        else {{
-            gs.info("Could not find API Key: {credential_name}");
-        }}
-    }} catch (error) {{
-        gs.error('Error sending incident event: ' + error.message);
-    }}
-}})(current, previous);'''
-        
-        response = requests.get(
-            script_endpoint,
-            params={"sysparm_query": f"name={business_rule_name}", "sysparm_fields": "sys_id"},
-            auth=self.auth,
-            headers=self.headers
-        )
-        existing = response.json().get("result", [])
-        
-        if existing:
-            br_sys_id = existing[0]["sys_id"]
-            # Deactivate first to force ServiceNow to reload the script
-            requests.patch(
-                f"{script_endpoint}/{br_sys_id}",
-                json={"active": "false"},
-                auth=self.auth,
-                headers=self.headers
-            )
-            # Update script, when field, and reactivate
-            requests.patch(
-                f"{script_endpoint}/{br_sys_id}",
-                json={"script": script, "when": "after", "active": "true"},
-                auth=self.auth,
-                headers=self.headers
-            )
-            print(f"    Updated existing business rule: {br_sys_id} (deactivated/reactivated to force reload, set to after)")
-        else:
-            response = requests.post(
-                script_endpoint,
-                json={
-                    "name": business_rule_name,
-                    "collection": table,
-                    "when": "after",  # Fire after transaction commits
-                    "action_insert": "true",
-                    "action_update": "true",
-                    "active": "true",
-                    "script": script
-                },
-                auth=self.auth,
-                headers=self.headers
-            )
-            if response.status_code in [200, 201]:
-                br_sys_id = response.json()["result"]["sys_id"]
-                self.created_resources.append(("sys_script", br_sys_id))
-                print(f"    Created business rule: {br_sys_id}")
-            else:
-                print(f"    Failed to create business rule: {response.status_code}")
-                return False
-        
-        # Verify business rule was created/updated successfully
-        print(f"  Verifying business rule: {business_rule_name}")
-        rule_info = self.verify_business_rule(business_rule_name)
-        if not rule_info:
-            print(f"    ✗ Business rule not found after creation/update!")
-            return False
-        
-        print(f"    ✓ Business rule verified:")
-        print(f"      - sys_id: {rule_info['sys_id']}")
-        print(f"      - Active: {rule_info['active']}")
-        print(f"      - When: {rule_info['when']}")
-        print(f"      - Collection: {rule_info['collection']}")
-        print(f"      - Script length: {rule_info['script_length']} chars")
-        
-        if not rule_info['active']:
-            print(f"    ✗ Business rule is NOT active!")
-            return False
-        
-        if rule_info['when'] != 'async':
-            print(f"    ⚠ Warning: Business rule 'when' is '{rule_info['when']}', expected 'async'")
-        
-        print("  All webhook resources created successfully")
-        return True
-
     def cleanup(self):
         """Clean up all created resources from ServiceNow."""
         print('Cleaning up all ServiceNow Resources')
@@ -1388,9 +1120,11 @@ class ServiceNowClient:
         url = url.rstrip("/")
         
         # Create JWT assertion
+        # NOTE: sub must contain the user's sys_id, not username
+        # ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id' and cannot be changed via API
         payload = {
             "iss": client_id,
-            "sub": user_id,
+            "sub": user_id,  # This should be the user's sys_id, not username
             "aud": client_id,
             "iat": int(time.time()),
             "exp": int(time.time()) + 3600,
@@ -1468,9 +1202,12 @@ class ServiceNowClient:
         else:
             session = boto3.Session()
         
-        ssm_client = session.client("ssm", region_name="us-east-1")
-        secrets_client = session.client("secretsmanager", region_name="us-east-1")
-        s3_resource = session.resource("s3", region_name="us-east-1")
+        # Use the default region from environment or session
+        region = session.region_name or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+        
+        ssm_client = session.client("ssm", region_name=region)
+        secrets_client = session.client("secretsmanager", region_name=region)
+        s3_resource = session.resource("s3", region_name=region)
         
         def get_param(name: str) -> str:
             response = ssm_client.get_parameter(Name=name, WithDecryption=True)
@@ -2050,6 +1787,7 @@ def deployed_integration(service_now_config, tmp_path_factory):
     deployer = CDKDeployer(project_root)
     if deployer.is_deployed:
         deployer.destroy()
+
     temp_dir = tmp_path_factory.mktemp("keys")
 
     # Generate RSA key pair (PEM format - works better with ServiceNow API)
@@ -2133,9 +1871,6 @@ def deployed_integration(service_now_config, tmp_path_factory):
         pytest.fail("Failed to get webhook URL or API auth token from deployed stack")
     
     table = "incident" if service_now_config["integration_module"] == "itsm" else "sn_si_incident"
-    if not oauth_setup.create_webhook_resources(webhook_url, api_auth_token, table):
-        oauth_setup.cleanup()
-        pytest.fail("Failed to create ServiceNow webhook resources")
 
     yield {
         **service_now_config,
@@ -2144,9 +1879,11 @@ def deployed_integration(service_now_config, tmp_path_factory):
     }
 
     if 'SKIP_DESTROY' not in os.environ:
-        print('Skipping Destroy for debugging')
         deployer.destroy()
-    # oauth_setup.cleanup()
+        oauth_setup.cleanup()
+    else: 
+        print('Skipping Destroy for debugging')
+    
 
 
 class TestSecurityIRToServiceNow:
