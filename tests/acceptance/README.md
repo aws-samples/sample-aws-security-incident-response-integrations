@@ -126,10 +126,13 @@ A service account user (`aws_integration`) is created with the following roles:
 
 ### Webhook Resources
 
+The Setup Lambda automatically creates:
 - Discovery credential storing API Gateway auth token
 - Outbound REST Message pointing to webhook URL
 - REST Message HTTP Method (POST function)
+- REST Message Function Parameters
 - Async Business Rule triggering on incident create/update
+- Attachment Business Rule triggering on attachment changes
 
 ## Notes
 

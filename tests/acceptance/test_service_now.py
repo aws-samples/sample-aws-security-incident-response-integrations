@@ -353,7 +353,7 @@ class ServiceNowOAuthSetup:
             return columns
         return []
 
-    def create_service_account_user(self, username: str = "aws_integration") -> Optional[str]:
+    def create_service_account_user(self, username: str = "aws_integration") -> Optional[Dict[str, str]]:
         """Create a service account user for JWT OAuth authentication.
         
         ServiceNow doesn't allow JWT bearer tokens to authenticate as 'admin',
@@ -367,7 +367,9 @@ class ServiceNowOAuthSetup:
             username: The username for the service account (default: aws_integration per documentation)
             
         Returns:
-            The username if created or already exists, None on failure
+            Dict with 'username' and 'sys_id' if created or already exists, None on failure.
+            The sys_id is required for JWT OAuth because ServiceNow's oauth_jwt.sub_claim
+            defaults to 'sys_id' and cannot be changed via API.
         """
         print(f"Creating service account user '{username}'...")
         
@@ -383,8 +385,8 @@ class ServiceNowOAuthSetup:
         
         users = response.json().get("result", [])
         if users:
-            print(f"Service account user '{username}' already exists")
             user_sys_id = users[0]["sys_id"]
+            print(f"Service account user '{username}' already exists with sys_id: {user_sys_id}")
             # Update user to ensure web_service_access_only is false
             requests.patch(
                 f"{user_endpoint}/{user_sys_id}",
@@ -394,7 +396,7 @@ class ServiceNowOAuthSetup:
             )
             # Ensure the user has all required roles
             self.ensure_user_has_required_roles(username)
-            return username
+            return {"username": username, "sys_id": user_sys_id}
         
         # Create the service account user
         # NOTE: web_service_access_only must be false to allow full API access
@@ -421,7 +423,7 @@ class ServiceNowOAuthSetup:
             
             # Grant all required roles to the new user
             self.ensure_user_has_required_roles(username)
-            return username
+            return {"username": username, "sys_id": user_sys_id}
         else:
             print(f"Failed to create service account user: {response.status_code} - {response.text}")
             return None
@@ -952,9 +954,13 @@ class ServiceNowOAuthSetup:
             "active": "true",
             "access_token_lifespan": "3600",
             "refresh_token_lifespan": "8640000",
-            # oauth_jwt specific fields - aligned with SERVICE_NOW.md documentation
-            "user_field": "user_id",  # Look up user by User Id (per documentation)
-            "sub_claim": "user_id",  # JWT sub claim contains user_id
+            # oauth_jwt specific fields
+            # IMPORTANT: ServiceNow defaults sub_claim to "sys_id" and this cannot be reliably
+            # changed via API. Therefore, we must:
+            # 1. Set user_field to "sys_id" so ServiceNow looks up users by sys_id
+            # 2. Put the user's sys_id (not username) in the JWT sub claim
+            "user_field": "sys_id",  # Look up user by sys_id field (matches sub_claim default)
+            "sub_claim": "sys_id",  # JWT sub claim contains sys_id (ServiceNow default)
             "clock_skew": "300",  # 5 minutes clock skew tolerance
             "enable_jti_verification": "true",  # Enable JTI verification (per documentation)
             "jti_claim": "jti",  # JTI claim field name (per documentation)
@@ -1039,13 +1045,16 @@ class ServiceNowOAuthSetup:
         }
 
     def create_webhook_resources(self, webhook_url: str, api_auth_token: str, table: str = "incident") -> bool:
-        """Create ServiceNow resources for webhook integration.
+        """Create or update ServiceNow resources for webhook integration.
         
-        Creates:
+        Updates existing resources created by the Setup Lambda:
         - Discovery credential to store API Gateway auth token
         - Outbound REST Message pointing to webhook URL
         - REST Message HTTP Method (POST function)
         - Business Rule to trigger on incident create/update
+        
+        The resource prefix is extracted from the webhook URL (API Gateway ID)
+        to match the naming convention used by the Setup Lambda.
         
         Args:
             webhook_url: The API Gateway webhook URL
@@ -1053,15 +1062,24 @@ class ServiceNowOAuthSetup:
             table: The ServiceNow table to monitor (default: incident)
             
         Returns:
-            True if all resources were created successfully
+            True if all resources were created/updated successfully
         """
-        resource_prefix = "aws-security-ir"
+        # Extract API Gateway ID from webhook URL to match Setup Lambda naming
+        # URL format: https://{api-id}.execute-api.{region}.amazonaws.com/prod/webhook
+        import re
+        match = re.search(r'https://([^.]+)\.execute-api', webhook_url)
+        if match:
+            resource_prefix = match.group(1)
+        else:
+            resource_prefix = "aws-security-ir"  # Fallback
+        
         credential_name = f"{resource_prefix}-aws-apigw-key"
         rest_message_name = f"{resource_prefix}-outbound-rest-message"
         function_name = f"{rest_message_name}-POST-function"
         business_rule_name = f"{resource_prefix}-business-rule"
         
         print(f"Creating ServiceNow webhook resources for {webhook_url}...")
+        print(f"  Using resource prefix: {resource_prefix}")
         
         # 1. Create or update discovery credential
         print(f"  Creating discovery credential: {credential_name}")
@@ -1192,9 +1210,6 @@ class ServiceNowOAuthSetup:
         
         script = f'''(function executeRule(current, previous) {{
     try {{
-        // Add 3-second delay to ensure transaction is committed
-        gs.sleep(3000);
-        
         var event_type = current.operation() == 'insert' ? 'IncidentCreated' : 'IncidentUpdated';
         var payload = {{
             "event_type": event_type,
@@ -1245,18 +1260,18 @@ class ServiceNowOAuthSetup:
             # Update script, when field, and reactivate
             requests.patch(
                 f"{script_endpoint}/{br_sys_id}",
-                json={"script": script, "when": "async", "active": "true"},
+                json={"script": script, "when": "after", "active": "true"},
                 auth=self.auth,
                 headers=self.headers
             )
-            print(f"    Updated existing business rule: {br_sys_id} (deactivated/reactivated to force reload, set to async)")
+            print(f"    Updated existing business rule: {br_sys_id} (deactivated/reactivated to force reload, set to after)")
         else:
             response = requests.post(
                 script_endpoint,
                 json={
                     "name": business_rule_name,
                     "collection": table,
-                    "when": "async",  # Fire AFTER transaction commits
+                    "when": "after",  # Fire after transaction commits
                     "action_insert": "true",
                     "action_update": "true",
                     "active": "true",
@@ -2058,9 +2073,16 @@ def deployed_integration(service_now_config, tmp_path_factory):
         # ServiceNow doesn't allow JWT bearer tokens to authenticate as 'admin'
         # Using 'aws_integration' as recommended in SERVICE_NOW.md documentation
         print("Creating service account user for JWT OAuth...")
-        service_account_username = oauth_setup.create_service_account_user("aws_integration")
-        if not service_account_username:
+        service_account_info = oauth_setup.create_service_account_user("aws_integration")
+        if not service_account_info:
             raise Exception("Failed to create service account user")
+        
+        # Extract username and sys_id from the returned dict
+        # The sys_id is required for JWT OAuth because ServiceNow's oauth_jwt.sub_claim
+        # defaults to 'sys_id' and cannot be changed via API
+        service_account_username = service_account_info["username"]
+        service_account_sys_id = service_account_info["sys_id"]
+        print(f"Service account: username='{service_account_username}', sys_id='{service_account_sys_id}'")
 
         # Upload PEM certificate to ServiceNow
         certificate_sys_id = oauth_setup.upload_certificate(certificate_pem)
@@ -2075,14 +2097,16 @@ def deployed_integration(service_now_config, tmp_path_factory):
         oauth_setup.cleanup()
         pytest.fail(f"Failed to set up OAuth in ServiceNow: {e}")
 
-    # Deploy CDK stack with service account user (not admin)
+    # Deploy CDK stack with service account user's sys_id (not username)
+    # The Setup Lambda expects the sys_id because ServiceNow's oauth_jwt.sub_claim
+    # defaults to 'sys_id' and cannot be changed via API
     print("Deploying CDK stack...")
 
     deploy_success = deployer.deploy(
         instance_id=service_now_config["instance_id"],
         client_id=oauth_config["client_id"],
         client_secret=oauth_config["client_secret"],
-        user_id=service_account_username,  # Use service account, not admin
+        user_id=service_account_sys_id,  # Use sys_id, not username - required for JWT OAuth
         private_key_path=str(private_key_path),
         integration_module=service_now_config["integration_module"],
     )
@@ -2096,9 +2120,10 @@ def deployed_integration(service_now_config, tmp_path_factory):
 
     deployer.wait_for_stabilization()
 
-    # Create ServiceNow webhook resources (business rule, REST message, etc.)
-    # This is needed because the setup handler Lambda can't create these resources
-    # due to ServiceNow ACL restrictions (see docstring above for details)
+    # The Setup Lambda now successfully creates ServiceNow webhook resources
+    # (business rule, REST message, discovery credential) using JWT OAuth.
+    # We just need to verify the resources exist and update the credential/REST message
+    # with the current deployment's webhook URL and API key.
     print("Creating ServiceNow webhook resources...")
     webhook_url = deployer.get_webhook_url()
     api_auth_token = deployer.get_api_auth_token()
@@ -2274,10 +2299,11 @@ class TestServiceNowToSecurityIR:
             f"Incidents will not trigger webhooks."
         )
         
-        # Assert business rule is configured for async execution
-        assert rule_info['when'] == 'async', (
-            f"Business rule 'when' is '{rule_info['when']}', expected 'async'. "
-            f"This may cause race conditions."
+        # Assert business rule is configured for 'after' execution
+        # 'after' fires synchronously after the transaction commits
+        assert rule_info['when'] == 'after', (
+            f"Business rule 'when' is '{rule_info['when']}', expected 'after'. "
+            f"The business rule should fire after the transaction commits."
         )
         
         # Assert business rule is on the correct table

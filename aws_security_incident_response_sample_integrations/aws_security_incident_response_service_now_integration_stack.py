@@ -412,7 +412,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         )
 
         service_now_secret_rotation_handler_logs = self.get_log_group(
-            "ServiceNowSecretRotationHandlerLogs", 'service-now-rotation-handler-logs' )
+            "ServiceNowSecretRotationHandlerLogs", 'service-now-secret-rotation-handler-logs' )
 
         # Create rotation Lambda function
         service_now_secret_rotation_handler = py_lambda.PythonFunction(
@@ -428,7 +428,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             role=service_now_secret_rotation_handler_role,
             log_group=service_now_secret_rotation_handler_logs,
         )
-        Tags.of(service_now_secret_rotation_handler_role).add('purpose', 'service-now-rotation-handler')
+        Tags.of(service_now_secret_rotation_handler_role).add('purpose', 'service-now-secret-rotation-handler')
 
         # Add basic execution role permissions
         service_now_secret_rotation_handler_role.add_managed_policy(
@@ -792,7 +792,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             properties={
                 "WebhookUrl": f"{service_now_api_gateway.url.rstrip('/')}/webhook",
                 "IntegrationModule": self.integration_module_param.value_as_string,
-                "Version": "3"
+                "Version": "5"
             },
         )
 

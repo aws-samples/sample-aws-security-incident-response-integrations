@@ -188,12 +188,12 @@ class ServiceNowApiService:
             logger.error(f"Error getting token url: {str(e)}")
             return None
 
-    def __get_encoded_jwt(self, client_id: str, user_id: str) -> Optional[str]:
+    def __get_encoded_jwt(self, client_id: str, user_sys_id: str) -> Optional[str]:
         """Generate encoded JWT using private key from S3 asset.
 
         Args:
             client_id (str): OAuth client ID for JWT issuer
-            user_id (str): ServiceNow user ID for JWT subject
+            user_sys_id (str): ServiceNow user sys_id for JWT subject (NOT username)
 
         Returns:
             Optional[str]: Encoded JWT or None if generation fails
@@ -211,14 +211,16 @@ class ServiceNowApiService:
             s3_object = self.s3_resource.Object(bucket, key)
             private_key = s3_object.get()['Body'].read().decode('utf-8')
             
-            if not user_id or not client_id:
-                logger.error("Missing user ID or client ID for JWT")
+            if not user_sys_id or not client_id:
+                logger.error("Missing user sys_id or client ID for JWT")
                 return None
             
             # Create JWT payload
+            # NOTE: sub must contain the user's sys_id, not username
+            # ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id' and cannot be changed via API
             payload = {
                 "iss": client_id,  # Issuer - OAuth client ID
-                "sub": user_id,    # Subject - ServiceNow user ID
+                "sub": user_sys_id,  # Subject - ServiceNow user sys_id (NOT username)
                 "aud": client_id,  # Audience - OAuth client ID
                 "iat": int(time.time()),  # Issued at - current timestamp
                 "exp": int(time.time()) + 3600,  # Expiration - 1 hour from now
@@ -241,6 +243,98 @@ class ServiceNowApiService:
         except jwt.InvalidTokenError:  
             logger.error("Invalid token")
             return None
+
+    def __get_user_sys_id(self, username: str) -> Optional[str]:
+        """Look up a ServiceNow user's sys_id by username.
+
+        ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id', so we need to
+        put the user's sys_id (not username) in the JWT sub claim.
+
+        This method uses JWT auth with the username as sub claim to get an initial
+        token, then uses that to look up the user's sys_id. This works because
+        some ServiceNow instances are configured to accept username in sub claim
+        for read operations, even if sub_claim is set to sys_id.
+
+        Args:
+            username (str): ServiceNow username (user_id field)
+
+        Returns:
+            Optional[str]: User's sys_id or None if lookup fails
+        """
+        try:
+            base_url = self.__get_request_base_url()
+            token_url = self.__get_jwt_oauth_token_url()
+            
+            # Get OAuth client credentials
+            client_id = self.__get_parameter(self.client_id_param_name)
+            client_secret = self.__get_secret_value(self.client_secret_arn)
+            
+            if not client_id or not client_secret:
+                logger.error("Missing client credentials for user lookup")
+                return None
+            
+            # Try to get a JWT token using the username as sub claim
+            # This may work for read operations even if sub_claim is set to sys_id
+            encoded_jwt = self.__get_encoded_jwt(client_id, username)
+            if not encoded_jwt:
+                logger.error("Failed to generate JWT for user lookup")
+                return None
+            
+            # Try to get an access token with username-based JWT
+            token_response = requests.post(
+                token_url,
+                data={
+                    'grant_type': JWT_GRANT_TYPE,
+                    'assertion': encoded_jwt,
+                    'client_id': client_id,
+                    'client_secret': client_secret
+                },
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                timeout=30,
+            )
+            
+            if token_response.status_code != 200:
+                logger.error(f"Failed to get JWT token for user lookup: {token_response.status_code} - {token_response.text}")
+                # If JWT with username fails, the user needs to manually configure sys_id
+                logger.error("ServiceNow sub_claim is set to sys_id. Please store the user's sys_id in the user_id parameter instead of username.")
+                return None
+            
+            access_token = token_response.json().get('access_token')
+            if not access_token:
+                logger.error("No access token in JWT response for user lookup")
+                return None
+            
+            # Query sys_user table to get sys_id for the username
+            response = requests.get(
+                f"{base_url}/api/now/table/sys_user",
+                params={
+                    "sysparm_query": f"user_name={username}",
+                    "sysparm_fields": "sys_id",
+                    "sysparm_limit": 1
+                },
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/json"
+                },
+                timeout=30,
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to look up user sys_id: {response.status_code} - {response.text}")
+                return None
+            
+            results = response.json().get("result", [])
+            if not results:
+                logger.error(f"User not found: {username}")
+                return None
+            
+            user_sys_id = results[0].get("sys_id")
+            logger.info(f"Resolved user '{username}' to sys_id: {user_sys_id}")
+            return user_sys_id
+            
+        except Exception as e:
+            logger.error(f"Error looking up user sys_id: {str(e)}")
+            return None
         
     def __get_jwt_oauth_access_token(self) -> Optional[str]:
         """Get OAuth access token using JWT authentication.
@@ -256,10 +350,18 @@ class ServiceNowApiService:
             # Get parameters for JWT OAuth
             client_secret = self.__get_secret_value(self.client_secret_arn)
             client_id = self.__get_parameter(self.client_id_param_name)
-            user_id = self.__get_parameter(self.user_id_param_name)
+            # user_id parameter should contain the user's sys_id (not username)
+            # because ServiceNow's oauth_jwt.sub_claim defaults to sys_id
+            user_sys_id = self.__get_parameter(self.user_id_param_name)
             
-            # Get encoded JWT
-            encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
+            logger.info(f"Getting JWT OAuth token for user sys_id: {user_sys_id[:8]}...")
+            
+            # Get encoded JWT with user's sys_id
+            encoded_jwt = self.__get_encoded_jwt(client_id, user_sys_id)
+            
+            if not encoded_jwt:
+                logger.error("Failed to generate encoded JWT")
+                return None
 
             # Prepare request headers, data to get OAuth access token using encoded_jwt
             token_url = self.__get_jwt_oauth_token_url()
@@ -274,7 +376,18 @@ class ServiceNowApiService:
                 'client_secret': client_secret
             }
             response = requests.post(token_url, headers=headers, data=data)
-            return (response.json())['access_token']
+            
+            # Log response status and check for errors
+            if response.status_code != 200:
+                logger.error(f"JWT token request failed: {response.status_code} - {response.text}")
+                return None
+            
+            response_json = response.json()
+            if 'error' in response_json:
+                logger.error(f"JWT token error: {response_json.get('error')} - {response_json.get('error_description')}")
+                return None
+                
+            return response_json['access_token']
         except requests.exceptions.RequestException as e:
             logger.error(f"HTTP request failed: {str(e)}")
             return None
@@ -593,16 +706,13 @@ class ServiceNowApiService:
             rule_payload = {
                 "name": f"{resource_prefix}-business-rule",
                 "collection": "incident",
-                "when": "async",  # Fire asynchronously AFTER transaction commits
+                "when": "after",  # Fire after transaction commits
                 "action_insert": True,
                 "action_update": True,
                 "active": True,
                 "script": f"""
         (function executeRule(current, previous) {{
             try {{
-                // Add 3-second delay to ensure transaction is committed
-                gs.sleep(3000);
-                
                 var event_type = current.operation() == 'insert' ? 'IncidentCreated' : 'IncidentUpdated';
                 var payload = {{
                     "event_type": event_type,
@@ -659,7 +769,7 @@ class ServiceNowApiService:
                 # Update script, when field, and reactivate
                 response = requests.patch(
                     f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"script": rule_payload["script"], "when": "async", "active": "true"},
+                    json={"script": rule_payload["script"], "when": "after", "active": "true"},
                     headers=headers,
                     timeout=30,
                 )
@@ -716,16 +826,13 @@ class ServiceNowApiService:
             rule_payload = {
                 "name": f"{resource_prefix}-ir-business-rule",
                 "collection": "sn_si_incident",
-                "when": "async",  # Fire asynchronously AFTER transaction commits
+                "when": "after",  # Fire after transaction commits
                 "action_insert": True,
                 "action_update": True,
                 "active": True,
                 "script": f"""
         (function executeRule(current, previous) {{
             try {{
-                // Add 3-second delay to ensure transaction is committed
-                gs.sleep(3000);
-                
                 var event_type = current.operation() == 'insert' ? 'IncidentCreated' : 'IncidentUpdated';
                 var payload = {{
                     "event_type": event_type,
@@ -782,7 +889,7 @@ class ServiceNowApiService:
                 # Update script, when field, and reactivate
                 response = requests.patch(
                     f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"script": rule_payload["script"], "when": "async", "active": "true"},
+                    json={"script": rule_payload["script"], "when": "after", "active": "true"},
                     headers=headers,
                     timeout=30,
                 )
