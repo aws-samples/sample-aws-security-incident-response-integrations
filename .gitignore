@@ -1,4 +1,5 @@
 .kiro/aside/
+.kiro/hooks/aside_start.kiro.hook
 
 .idea
 node_modules
