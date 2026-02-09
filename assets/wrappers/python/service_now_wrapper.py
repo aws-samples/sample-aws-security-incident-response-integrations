@@ -507,7 +507,7 @@ class ServiceNowClient:
             glide_record.query()
             
             # Debug: Log the query and result count
-            logger.info(f"Querying {table_name} for incident number: {incident_number}")
+            logger.debug(f"Querying {table_name} for incident number: {incident_number}")
             logger.info(f"Query returned {glide_record.get_row_count()} results")
             
             if glide_record.next():
@@ -519,12 +519,12 @@ class ServiceNowClient:
             else:
                 logger.error(f"No incident found with number: {incident_number}")
                 # Debug: Try querying all recent incidents to see if it exists
-                logger.info(f"Attempting to query all recent incidents in {table_name}...")
+                logger.debug(f"Attempting to query all recent incidents in {table_name}...")
                 all_gr = self.__get_glide_record(table_name)
                 all_gr.add_query("sys_created_on", ">", "javascript:gs.minutesAgoStart(5)")
                 all_gr.query()
                 recent_count = all_gr.get_row_count()
-                logger.info(f"Found {recent_count} incidents created in last 5 minutes")
+                logger.debug(f"Found {recent_count} incidents created in last 5 minutes")
                 return None
                 
         except Exception as e:

@@ -85,7 +85,6 @@ JWT (JSON Web Token) OAuth authentication uses RSA key pairs to generate signed 
       - First Name: `AWS`
       - Last Name: `Integration`
 4. If you have a user, search with user-id and open the record
-5. Note the user's `sys_id` — you will need this for deployment. The `sys_id` is a 32-character unique identifier (e.g., `a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6`). You can find it by right-clicking the header bar of the user record and selecting "Copy sys_id", or from the URL when viewing the user record.
 5. Assign the following roles under the `Roles` tab by clicking on `Edit`:
    
    **ITSM Mode (incident table):**
@@ -260,7 +259,7 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    - **Access Token Lifespan**: `3600`
    - **Clock skew**: `300`
    - **Token Format**: `Opaque`
-   - **User field**: `sys_id`
+   - **User field**: `user_name`
    - **Enable JTI verification**: ✅
    - **JTI Claim**: `jti`
    - **JWKS Cache Lifespan**: `720`
@@ -304,7 +303,7 @@ The ServiceNow integration stack requires the following parameters during deploy
 | `serviceNowInstanceId` | The ServiceNow instance ID (subdomain of your ServiceNow URL) | String | Yes | `dev12345` (from dev12345.service-now.com) |
 | `serviceNowClientId` | The OAuth client ID from ServiceNow OAuth application | String | Yes | `abc123def456` |
 | `serviceNowClientSecret` | The OAuth client secret from ServiceNow OAuth application | String | Yes | `********` |
-| `serviceNowUserId` | The ServiceNow user's sys_id for JWT authentication. **Important:** This must be the user's `sys_id` (e.g., `a1b2c3d4e5f6g7h8i9j0`), not the username. ServiceNow's JWT OAuth uses `sys_id` as the subject claim identifier. You can find the sys_id in ServiceNow by navigating to User Administration > Users, selecting the user, and copying the sys_id from the URL or record. | String | Yes | `a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6` |
+| `serviceNowUserId` | The ServiceNow user's user_name for JWT authentication. |
 | `privateKeyAssetPath` | Local path to the RSA private key file for JWT signing | String | Yes | `./private.key` |
 | `integrationModule` | ServiceNow integration module type | String | Yes | `itsm` (IT Service Management) or `ir` (Incident Response) |
 | `logLevel` | The log level for Lambda functions | String | No | `info`, `debug`, or `error` (default) |
@@ -610,7 +609,7 @@ The stack provides the following outputs that can be used for integration:
    **Required Parameters:**
    - `--client-id`: OAuth client ID from ServiceNow OAuth application
    - `--client-secret`: OAuth client secret from ServiceNow OAuth application  
-   - `--sys-id`: ServiceNow user's `sys_id` for JWT authentication (not the username — see [Setup ServiceNow Integration User](#setup-servicenow-integration-user))
+   - `--sys-id`: ServiceNow user's `user_name` for JWT authentication
    - `--private-key-path`: Path to RSA private key file for JWT signing
    - `--integration-module`: Choose `itsm` for IT Service Management or `ir` for Incident Response module
    
