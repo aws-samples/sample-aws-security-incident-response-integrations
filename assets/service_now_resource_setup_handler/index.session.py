@@ -111,7 +111,7 @@ class ServiceNowApiService:
             **kwargs: OAuth configuration parameters including:
                 - client_id_param_name (str): SSM parameter name containing OAuth client ID
                 - client_secret_arn (str): Secret ARN containing OAuth client secret
-                - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+                - user_sys_id_param_name (str): SSM parameter name containing ServiceNow user sys_id
                 - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
                 - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
@@ -119,7 +119,7 @@ class ServiceNowApiService:
         self.instance_id = instance_id
         self.client_id_param_name = kwargs.get('client_id_param_name')
         self.client_secret_arn = kwargs.get('client_secret_arn')
-        self.user_id_param_name = kwargs.get('user_id_param_name')
+        self.user_sys_id_param_name = kwargs.get('user_sys_id_param_name')
         self.private_key_asset_bucket_param_name = kwargs.get('private_key_asset_bucket_param_name')
         self.private_key_asset_key_param_name = kwargs.get('private_key_asset_key_param_name')
         self.secrets_manager_service = SecretsManagerService()
@@ -130,7 +130,7 @@ class ServiceNowApiService:
             instance_id = self.instance_id,
             client_id_param_name = self.client_id_param_name,
             client_secret_arn = self.client_secret_arn,
-            user_id_param_name = self.user_id_param_name,
+            user_sys_id_param_name = self.user_sys_id_param_name,
             private_key_asset_bucket_param_name = self.private_key_asset_bucket_param_name,
             private_key_asset_key_param_name = self.private_key_asset_key_param_name
         )
@@ -205,12 +205,12 @@ class ServiceNowApiService:
             logger.error(f"Error getting token url: {str(e)}")
             return None
 
-    def __get_encoded_jwt(self, client_id: str, user_id: str) -> Optional[str]:
+    def __get_encoded_jwt(self, client_id: str, user_sys_id: str) -> Optional[str]:
         """Generate encoded JWT using private key from S3 asset.
 
         Args:
             client_id (str): OAuth client ID for JWT issuer
-            user_id (str): ServiceNow user ID for JWT subject
+            user_sys_id (str): ServiceNow user sys_id for JWT subject
 
         Returns:
             Optional[str]: Encoded JWT or None if generation fails
@@ -228,14 +228,14 @@ class ServiceNowApiService:
             s3_object = self.s3_resource.Object(bucket, key)
             private_key = s3_object.get()['Body'].read().decode('utf-8')
 
-            if not user_id or not client_id:
-                logger.error("Missing user ID or client ID for JWT")
+            if not user_sys_id or not client_id:
+                logger.error("Missing user sys_id or client ID for JWT")
                 return None
 
             # Create JWT payload
             payload = {
                 "iss": client_id,  # Issuer - OAuth client ID
-                "sub": user_id,    # Subject - ServiceNow user ID
+                "sub": user_sys_id,    # Subject - ServiceNow user sys_id (NOT username)
                 "aud": client_id,  # Audience - OAuth client ID
                 "iat": int(time.time()),  # Issued at - current timestamp
                 "exp": int(time.time()) + 3600,  # Expiration - 1 hour from now
@@ -276,10 +276,10 @@ class ServiceNowApiService:
             # Get parameters for JWT OAuth
             client_secret = self.__get_secret_value(self.client_secret_arn)
             client_id = self.__get_parameter(self.client_id_param_name)
-            user_id = self.__get_parameter(self.user_id_param_name)
+            user_sys_id = self.__get_parameter(self.user_sys_id_param_name)
 
             # Get encoded JWT
-            encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
+            encoded_jwt = self.__get_encoded_jwt(client_id, user_sys_id)
 
             # Prepare request headers, data to get OAuth access token using encoded_jwt
             token_url = self.__get_jwt_oauth_token_url()
@@ -1032,7 +1032,7 @@ def handler(event, context):
         )
         client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
         client_secret_arn = os.environ.get("SERVICE_NOW_CLIENT_SECRET_ARN")
-        user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+        user_sys_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
         private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
         private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
@@ -1040,7 +1040,7 @@ def handler(event, context):
             instance_id,
             client_id_param_name=client_id_param_name,
             client_secret_arn=client_secret_arn,
-            user_id_param_name=user_id_param_name,
+            user_sys_id_param_name=user_sys_id_param_name,
             private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
             private_key_asset_key_param_name=private_key_asset_key_param_name
         )

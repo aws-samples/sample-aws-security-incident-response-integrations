@@ -1040,7 +1040,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
             instance_id_param = os.environ.get("SERVICE_NOW_INSTANCE_ID")
             client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
             client_secret_arn = os.environ.get("SERVICE_NOW_CLIENT_SECRET_ARN")
-            user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+            user_sys_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
             private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
             private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
@@ -1050,7 +1050,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
 
             instance_id = parameter_service._get_parameter(instance_id_param)
 
-            if not all([instance_id, client_id_param_name, client_secret_arn, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
+            if not all([instance_id, client_id_param_name, client_secret_arn, user_sys_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
                 logger.error("Failed to retrieve ServiceNow credentials from SSM")
                 return ResponseBuilderService._build_error_response(
                     "Failed to retrieve ServiceNow credentials"
@@ -1068,7 +1068,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
                 event_bus_name,
                 client_id_param_name=client_id_param_name,
                 client_secret_arn=client_secret_arn,
-                user_id_param_name=user_id_param_name,
+                user_sys_id_param_name=user_sys_id_param_name,
                 private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
                 private_key_asset_key_param_name=private_key_asset_key_param_name
             )

@@ -106,7 +106,7 @@ class ServiceNowApiService:
             **kwargs: OAuth configuration parameters including:
                 - client_id_param_name (str): SSM parameter name containing OAuth client ID
                 - client_secret_arn (str): Secret ARN containing OAuth client secret
-                - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+                - user_sys_id_param_name (str): SSM parameter name containing ServiceNow user sys_id
                 - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
                 - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
@@ -114,7 +114,7 @@ class ServiceNowApiService:
         self.instance_id = instance_id
         self.client_id_param_name = kwargs.get('client_id_param_name')
         self.client_secret_arn = kwargs.get('client_secret_arn')
-        self.user_id_param_name = kwargs.get('user_id_param_name')
+        self.user_sys_id_param_name = kwargs.get('user_sys_id_param_name')
         self.private_key_asset_bucket_param_name = kwargs.get('private_key_asset_bucket_param_name')
         self.private_key_asset_key_param_name = kwargs.get('private_key_asset_key_param_name')
         self.secrets_manager_service = SecretsManagerService()
@@ -296,7 +296,7 @@ class ServiceNowApiService:
             if token_response.status_code != 200:
                 logger.error(f"Failed to get JWT token for user lookup: {token_response.status_code} - {token_response.text}")
                 # If JWT with username fails, the user needs to manually configure sys_id
-                logger.error("ServiceNow sub_claim is set to sys_id. Please store the user's sys_id in the user_id parameter instead of username.")
+                logger.error("ServiceNow sub_claim is set to sys_id. Please store the user's sys_id in the user_sys_id parameter instead of username.")
                 return None
             
             access_token = token_response.json().get('access_token')
@@ -352,7 +352,7 @@ class ServiceNowApiService:
             client_id = self.__get_parameter(self.client_id_param_name)
             # user_id parameter should contain the user's sys_id (not username)
             # because ServiceNow's oauth_jwt.sub_claim defaults to sys_id
-            user_sys_id = self.__get_parameter(self.user_id_param_name)
+            user_sys_id = self.__get_parameter(self.user_sys_id_param_name)
             
             logger.info(f"Getting JWT OAuth token for user sys_id: {user_sys_id[:8]}...")
             
@@ -1167,7 +1167,7 @@ def handler(event, context):
         )
         client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
         client_secret_arn = os.environ.get("SERVICE_NOW_CLIENT_SECRET_ARN")
-        user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+        user_sys_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
         private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
         private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
@@ -1175,7 +1175,7 @@ def handler(event, context):
             instance_id,
             client_id_param_name=client_id_param_name,
             client_secret_arn=client_secret_arn,
-            user_id_param_name=user_id_param_name,
+            user_sys_id_param_name=user_sys_id_param_name,
             private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
             private_key_asset_key_param_name=private_key_asset_key_param_name
         )

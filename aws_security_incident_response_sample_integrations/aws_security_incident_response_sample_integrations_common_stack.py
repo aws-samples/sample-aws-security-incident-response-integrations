@@ -277,7 +277,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                     ],
                     "SERVICE_NOW_CLIENT_ID": service_now_params.get("client_id_param_name", ""),
                     "SERVICE_NOW_CLIENT_SECRET_ARN": "/SecurityIncidentResponse/serviceNowClientSecretArn",  # SSM param containing secret ARN
-                    "SERVICE_NOW_USER_ID": service_now_params.get("user_id_param_name", ""),
+                    "SERVICE_NOW_USER_ID": service_now_params.get("user_sys_id_param_name", ""),
                     "PRIVATE_KEY_ASSET_BUCKET": service_now_params.get("private_key_asset_bucket_param_name", ""),
                     "PRIVATE_KEY_ASSET_KEY": service_now_params.get("private_key_asset_key_param_name", ""),
                 }
@@ -347,7 +347,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             ssm_resources = [f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params['instance_id_param_name']}"]
             
             # Add OAuth parameters if they exist (excluding client_secret which is now in Secrets Manager)
-            for param_key in ['client_id_param_name', 'user_id_param_name', 'private_key_asset_bucket_param_name', 'private_key_asset_key_param_name']:
+            for param_key in ['client_id_param_name', 'user_sys_id_param_name', 'private_key_asset_bucket_param_name', 'private_key_asset_key_param_name']:
                 if param_key in service_now_params and service_now_params[param_key]:
                     ssm_resources.append(f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params[param_key]}")
             
@@ -517,7 +517,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 service_now_params.get("client_secret_arn", ""),
             )
             self.security_ir_client.add_environment(
-                "SERVICE_NOW_USER_ID", service_now_params.get("user_id_param_name", "")
+                "SERVICE_NOW_USER_ID", service_now_params.get("user_sys_id_param_name", "")
             )
             self.security_ir_client.add_environment(
                 "PRIVATE_KEY_ASSET_BUCKET", service_now_params.get("private_key_asset_bucket_param_name", "")

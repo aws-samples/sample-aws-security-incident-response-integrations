@@ -396,7 +396,7 @@ class ServiceNowOAuthSetup:
             )
             # Ensure the user has all required roles
             self.ensure_user_has_required_roles(username)
-            return {"username": username, "sys_id": user_sys_id}
+            return {"user_name": username, "sys_id": user_sys_id}
         
         # Create the service account user
         # NOTE: web_service_access_only must be false to allow full API access
@@ -423,7 +423,7 @@ class ServiceNowOAuthSetup:
             
             # Grant all required roles to the new user
             self.ensure_user_has_required_roles(username)
-            return {"username": username, "sys_id": user_sys_id}
+            return {"user_name": username, "sys_id": user_sys_id}
         else:
             print(f"Failed to create service account user: {response.status_code} - {response.text}")
             return None
@@ -1092,7 +1092,7 @@ class ServiceNowClient:
         url: str,
         client_id: str,
         client_secret: str,
-        user_id: str,
+        user_sys_id: str,
         private_key: str,
         integration_module: str = "itsm"
     ) -> "ServiceNowClient":
@@ -1106,7 +1106,7 @@ class ServiceNowClient:
             url: ServiceNow instance URL
             client_id: OAuth client ID
             client_secret: OAuth client secret
-            user_id: ServiceNow user ID (e.g., 'aws_integration')
+            user_sys_id: ServiceNow user sys_id (32-character GUID)
             private_key: PEM-encoded private key for JWT signing
             integration_module: 'itsm' or 'ir'
             
@@ -1124,7 +1124,7 @@ class ServiceNowClient:
         # ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id' and cannot be changed via API
         payload = {
             "iss": client_id,
-            "sub": user_id,  # This should be the user's sys_id, not username
+            "sub": user_sys_id,  # Must be the user's sys_id, not username
             "aud": client_id,
             "iat": int(time.time()),
             "exp": int(time.time()) + 3600,
@@ -1162,7 +1162,7 @@ class ServiceNowClient:
         # Create instance with OAuth authentication using the session
         instance = cls.__new__(cls)
         instance.url = url
-        instance.username = user_id
+        instance.username = user_sys_id
         instance.password = None  # No password for OAuth
         instance.table = "incident" if integration_module == "itsm" else "sn_si_incident"
         instance.client = SnowClient(url, session)  # Pass session directly
@@ -1221,7 +1221,7 @@ class ServiceNowClient:
         client_id = get_param("/SecurityIncidentResponse/serviceNowClientId")
         client_secret_arn = get_param("/SecurityIncidentResponse/serviceNowClientSecretArn")
         client_secret = get_secret(client_secret_arn)
-        user_id = get_param("/SecurityIncidentResponse/serviceNowUserId")
+        user_sys_id = get_param("/SecurityIncidentResponse/serviceNowUserId")
         bucket = get_param("/SecurityIncidentResponse/privateKeyAssetBucket")
         key = get_param("/SecurityIncidentResponse/privateKeyAssetKey")
         
@@ -1230,13 +1230,13 @@ class ServiceNowClient:
         private_key = response['Body'].read().decode('utf-8')
         response['Body'].close()
         
-        print(f"Creating JWT OAuth client for user '{user_id}' with client_id '{client_id}'")
+        print(f"Creating JWT OAuth client for user sys_id '{user_sys_id}' with client_id '{client_id}'")
         
         return cls.from_jwt_oauth(
             url=url,
             client_id=client_id,
             client_secret=client_secret,
-            user_id=user_id,
+            user_sys_id=user_sys_id,
             private_key=private_key,
             integration_module=integration_module
         )
@@ -1557,7 +1557,7 @@ class CDKDeployer:
         instance_id: str,
         client_id: str,
         client_secret: str,
-        user_id: str,
+        user_sys_id: str,
         private_key_path: str,
         integration_module: str,
     ) -> bool:
@@ -1579,7 +1579,7 @@ class CDKDeployer:
             "--parameters", f"{SERVICE_NOW_STACK_NAME}:serviceNowInstanceId={instance_id}",
             "--parameters", f"{SERVICE_NOW_STACK_NAME}:serviceNowClientId={client_id}",
             "--parameters", f"{SERVICE_NOW_STACK_NAME}:serviceNowClientSecret={client_secret}",
-            "--parameters", f"{SERVICE_NOW_STACK_NAME}:serviceNowUserId={user_id}",
+            "--parameters", f"{SERVICE_NOW_STACK_NAME}:serviceNowUserId={user_sys_id}",
             "--parameters", f"{SERVICE_NOW_STACK_NAME}:privateKeyBucket={bucket_name}",
             "--parameters", f"{SERVICE_NOW_STACK_NAME}:integrationModule={integration_module}",
         ]
@@ -1818,7 +1818,7 @@ def deployed_integration(service_now_config, tmp_path_factory):
         # Extract username and sys_id from the returned dict
         # The sys_id is required for JWT OAuth because ServiceNow's oauth_jwt.sub_claim
         # defaults to 'sys_id' and cannot be changed via API
-        service_account_username = service_account_info["username"]
+        service_account_username = service_account_info["user_name"]
         service_account_sys_id = service_account_info["sys_id"]
         print(f"Service account: username='{service_account_username}', sys_id='{service_account_sys_id}'")
 
@@ -1844,7 +1844,7 @@ def deployed_integration(service_now_config, tmp_path_factory):
         instance_id=service_now_config["instance_id"],
         client_id=oauth_config["client_id"],
         client_secret=oauth_config["client_secret"],
-        user_id=service_account_sys_id,  # Use sys_id, not username - required for JWT OAuth
+        user_sys_id=service_account_sys_id,  # Use sys_id, not username - required for JWT OAuth
         private_key_path=str(private_key_path),
         integration_module=service_now_config["integration_module"],
     )

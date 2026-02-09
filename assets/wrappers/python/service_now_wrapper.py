@@ -109,14 +109,14 @@ class ServiceNowClient:
             **kwargs: OAuth configuration parameters including:
                 - client_id_param_name (str): SSM parameter name containing OAuth client ID
                 - client_secret_arn (str): Secret ARN containing OAuth client secret
-                - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+                - user_sys_id_param_name (str): SSM parameter name containing ServiceNow user sys_id
                 - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
                 - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
         self.instance_id = instance_id
         self.client_id_param_name = kwargs.get('client_id_param_name')
         self.client_secret_arn = kwargs.get('client_secret_arn')
-        self.user_id_param_name = kwargs.get('user_id_param_name')
+        self.user_sys_id_param_name = kwargs.get('user_sys_id_param_name')
         self.private_key_asset_bucket_param_name = kwargs.get('private_key_asset_bucket_param_name')
         self.private_key_asset_key_param_name = kwargs.get('private_key_asset_key_param_name')
         self.s3_resource = boto3.resource('s3')
@@ -164,12 +164,12 @@ class ServiceNowClient:
             logger.error(f"Error retrieving secret from Secrets Manager: {str(e)}")
             return None
 
-    def __get_encoded_jwt(self, client_id: str, user_id: str) -> Optional[str]:
+    def __get_encoded_jwt(self, client_id: str, user_sys_id: str) -> Optional[str]:
         """Generate encoded JWT using private key from S3 asset.
 
         Args:
             client_id (str): OAuth client ID for JWT issuer
-            user_id (str): ServiceNow user ID for JWT subject
+            user_sys_id (str): ServiceNow user sys_id for JWT subject
 
         Returns:
             Optional[str]: Encoded JWT or None if generation fails
@@ -193,10 +193,9 @@ class ServiceNowClient:
             
             # NOTE: sub must contain the user's sys_id, not username
             # ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id' and cannot be changed via API
-            # The user_id parameter should store the sys_id value for uniqueness
             payload = {
                 "iss": client_id, # Issuer - OAuth client ID
-                "sub": user_id, # Subject - ServiceNow user sys_id (NOT username)
+                "sub": user_sys_id, # Subject - ServiceNow user sys_id (NOT username)
                 "aud": client_id, # Audience - OAuth client ID
                 "iat": int(time.time()), # Issued at - current timestamp
                 "exp": int(time.time()) + 3600, # Expiration - 1 hour from now
@@ -232,10 +231,10 @@ class ServiceNowClient:
                 # It's already a secret ARN
                 client_secret = self.__get_secret_value(self.client_secret_arn)
             client_id = self.__get_parameter(self.client_id_param_name)
-            user_id = self.__get_parameter(self.user_id_param_name)
+            user_sys_id = self.__get_parameter(self.user_sys_id_param_name)
             
             # Get encoded JWT
-            encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
+            encoded_jwt = self.__get_encoded_jwt(client_id, user_sys_id)
 
             # Prepare request headers, data to get OAuth access token using encoded_jwt
             token_url = f"https://{self.instance_id}.service-now.com/oauth_token.do"
@@ -281,14 +280,14 @@ class ServiceNowClient:
             else:
                 # It's already a secret ARN
                 client_secret = self.__get_secret_value(self.client_secret_arn)
-            user_id = self.__get_parameter(self.user_id_param_name)
+            user_sys_id = self.__get_parameter(self.user_sys_id_param_name)
             
-            if not all([client_id, client_secret, user_id]):
+            if not all([client_id, client_secret, user_sys_id]):
                 logger.error("Missing OAuth2 credentials")
                 return None
             
             # Preparing JWT token
-            encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
+            encoded_jwt = self.__get_encoded_jwt(client_id, user_sys_id)
             
             # Preparing ServiceNowJWTAuth for ServiceNowClient
             auth = ServiceNowJWTAuth(self.instance_id, client_id, client_secret, encoded_jwt)
