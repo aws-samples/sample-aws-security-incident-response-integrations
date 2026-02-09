@@ -93,12 +93,14 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             no_echo=True,
         )
 
-        # Store Service Now User ID parameter
+        # Store Service Now User sys_id parameter
+        # NOTE: Parameter name kept as "serviceNowUserId" for backwards compatibility.
+        # The CLI flag is --sys-id and the value must be the user's sys_id (32-char GUID), not the username.
         service_now_user_id_param = CfnParameter(
             self,
             "serviceNowUserId",
             type="String",
-            description="The ServiceNow user ID for JWT authentication.",
+            description="The ServiceNow user's sys_id for JWT authentication (not the username).",
         )
 
         # Private key bucket parameter (from deploy script)
@@ -142,7 +144,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
             "serviceNowUserIdSSM",
             parameter_name="/SecurityIncidentResponse/serviceNowUserId",
             string_value=service_now_user_id_param.value_as_string,
-            description="Service Now user ID",
+            description="ServiceNow user sys_id for JWT authentication",
         )
         service_now_user_id_ssm.apply_removal_policy(RemovalPolicy.DESTROY)
 

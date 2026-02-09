@@ -11,7 +11,7 @@ section in this document.
   --instance-id <your-servicenow-instance-id> \
   --client-id <your-oauth-client-id> \
   --client-secret <your-oauth-client-secret> \
-  --user-id <your-servicenow-user-id> \
+  --sys-id <your-servicenow-user-sys-id> \
   --private-key-path <path-to-private-key-file> \
   --integration-module <itsm|ir> \
   --log-level <info|error|debug>
@@ -24,7 +24,7 @@ Eg.
   --instance-id dev1234 \
   --client-id test-1234 \
   --client-secret "XXXXXXXXXXXXXXXXXXXX" \
-  --user-id abcd.1234 \
+  --sys-id a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6 \
   --private-key-path private.key \
   --integration-module ir \
   --log-level info
@@ -85,6 +85,7 @@ JWT (JSON Web Token) OAuth authentication uses RSA key pairs to generate signed 
       - First Name: `AWS`
       - Last Name: `Integration`
 4. If you have a user, search with user-id and open the record
+5. Note the user's `sys_id` — you will need this for deployment. The `sys_id` is a 32-character unique identifier (e.g., `a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6`). You can find it by right-clicking the header bar of the user record and selecting "Copy sys_id", or from the URL when viewing the user record.
 5. Assign the following roles under the `Roles` tab by clicking on `Edit`:
    
    **ITSM Mode (incident table):**
@@ -259,7 +260,7 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    - **Access Token Lifespan**: `3600`
    - **Clock skew**: `300`
    - **Token Format**: `Opaque`
-   - **User field**: `User Id`
+   - **User field**: `sys_id`
    - **Enable JTI verification**: ✅
    - **JTI Claim**: `jti`
    - **JWKS Cache Lifespan**: `720`
@@ -600,7 +601,7 @@ The stack provides the following outputs that can be used for integration:
      --instance-id <your-servicenow-instance-id> \
      --client-id <your-oauth-client-id> \
      --client-secret <your-oauth-client-secret> \
-     --user-id <your-servicenow-user-id> \
+     --sys-id <your-servicenow-user-sys-id> \
      --private-key-path <path-to-private-key-file> \
      --integration-module <itsm|ir> \
      --log-level info
@@ -609,7 +610,7 @@ The stack provides the following outputs that can be used for integration:
    **Required Parameters:**
    - `--client-id`: OAuth client ID from ServiceNow OAuth application
    - `--client-secret`: OAuth client secret from ServiceNow OAuth application  
-   - `--user-id`: ServiceNow user ID for JWT authentication
+   - `--sys-id`: ServiceNow user's `sys_id` for JWT authentication (not the username — see [Setup ServiceNow Integration User](#setup-servicenow-integration-user))
    - `--private-key-path`: Path to RSA private key file for JWT signing
    - `--integration-module`: Choose `itsm` for IT Service Management or `ir` for Incident Response module
    
