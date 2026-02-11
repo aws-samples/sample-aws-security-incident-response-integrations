@@ -453,8 +453,15 @@ class IncidentService:
                 ir_case_detail, ir_case_id, jira_fields, jira_status, status_comment
             )
 
+        # Extract comment field if present (add as comment, not update field)
+        update_comment = jira_fields.pop("comment", None)
+
         # Update existing issue
         self.jira_client.update_issue(jira_issue_id, jira_fields)
+
+        # Add comment if present
+        if update_comment:
+            self.jira_client.add_comment(jira_issue_id, update_comment)
 
         # Update status if needed
         if jira_status:
