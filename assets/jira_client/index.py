@@ -383,12 +383,19 @@ class IncidentService:
         Returns:
             Optional[str]: Jira issue ID or None if creation fails
         """
+        # Extract comment field if present (Jira doesn't support comment during creation)
+        initial_comment = jira_fields.pop("comment", None)
+
         # Create new issue
         jira_issue = self.jira_client.create_issue(jira_fields)
         if not jira_issue:
             return None
 
         jira_issue_id = jira_issue.key
+
+        # Add initial comment if present
+        if initial_comment:
+            self.jira_client.add_comment(jira_issue_id, initial_comment)
 
         # Update status as needed
         if jira_status:
