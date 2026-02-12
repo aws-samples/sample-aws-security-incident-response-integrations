@@ -1425,7 +1425,7 @@ class CDKDeployer:
         # Deployment Target Metadata
         self.__is_deployed = self.cloudformation_client.is_stack_deployed(SERVICE_NOW_STACK_NAME)
         account = boto3.client('sts').get_caller_identity()['Account']
-        self.bucket_name = f"snow-key-{account}"
+        self.bucket_name = f"service-now-key-{account}"
 
     def wait_for_stabilization(self) -> None:
         if not self.cloudformation_client.is_stack_stabilized(SERVICE_NOW_STACK_NAME):
@@ -1514,21 +1514,33 @@ class CDKDeployer:
             Bucket name
         """
 
+        from botocore.exceptions import ClientError
+
         region = boto3.Session().region_name or 'us-east-1'
 
-        
-        try:
-            if region == 'us-east-1':
-                self.s3_client.create_bucket(Bucket=self.bucket_name)
-            else:
-                self.s3_client.create_bucket(
-                    Bucket=self.bucket_name,
-                    CreateBucketConfiguration={'LocationConstraint': region}
-                )
-            print(f"Created S3 bucket: {self.bucket_name}")
-        except (self.s3_client.exceptions.BucketAlreadyOwnedByYou, 
-                self.s3_client.exceptions.BucketAlreadyExists):
-            print(f"Using existing S3 bucket: {self.bucket_name}")
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                if region == 'us-east-1':
+                    self.s3_client.create_bucket(Bucket=self.bucket_name)
+                else:
+                    self.s3_client.create_bucket(
+                        Bucket=self.bucket_name,
+                        CreateBucketConfiguration={'LocationConstraint': region}
+                    )
+                print(f"Created S3 bucket: {self.bucket_name}")
+                break
+            except (self.s3_client.exceptions.BucketAlreadyOwnedByYou, 
+                    self.s3_client.exceptions.BucketAlreadyExists):
+                print(f"Using existing S3 bucket: {self.bucket_name}")
+                break
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'OperationAborted' and attempt < max_retries - 1:
+                    wait_time = 10 * (attempt + 1)
+                    print(f"Bucket operation in progress, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(wait_time)
+                else:
+                    raise
         
         # Enable encryption
         try:
@@ -1783,7 +1795,7 @@ def deployed_integration(service_now_config, tmp_path_factory):
     As a workaround, this test creates the webhook resources directly using admin
     basic auth credentials after the CDK stack is deployed.
     """
-    project_root = Path(__file__).parent.parent.parent
+    project_root = Path(__file__).parent.parent.parent.parent
     deployer = CDKDeployer(project_root)
     if deployer.is_deployed:
         deployer.destroy()
