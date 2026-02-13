@@ -7,7 +7,7 @@ with proper parameter passing for different integration types.
 
 Usage:
     ./deploy-integrations-solution.py jira --email user@example.com --url https://example.atlassian.net --token TOKEN --project-key PROJ
-    ./deploy-integrations-solution.py service-now --instance-id example --client-id CLIENT_ID --client-secret SECRET --sys-id USER_SYS_ID --private-key-path ./private.key --integration-module itsm
+    ./deploy-integrations-solution.py service-now --instance-id example --client-id CLIENT_ID --client-secret SECRET --user-sys-id USER_SYS_ID --private-key-path ./private.key --integration-module itsm
     ./deploy-integrations-solution.py slack --bot-token xoxb-... --signing-secret SECRET --workspace-id WORKSPACE_ID
 """
 
@@ -157,7 +157,7 @@ def deploy_servicenow(args):
             "--parameters",
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowClientSecret={args.client_secret}",
             "--parameters",
-            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowUserId={args.sys_id}",  # CDK parameter name kept as serviceNowUserId for backwards compatibility
+            f"AwsSecurityIncidentResponseServiceNowIntegrationStack:serviceNowUserId={args.user_sys_id}",  # CDK parameter name kept as serviceNowUserId for backwards compatibility
             "--parameters",
             f"AwsSecurityIncidentResponseServiceNowIntegrationStack:privateKeyBucket={bucket_name}",
             "--parameters",
@@ -273,7 +273,7 @@ def main():
         "--client-secret", required=True, help="ServiceNow OAuth client secret"
     )
     servicenow_parser.add_argument(
-        "--sys-id", required=True, help="ServiceNow user's sys_id (32-character GUID) for JWT authentication"
+        "--user-sys-id", required=True, help="ServiceNow user's sys_id (32-character GUID) for JWT authentication"
     )
     servicenow_parser.add_argument(
         "--private-key-path", required=True, help="Local path to private key file (e.g., ./private.key)"
@@ -328,7 +328,7 @@ def main():
                 textwrap.dedent("""
                 Please specify 'jira', 'service-now', or 'slack' as the integration type.
                 Example: deploy-integrations-solution jira --email user@example.com --url https://example.atlassian.net --token YOUR_TOKEN --project-key PROJ
-                Example: deploy-integrations-solution service-now --instance-id example --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET --sys-id YOUR_SYS_ID --private-key-path ./private.key --integration-module itsm
+                Example: deploy-integrations-solution service-now --instance-id example --client-id YOUR_CLIENT_ID --client-secret YOUR_CLIENT_SECRET --user-sys-id YOUR_USER_SYS_ID --private-key-path ./private.key --integration-module itsm
                 Example: deploy-integrations-solution slack --bot-token xoxb-... --signing-secret YOUR_SECRET --workspace-id YOUR_WORKSPACE_ID
             """)
             )

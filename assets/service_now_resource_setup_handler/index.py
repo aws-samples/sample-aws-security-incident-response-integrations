@@ -258,8 +258,6 @@ class ServiceNowApiService:
             # Get parameters for JWT OAuth
             client_secret = self.__get_secret_value(self.client_secret_arn)
             client_id = self.__get_parameter(self.client_id_param_name)
-            # user_id parameter should contain the user's sys_id (not username)
-            # because ServiceNow's oauth_jwt.sub_claim defaults to sys_id
             user_sys_id = self.__get_parameter(self.user_sys_id_param_name)
             
             logger.info(f"Getting JWT OAuth token for user sys_id: {user_sys_id[:8]}...")
