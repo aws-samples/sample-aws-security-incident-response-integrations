@@ -23,7 +23,7 @@ def main():
     client_id = get_param("/SecurityIncidentResponse/serviceNowClientId")
     client_secret_arn = get_param("/SecurityIncidentResponse/serviceNowClientSecretArn")
     client_secret = get_secret(client_secret_arn)
-    user_id = get_param("/SecurityIncidentResponse/serviceNowUserId")
+    user_sys_id = get_param("/SecurityIncidentResponse/serviceNowUserId")
     bucket = get_param("/SecurityIncidentResponse/privateKeyAssetBucket")
     key = get_param("/SecurityIncidentResponse/privateKeyAssetKey")
 
@@ -33,14 +33,14 @@ def main():
     response['Body'].close()
 
     print(f"Client ID: {client_id}")
-    print(f"User ID (sys_id): {user_id}")
+    print(f"User sys_id: {user_sys_id}")
 
     # Create JWT
     # NOTE: sub must contain the user's sys_id, not username
     # ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id'
     payload = {
         "iss": client_id,
-        "sub": user_id,  # This should be the user's sys_id, not username
+        "sub": user_sys_id,  # This should be the user's sys_id, not username
         "aud": client_id,
         "iat": int(time.time()),
         "exp": int(time.time()) + 3600,

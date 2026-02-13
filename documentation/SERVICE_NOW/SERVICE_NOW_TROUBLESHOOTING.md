@@ -11,6 +11,7 @@ This document provides detailed information on troubleshooting, validation, and 
 - [Troubleshooting](#troubleshooting)
   - [Common Issues and Solutions](#common-issues-and-solutions)
   - [Diagnostic Steps](#diagnostic-steps)
+  - [Diagnostic Scripts](#diagnostic-scripts)
 - [Security Considerations](#security-considerations)
 
 ## Setup and Configuration
@@ -242,6 +243,70 @@ The JWT tokens include:
 2. Check API Gateway access logs for incoming requests
 3. Verify EventBridge events are being properly routed
 4. Examine DynamoDB for proper incident mapping
+
+### Diagnostic Scripts
+
+Two diagnostic scripts are available in the `scripts/` directory to help troubleshoot incident creation, visibility, and OAuth write permission issues. These scripts replicate the same authentication and API flows used by the deployed Lambda functions, making them useful for isolating problems outside of the AWS infrastructure.
+
+#### Prerequisites
+
+Both scripts require:
+- AWS credentials configured with access to SSM Parameter Store, Secrets Manager, and S3 (for retrieving OAuth configuration and the RSA private key)
+- Python 3 with `requests`, `PyJWT`, `boto3`, and `pysnc` installed
+- The ServiceNow integration stack deployed (scripts read credentials from SSM parameters such as `/SecurityIncidentResponse/serviceNowClientId`)
+
+Set the following environment variables before running:
+
+```bash
+export SERVICENOW_INSTANCE_ID="<your-instance-id>"
+export SERVICENOW_ADMIN_USERNAME="admin"
+export SERVICENOW_ADMIN_PASSWORD="<your-admin-password>"
+export SERVICENOW_INTEGRATION_USERNAME="aws_integration"
+```
+
+#### test_incident_creation.py
+
+This pytest-based script diagnoses incident creation and visibility issues by exercising the same code paths used by the acceptance tests and the notification handler Lambda. It creates an incident using admin credentials, then verifies that both the admin user and the `aws_integration` OAuth user can read it.
+
+**Test classes and what they verify:**
+
+- **TestEnvironmentVariables** — Confirms all required environment variables are set before running other tests.
+- **TestIncidentCreation** — Creates an incident via the admin pysnc client and validates the returned `sys_id` and incident number.
+- **TestAdminVisibility** — Reads the incident back using admin credentials (pysnc and REST API) to confirm it exists and is queryable.
+- **TestOAuthVisibility** — Reads the incident using a JWT OAuth token (the same authentication method the Lambda uses). If these tests fail while admin tests pass, the problem is with the integration user's permissions or OAuth scope in ServiceNow.
+- **TestRecentIncidents** — Queries recently created incidents using both admin and OAuth credentials to verify general query access.
+
+**Run it:**
+
+```bash
+pytest scripts/test_incident_creation.py -v
+```
+
+**When to use it:**
+- Incidents created in ServiceNow are not appearing in AWS Security Incident Response
+- The notification handler Lambda cannot find incidents that were just created
+- You suspect the `aws_integration` user lacks read access to the incident table
+
+#### test_oauth_write.py
+
+This standalone script tests whether the `aws_integration` user can create (and delete) incidents via the ServiceNow REST API using JWT OAuth authentication. It retrieves all credentials from SSM Parameter Store and S3, generates a JWT, exchanges it for an OAuth access token, and attempts to create a test incident.
+
+**Run it:**
+
+```bash
+python scripts/test_oauth_write.py
+```
+
+**What it outputs:**
+- The OAuth client ID and user sys_id being used
+- Whether the OAuth token exchange succeeded
+- The HTTP status code and response body from the incident creation attempt
+- Cleanup status (deletes the test incident if creation succeeded)
+
+**When to use it:**
+- Events are not flowing from AWS to ServiceNow (the Lambda cannot create or update incidents)
+- You suspect the OAuth user lacks write permissions on the incident table
+- You need to verify that JWT signing and OAuth token exchange are working end-to-end
 
 ### Specific Issue Troubleshooting
 
