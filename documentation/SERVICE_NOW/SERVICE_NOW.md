@@ -85,7 +85,9 @@ JWT (JSON Web Token) OAuth authentication uses RSA key pairs to generate signed 
       - First Name: `AWS`
       - Last Name: `Integration`
 4. If you have a user, search with user-id and open the record
-5. Assign the following roles under the `Roles` tab by clicking on `Edit`:
+5. Copy the user's `Sys ID`  
+![Shows getting the User's Sys Id via the hamburger menu in the User Creation scren](../images/user-sys-id.png)
+6. Assign the following roles under the `Roles` tab by clicking on `Edit`:
    
    **ITSM Mode (incident table):**
    - `itil` (Base ITIL role - grants read/write access to incident table)

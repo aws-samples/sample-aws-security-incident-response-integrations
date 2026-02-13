@@ -95,7 +95,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
 
         # Store Service Now User sys_id parameter
         # NOTE: Parameter name kept as "serviceNowUserId" for backwards compatibility.
-        # The CLI flag is --sys-id and the value must be the user's sys_id (32-char GUID), not the username.
+        # The CLI flag is --user-sys-id and the value must be the user's sys_id (32-char GUID), not the username.
         service_now_user_id_param = CfnParameter(
             self,
             "serviceNowUserId",
