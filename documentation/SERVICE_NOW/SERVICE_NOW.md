@@ -11,7 +11,7 @@ section in this document.
   --instance-id <your-servicenow-instance-id> \
   --client-id <your-oauth-client-id> \
   --client-secret <your-oauth-client-secret> \
-  --sys-id <your-servicenow-user-sys-id> \
+  --user-sys-id <your-servicenow-user-sys-id> \
   --private-key-path <path-to-private-key-file> \
   --integration-module <itsm|ir> \
   --log-level <info|error|debug>
@@ -24,7 +24,7 @@ Eg.
   --instance-id dev1234 \
   --client-id test-1234 \
   --client-secret "XXXXXXXXXXXXXXXXXXXX" \
-  --sys-id a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6 \
+  --user-sys-id a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6 \
   --private-key-path private.key \
   --integration-module ir \
   --log-level info
@@ -600,7 +600,7 @@ The stack provides the following outputs that can be used for integration:
      --instance-id <your-servicenow-instance-id> \
      --client-id <your-oauth-client-id> \
      --client-secret <your-oauth-client-secret> \
-     --sys-id <your-servicenow-user-sys-id> \
+     --user-sys-id <your-servicenow-user-sys-id> \
      --private-key-path <path-to-private-key-file> \
      --integration-module <itsm|ir> \
      --log-level info
@@ -609,7 +609,7 @@ The stack provides the following outputs that can be used for integration:
    **Required Parameters:**
    - `--client-id`: OAuth client ID from ServiceNow OAuth application
    - `--client-secret`: OAuth client secret from ServiceNow OAuth application  
-   - `--sys-id`: ServiceNow user's `sys-id` for JWT authentication
+   - `--user-sys-id`: ServiceNow user's `sys-id` for JWT authentication
    - `--private-key-path`: Path to RSA private key file for JWT signing
    - `--integration-module`: Choose `itsm` for IT Service Management or `ir` for Incident Response module
    
