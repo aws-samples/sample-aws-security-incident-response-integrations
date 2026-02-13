@@ -730,7 +730,7 @@ class ServiceNowApiService:
                     request.setRequestHeader('Authorization', api_key);
                     request.setRequestBody(JSON.stringify(payload));
                     
-                    var response = request.execute();
+                    var response = request.executeAsync();
                     gs.info('Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
                     var responseBody = response.getBody();
                     var httpStatus = response.getStatusCode();
@@ -850,7 +850,7 @@ class ServiceNowApiService:
                     request.setRequestHeader('Authorization', api_key);
                     request.setRequestBody(JSON.stringify(payload));
                     
-                    var response = request.execute();
+                    var response = request.executeAsync();
                     gs.info('Security Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
                     var responseBody = response.getBody();
                     var httpStatus = response.getStatusCode();
@@ -982,7 +982,7 @@ class ServiceNowApiService:
                         request.setRequestHeader('Authorization', api_key);
                         request.setRequestBody(JSON.stringify(payload));
                         
-                        var response = request.execute();
+                        var response = request.executeAsync();
                         gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
                         var responseBody = response.getBody();
                         var httpStatus = response.getStatusCode();
@@ -1091,7 +1091,7 @@ class ServiceNowApiService:
                         request.setRequestHeader('Authorization', api_key);
                         request.setRequestBody(JSON.stringify(payload));
                         
-                        var response = request.execute();
+                        var response = request.executeAsync();
                         gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
                         var responseBody = response.getBody();
                         var httpStatus = response.getStatusCode();
