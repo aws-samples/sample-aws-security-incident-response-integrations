@@ -36,8 +36,6 @@ def main():
     print(f"User sys_id: {user_sys_id}")
 
     # Create JWT
-    # NOTE: sub must contain the user's sys_id, not username
-    # ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id'
     payload = {
         "iss": client_id,
         "sub": user_sys_id,  # This should be the user's sys_id, not username
