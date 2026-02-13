@@ -1120,8 +1120,6 @@ class ServiceNowClient:
         url = url.rstrip("/")
         
         # Create JWT assertion
-        # NOTE: sub must contain the user's sys_id, not username
-        # ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id' and cannot be changed via API
         payload = {
             "iss": client_id,
             "sub": user_sys_id,  # Must be the user's sys_id, not username
