@@ -21,7 +21,7 @@ app = cdk.App()
 service_now_params = {
     "instance_id_param_name": "/SecurityIncidentResponse/serviceNowInstanceId",
     "client_id_param_name": "/SecurityIncidentResponse/serviceNowClientId",
-    "user_id_param_name": "/SecurityIncidentResponse/serviceNowUserId",
+    "user_sys_id_param_name": "/SecurityIncidentResponse/serviceNowUserId",
     "private_key_asset_bucket_param_name": "/SecurityIncidentResponse/privateKeyAssetBucket",
     "private_key_asset_key_param_name": "/SecurityIncidentResponse/privateKeyAssetKey",
 }

@@ -106,7 +106,7 @@ class ServiceNowApiService:
             **kwargs: OAuth configuration parameters including:
                 - client_id_param_name (str): SSM parameter name containing OAuth client ID
                 - client_secret_arn (str): Secret ARN containing OAuth client secret
-                - user_id_param_name (str): SSM parameter name containing ServiceNow user ID
+                - user_sys_id_param_name (str): SSM parameter name containing ServiceNow user sys_id
                 - private_key_asset_bucket_param_name (str): SSM parameter name containing S3 bucket for private key asset
                 - private_key_asset_key_param_name (str): SSM parameter name containing S3 object key for private key asset
         """
@@ -114,7 +114,7 @@ class ServiceNowApiService:
         self.instance_id = instance_id
         self.client_id_param_name = kwargs.get('client_id_param_name')
         self.client_secret_arn = kwargs.get('client_secret_arn')
-        self.user_id_param_name = kwargs.get('user_id_param_name')
+        self.user_sys_id_param_name = kwargs.get('user_sys_id_param_name')
         self.private_key_asset_bucket_param_name = kwargs.get('private_key_asset_bucket_param_name')
         self.private_key_asset_key_param_name = kwargs.get('private_key_asset_key_param_name')
         self.secrets_manager_service = SecretsManagerService()
@@ -188,12 +188,12 @@ class ServiceNowApiService:
             logger.error(f"Error getting token url: {str(e)}")
             return None
 
-    def __get_encoded_jwt(self, client_id: str, user_id: str) -> Optional[str]:
+    def __get_encoded_jwt(self, client_id: str, user_sys_id: str) -> Optional[str]:
         """Generate encoded JWT using private key from S3 asset.
 
         Args:
             client_id (str): OAuth client ID for JWT issuer
-            user_id (str): ServiceNow user ID for JWT subject
+            user_sys_id (str): ServiceNow user sys_id for JWT subject (NOT username)
 
         Returns:
             Optional[str]: Encoded JWT or None if generation fails
@@ -211,14 +211,16 @@ class ServiceNowApiService:
             s3_object = self.s3_resource.Object(bucket, key)
             private_key = s3_object.get()['Body'].read().decode('utf-8')
             
-            if not user_id or not client_id:
-                logger.error("Missing user ID or client ID for JWT")
+            if not user_sys_id or not client_id:
+                logger.error("Missing user sys_id or client ID for JWT")
                 return None
             
             # Create JWT payload
+            # NOTE: sub must contain the user's sys_id, not username
+            # ServiceNow's oauth_jwt.sub_claim defaults to 'sys_id' and cannot be changed via API
             payload = {
                 "iss": client_id,  # Issuer - OAuth client ID
-                "sub": user_id,    # Subject - ServiceNow user ID
+                "sub": user_sys_id,  # Subject - ServiceNow user sys_id (NOT username)
                 "aud": client_id,  # Audience - OAuth client ID
                 "iat": int(time.time()),  # Issued at - current timestamp
                 "exp": int(time.time()) + 3600,  # Expiration - 1 hour from now
@@ -241,7 +243,7 @@ class ServiceNowApiService:
         except jwt.InvalidTokenError:  
             logger.error("Invalid token")
             return None
-        
+
     def __get_jwt_oauth_access_token(self) -> Optional[str]:
         """Get OAuth access token using JWT authentication.
 
@@ -256,10 +258,16 @@ class ServiceNowApiService:
             # Get parameters for JWT OAuth
             client_secret = self.__get_secret_value(self.client_secret_arn)
             client_id = self.__get_parameter(self.client_id_param_name)
-            user_id = self.__get_parameter(self.user_id_param_name)
+            user_sys_id = self.__get_parameter(self.user_sys_id_param_name)
             
-            # Get encoded JWT
-            encoded_jwt = self.__get_encoded_jwt(client_id, user_id)
+            logger.info(f"Getting JWT OAuth token for user sys_id: {user_sys_id[:8]}...")
+            
+            # Get encoded JWT with user's sys_id
+            encoded_jwt = self.__get_encoded_jwt(client_id, user_sys_id)
+            
+            if not encoded_jwt:
+                logger.error("Failed to generate encoded JWT")
+                return None
 
             # Prepare request headers, data to get OAuth access token using encoded_jwt
             token_url = self.__get_jwt_oauth_token_url()
@@ -274,7 +282,18 @@ class ServiceNowApiService:
                 'client_secret': client_secret
             }
             response = requests.post(token_url, headers=headers, data=data)
-            return (response.json())['access_token']
+            
+            # Log response status and check for errors
+            if response.status_code != 200:
+                logger.error(f"JWT token request failed: {response.status_code} - {response.text}")
+                return None
+            
+            response_json = response.json()
+            if 'error' in response_json:
+                logger.error(f"JWT token error: {response_json.get('error')} - {response_json.get('error_description')}")
+                return None
+                
+            return response_json['access_token']
         except requests.exceptions.RequestException as e:
             logger.error(f"HTTP request failed: {str(e)}")
             return None
@@ -593,7 +612,7 @@ class ServiceNowApiService:
             rule_payload = {
                 "name": f"{resource_prefix}-business-rule",
                 "collection": "incident",
-                "when": "after",
+                "when": "after",  # Fire after transaction commits
                 "action_insert": True,
                 "action_update": True,
                 "active": True,
@@ -608,10 +627,8 @@ class ServiceNowApiService:
                 }};
                 var gr = new GlideRecord('discovery_credentials');
                 if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                    credential_sys_id = gr.getUniqueValue();
-					var provider = new sn_cc.StandardCredentialsProvider();
-					var credential = provider.getCredentialByID(credential_sys_id);
-					var api_key = credential.getAttribute("password");
+                    // Read password directly from GlideRecord (works with basic_auth type)
+                    var api_key = gr.getValue('password');
                     
                     var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                     var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
@@ -636,17 +653,44 @@ class ServiceNowApiService:
         """,
             }
 
-            # Create Business Rule resource in Service Now using REST API
-            response = requests.post(
+            # Check if business rule already exists
+            check_response = requests.get(
                 f"{base_url}/api/now/table/sys_script",
-                json=rule_payload,
+                params={"sysparm_query": f"name={resource_prefix}-business-rule", "sysparm_fields": "sys_id"},
                 headers=headers,
                 timeout=30,
             )
-
-            logger.info(
-                f"ITSM Business Rule created in Service Now: {json.loads(response.text)}"
-            )
+            existing = check_response.json().get("result", [])
+            
+            if existing:
+                # Update existing business rule - deactivate first to force reload
+                br_sys_id = existing[0]["sys_id"]
+                # Deactivate
+                requests.patch(
+                    f"{base_url}/api/now/table/sys_script/{br_sys_id}",
+                    json={"active": "false"},
+                    headers=headers,
+                    timeout=30,
+                )
+                # Update script, when field, and reactivate
+                response = requests.patch(
+                    f"{base_url}/api/now/table/sys_script/{br_sys_id}",
+                    json={"script": rule_payload["script"], "when": "after", "active": "true"},
+                    headers=headers,
+                    timeout=30,
+                )
+                logger.info(f"ITSM Business Rule updated in Service Now: {br_sys_id}")
+            else:
+                # Create Business Rule resource in Service Now using REST API
+                response = requests.post(
+                    f"{base_url}/api/now/table/sys_script",
+                    json=rule_payload,
+                    headers=headers,
+                    timeout=30,
+                )
+                logger.info(
+                    f"ITSM Business Rule created in Service Now: {json.loads(response.text)}"
+                )
 
             return response
         except Exception as e:
@@ -688,7 +732,7 @@ class ServiceNowApiService:
             rule_payload = {
                 "name": f"{resource_prefix}-ir-business-rule",
                 "collection": "sn_si_incident",
-                "when": "after",
+                "when": "after",  # Fire after transaction commits
                 "action_insert": True,
                 "action_update": True,
                 "active": True,
@@ -703,10 +747,8 @@ class ServiceNowApiService:
                 }};
                 var gr = new GlideRecord('discovery_credentials');
                 if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                    credential_sys_id = gr.getUniqueValue();
-					var provider = new sn_cc.StandardCredentialsProvider();
-					var credential = provider.getCredentialByID(credential_sys_id);
-					var api_key = credential.getAttribute("password");
+                    // Read password directly from GlideRecord (works with basic_auth type)
+                    var api_key = gr.getValue('password');
                     
                     var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                     var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
@@ -731,17 +773,44 @@ class ServiceNowApiService:
         """,
             }
 
-            # Create Business Rule resource in Service Now using REST API
-            response = requests.post(
+            # Check if business rule already exists
+            check_response = requests.get(
+                f"{base_url}/api/now/table/sys_script",
+                params={"sysparm_query": f"name={resource_prefix}-ir-business-rule", "sysparm_fields": "sys_id"},
+                headers=headers,
+                timeout=30,
+            )
+            existing = check_response.json().get("result", [])
+            
+            if existing:
+                # Update existing business rule - deactivate first to force reload
+                br_sys_id = existing[0]["sys_id"]
+                # Deactivate
+                requests.patch(
+                    f"{base_url}/api/now/table/sys_script/{br_sys_id}",
+                    json={"active": "false"},
+                    headers=headers,
+                    timeout=30,
+                )
+                # Update script, when field, and reactivate
+                response = requests.patch(
+                    f"{base_url}/api/now/table/sys_script/{br_sys_id}",
+                    json={"script": rule_payload["script"], "when": "after", "active": "true"},
+                    headers=headers,
+                    timeout=30,
+                )
+                logger.info(f"IR Business Rule updated in Service Now: {br_sys_id}")
+            else:
+                # Create Business Rule resource in Service Now using REST API
+                response = requests.post(
                 f"{base_url}/api/now/table/sys_script",
                 json=rule_payload,
                 headers=headers,
                 timeout=30,
             )
-
-            logger.info(
-                f"IR Business Rule created in Service Now: {json.loads(response.text)}"
-            )
+                logger.info(
+                    f"IR Business Rule created in Service Now: {json.loads(response.text)}"
+                )
 
             return response
         except Exception as e:
@@ -810,10 +879,8 @@ class ServiceNowApiService:
                     
                     var gr = new GlideRecord('discovery_credentials');
                     if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                        credential_sys_id = gr.getUniqueValue();
-                        var provider = new sn_cc.StandardCredentialsProvider();
-                        var credential = provider.getCredentialByID(credential_sys_id);
-                        var api_key = credential.getAttribute("password");
+                        // Read password directly from GlideRecord (works with basic_auth type)
+                        var api_key = gr.getValue('password');
 
                         var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                         var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
@@ -921,10 +988,8 @@ class ServiceNowApiService:
                     
                     var gr = new GlideRecord('discovery_credentials');
                     if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                        credential_sys_id = gr.getUniqueValue();
-                        var provider = new sn_cc.StandardCredentialsProvider();
-                        var credential = provider.getCredentialByID(credential_sys_id);
-                        var api_key = credential.getAttribute("password");
+                        // Read password directly from GlideRecord (works with basic_auth type)
+                        var api_key = gr.getValue('password');
                     
                         var outbound_rest_message_name_str = "{outbound_rest_message_name}";
                         var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
@@ -1008,7 +1073,7 @@ def handler(event, context):
         )
         client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
         client_secret_arn = os.environ.get("SERVICE_NOW_CLIENT_SECRET_ARN")
-        user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+        user_sys_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
         private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
         private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
@@ -1016,7 +1081,7 @@ def handler(event, context):
             instance_id,
             client_id_param_name=client_id_param_name,
             client_secret_arn=client_secret_arn,
-            user_id_param_name=user_id_param_name,
+            user_sys_id_param_name=user_sys_id_param_name,
             private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
             private_key_asset_key_param_name=private_key_asset_key_param_name
         )
