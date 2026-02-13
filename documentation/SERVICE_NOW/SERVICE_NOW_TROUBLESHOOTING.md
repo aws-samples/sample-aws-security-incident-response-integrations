@@ -27,7 +27,7 @@ This document provides detailed information on troubleshooting, validation, and 
      --instance-id <your-servicenow-instance-id> \
      --client-id <your-oauth-client-id> \
      --client-secret <your-oauth-client-secret> \
-     --sys-id <your-servicenow-user-sys-id> \
+     --user-sys-id <your-servicenow-user-sys-id> \
      --private-key-path <path-to-private-key-file> \
      --integration-module <itsm|ir> \
      --log-level info
@@ -36,7 +36,7 @@ This document provides detailed information on troubleshooting, validation, and 
    **Required Parameters:**
    - `--client-id`: OAuth client ID from ServiceNow OAuth application
    - `--client-secret`: OAuth client secret from ServiceNow OAuth application
-   - `--sys-id`: ServiceNow user's `sys_id` (32-character GUID) for JWT authentication
+   - `--user-sys-id`: ServiceNow user's `sys_id` (32-character GUID) for JWT authentication
    - `--private-key-path`: Path to RSA private key file for JWT signing
    - `--integration-module`: Choose `itsm` for IT Service Management or `ir` for Incident Response module
    

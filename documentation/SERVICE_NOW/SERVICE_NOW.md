@@ -300,15 +300,15 @@ data you need below in the [Parameters](#parameters) section.
 
 The ServiceNow integration stack requires the following parameters during deployment:
 
-| Parameter | Description                                                   | Type | Required | Example |
-|-----------|---------------------------------------------------------------|------|----------|--------|
-| `serviceNowInstanceId` | The ServiceNow instance ID (subdomain of your ServiceNow URL) | String | Yes | `dev12345` (from dev12345.service-now.com) |
-| `serviceNowClientId` | The OAuth client ID from ServiceNow OAuth application         | String | Yes | `abc123def456` |
-| `serviceNowClientSecret` | The OAuth client secret from ServiceNow OAuth application     | String | Yes | `********` |
-| `serviceNowUserId` | The ServiceNow user's sys-id for JWT authentication.          |
-| `privateKeyAssetPath` | Local path to the RSA private key file for JWT signing        | String | Yes | `./private.key` |
-| `integrationModule` | ServiceNow integration module type                            | String | Yes | `itsm` (IT Service Management) or `ir` (Incident Response) |
-| `logLevel` | The log level for Lambda functions                            | String | No | `info`, `debug`, or `error` (default) |
+| Parameter | Description                                                   | Type                                                     | Required                                             | Example                                                    |
+|-----------|---------------------------------------------------------------|----------------------------------------------------------|------------------------------------------------------|------------------------------------------------------------|
+| `serviceNowInstanceId` | The ServiceNow instance ID (subdomain of your ServiceNow URL) | String                                                   | Yes                                                  | `dev12345` (from dev12345.service-now.com)                 |
+| `serviceNowClientId` | The OAuth client ID from ServiceNow OAuth application         | String                                                   | Yes                                                  | `abc123def456`                                             |
+| `serviceNowClientSecret` | The OAuth client secret from ServiceNow OAuth application     | String                                                   | Yes                                                  | `********`                                                 |
+| `serviceNowUserId` | The ServiceNow user's sys-id for JWT authentication. | String | Yes | `8b3fede183cbfe90e020f7a6feaad387`                           |
+| `privateKeyAssetPath` | Local path to the RSA private key file for JWT signing        | String                                                   | Yes                                                  | `./private.key`                                            |
+| `integrationModule` | ServiceNow integration module type                            | String                                                   | Yes                                                  | `itsm` (IT Service Management) or `ir` (Incident Response) |
+| `logLevel` | The log level for Lambda functions                            | String                                                   | No                                                   | `info`, `debug`, or `error` (default)                      |
 
 ## Post Deployment Verification
 
