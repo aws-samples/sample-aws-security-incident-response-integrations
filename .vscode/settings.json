@@ -1,5 +1,5 @@
 {
-    "kiroAgent.configureMCP": "Disabled",
+    "kiroAgent.configureMCP": "Enabled",
     "workbench.colorCustomizations": {
         "terminal.integrated.shellIntegration.decorationsEnabled": "true",
         "terminal.selectionForeground": "#ff0000",

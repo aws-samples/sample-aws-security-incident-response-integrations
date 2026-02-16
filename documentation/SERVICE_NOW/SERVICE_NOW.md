@@ -2,7 +2,8 @@
 
 This document provides an overview of the AWS Security Incident Response ServiceNow integration, including its architecture, resources, parameters, and deployment instructions.
 
-## Deployment
+For quick reference, this is the deployment command that needs to be run.  For a step-by-step guide see the [Deployment](#deployment) 
+section in this document.
 
 ```bash
 # Deploy the integration with JWT OAuth authentication
@@ -10,7 +11,7 @@ This document provides an overview of the AWS Security Incident Response Service
   --instance-id <your-servicenow-instance-id> \
   --client-id <your-oauth-client-id> \
   --client-secret <your-oauth-client-secret> \
-  --user-id <your-servicenow-user-id> \
+  --user-sys-id <your-servicenow-user-sys-id> \
   --private-key-path <path-to-private-key-file> \
   --integration-module <itsm|ir> \
   --log-level <info|error|debug>
@@ -23,11 +24,15 @@ Eg.
   --instance-id dev1234 \
   --client-id test-1234 \
   --client-secret "XXXXXXXXXXXXXXXXXXXX" \
-  --user-id abcd.1234 \
+  --user-sys-id a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6 \
   --private-key-path private.key \
   --integration-module ir \
   --log-level info
 ```
+
+## Deployment
+
+Below is a step-by-step guide to deploy the ServiceNow Integration.
 
 ### Integration Module Options
 
@@ -73,25 +78,34 @@ JWT (JSON Web Token) OAuth authentication uses RSA key pairs to generate signed 
 ### Setup ServiceNow Integration User
 
 1. Log in to your ServiceNow instance as an administrator
-2. Navigate to User Administration > Users
+2. Navigate to **User Administration** > **Users**
 3. If you do not have a user, click "New" to create a new user
    1. Fill in the required fields:
       - User ID: `aws_integration` (recommended)
       - First Name: `AWS`
       - Last Name: `Integration`
 4. If you have a user, search with user-id and open the record
-5. Assign the following roles under the `Roles` tab by clicking on `Edit`:
-   - `rest_api_explorer` (or a custom role with permissions to create `Outbound REST Message`)
-   - `web_service_admin` (or a custom role with permissions to create `Outbound REST Message`)
-   - `business_rule_admin` (for performing operations on `Business Rules`)
-   - `incident_manager` (for performing operations on Incidents)
-   - `snc_internal`
+5. Copy the user's `Sys ID`  
+![Shows getting the User's Sys Id via the hamburger menu in the User Creation scren](../images/user-sys-id.png)
+6. Assign the following roles under the `Roles` tab by clicking on `Edit`:
+   
+   **ITSM Mode (incident table):**
+   - `itil` (Base ITIL role - grants read/write access to incident table)
+   
+   **IR Mode (sn_si_incident table):**
    - `sn_si.analyst` (for performing operations on Security Incidents)
    - `sn_si.basic` (for performing operations on Security Incidents)
    - `sn_si.external` (for performing operations on Security Incidents)
    - `sn_si.integration_user` (for performing operations on Security Incidents)
    - `sn_si.manager` (for performing operations on Security Incidents)
    - `sn_si.read` (for performing operations on Security Incidents)
+   
+   **Common roles (both modes):**
+   - `rest_api_explorer` (or a custom role with permissions to create `Outbound REST Message`)
+   - `web_service_admin` (or a custom role with permissions to create `Outbound REST Message`)
+   - `business_rule_admin` (for performing operations on `Business Rules`)
+   - `incident_manager` (for performing operations on Incidents)
+   - `snc_internal` (ServiceNow internal role)
    - `credential_admin` (for storing the sensitive APIKey as a `discovery_credential` encrypted password)
 
 ### Retrieve aws credentials for configuring profile
@@ -222,20 +236,22 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
 
 ### Upload/Add the X.509 Certificate in ServiceNow
 
-1. Navigate to **System Definition > Certificates**
+1. Navigate to **System Definition** > **Certificates**
 2. Click **New** to create a new certificate record
 3. Fill in the required fields:
    - **Name**: `AWS Security IR Integration Certificate`
    - **Format**: `PEM`
    - **Type**: `Trust Store Certificate`
 4. In the **PEM Certificate** field, paste the contents copied in the previous section from `publickey.cer`
-5. Save the certificate record and note the **Sys ID**
+5. Save the certificate record
 ![X.509 Certificate](../images/image-13.png)
+6. On the **System Definition** > **Certificates**, you can get the **Sys ID*. Save the **Sys ID** for latest
+![Copy Sys ID](../images/Image-19.png)
 
 ### Configure OAuth Client Application in ServiceNow
 
 1. Navigate to **System OAuth > Application Registry**
-2. Click **New** and select **Create an OAuth API endpoint for external clients**
+2. Click **New** and select **[Deprecated UI] Create an OAuth JWT API endpoint for external clients**
 3. Fill in the required fields:
    - **Name**: `AWS Security Incident Response Integration`
    - **Client ID**: Generate or provide a unique client ID
@@ -245,7 +261,7 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    - **Access Token Lifespan**: `3600`
    - **Clock skew**: `300`
    - **Token Format**: `Opaque`
-   - **User field**: `User Id`
+   - **User field**: `Sys ID` ## user_name is no longer the recommended approach. Please use Sys ID.
    - **Enable JTI verification**: ✅
    - **JTI Claim**: `jti`
    - **JWKS Cache Lifespan**: `720`
@@ -255,40 +271,44 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
    ![](../images/image-15.png)
 
       ![](../images/image-16.png)
-5. Under the **JWT Verifier Maps** section:
+5. Click Submit to create the Application Registry
+6. Navigate to the `AWS Security Incident Response Integration` entry that was just created under Application Registry.
+7. Under the **JWT Verifier Maps** section:
    1. Click on New
    2. Enter the following details
       - **Name**: `AWS Security Incident Response Integration JWT Verifier`
       - **Sys certificate**: Click on the `Search` icon and select the `x.509` certificate created in the previous steps
    ![](../images/image-17.png)
    ![](../images/image-18.png)
-6. Save the application and note the **Client ID** and **Client Secret**
+8. Save the application.
+9. Note the **Client ID** and **Client Secret** as it will be needed for deployment
 
 **Security Note:** Keep the private key secure and never commit it to version control.
 
 **Best Practice:** Create a dedicated service account rather than using a personal account.
 
-### Secure Your Credentials (Optional)
+### Securing Your Credentials
 
-1. Store your ServiceNow credentials securely
-2. For production environments, consider using:
-   - AWS Secrets Manager
-   - ServiceNow API keys instead of passwords
-3. Rotate credentials regularly according to your security policies
+The deployment script automatically will store your credential in secure storage using AWS Secrets Manager.
+
+### Deploy
+
+Now that you have all the necessary data for deployment see [Deployment](#Deployment) section. You can confirm you all the
+data you need below in the [Parameters](#parameters) section.
 
 ## Parameters
 
 The ServiceNow integration stack requires the following parameters during deployment:
 
-| Parameter | Description | Type | Required | Example |
-|-----------|-------------|------|----------|--------|
-| `serviceNowInstanceId` | The ServiceNow instance ID (subdomain of your ServiceNow URL) | String | Yes | `dev12345` (from dev12345.service-now.com) |
-| `serviceNowClientId` | The OAuth client ID from ServiceNow OAuth application | String | Yes | `abc123def456` |
-| `serviceNowClientSecret` | The OAuth client secret from ServiceNow OAuth application | String | Yes | `********` |
-| `serviceNowUserId` | The ServiceNow user ID for JWT authentication | String | Yes | `aws_integration` |
-| `privateKeyAssetPath` | Local path to the RSA private key file for JWT signing | String | Yes | `./private.key` |
-| `integrationModule` | ServiceNow integration module type | String | Yes | `itsm` (IT Service Management) or `ir` (Incident Response) |
-| `logLevel` | The log level for Lambda functions | String | No | `info`, `debug`, or `error` (default) |
+| Parameter | Description                                                   | Type                                                     | Required                                             | Example                                                    |
+|-----------|---------------------------------------------------------------|----------------------------------------------------------|------------------------------------------------------|------------------------------------------------------------|
+| `serviceNowInstanceId` | The ServiceNow instance ID (subdomain of your ServiceNow URL) | String                                                   | Yes                                                  | `dev12345` (from dev12345.service-now.com)                 |
+| `serviceNowClientId` | The OAuth client ID from ServiceNow OAuth application         | String                                                   | Yes                                                  | `abc123def456`                                             |
+| `serviceNowClientSecret` | The OAuth client secret from ServiceNow OAuth application     | String                                                   | Yes                                                  | `********`                                                 |
+| `serviceNowUserId` | The ServiceNow user's sys-id for JWT authentication. | String | Yes | `8b3fede183cbfe90e020f7a6feaad387`                           |
+| `privateKeyAssetPath` | Local path to the RSA private key file for JWT signing        | String                                                   | Yes                                                  | `./private.key`                                            |
+| `integrationModule` | ServiceNow integration module type                            | String                                                   | Yes                                                  | `itsm` (IT Service Management) or `ir` (Incident Response) |
+| `logLevel` | The log level for Lambda functions                            | String                                                   | No                                                   | `info`, `debug`, or `error` (default)                      |
 
 ## Post Deployment Verification
 
@@ -582,7 +602,7 @@ The stack provides the following outputs that can be used for integration:
      --instance-id <your-servicenow-instance-id> \
      --client-id <your-oauth-client-id> \
      --client-secret <your-oauth-client-secret> \
-     --user-id <your-servicenow-user-id> \
+     --user-sys-id <your-servicenow-user-sys-id> \
      --private-key-path <path-to-private-key-file> \
      --integration-module <itsm|ir> \
      --log-level info
@@ -591,7 +611,7 @@ The stack provides the following outputs that can be used for integration:
    **Required Parameters:**
    - `--client-id`: OAuth client ID from ServiceNow OAuth application
    - `--client-secret`: OAuth client secret from ServiceNow OAuth application  
-   - `--user-id`: ServiceNow user ID for JWT authentication
+   - `--user-sys-id`: ServiceNow user's `sys-id` for JWT authentication
    - `--private-key-path`: Path to RSA private key file for JWT signing
    - `--integration-module`: Choose `itsm` for IT Service Management or `ir` for Incident Response module
    
