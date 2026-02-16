@@ -28,6 +28,7 @@ from .constants import (
     SERVICE_NOW_EVENT_SOURCE,
     LAMBDA_MEMORY_SIZE,
     LAMBDA_TIMEOUT_MINUTES,
+    API_KEY_ROTATION_SCHEDULE_DURATION,
 )
 from .aws_security_incident_response_sample_integrations_common_stack import (
     AwsSecurityIncidentResponseSampleIntegrationsCommonStack,
@@ -434,7 +435,7 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         api_auth_secret.add_rotation_schedule(
             "RotationSchedule",
             rotation_lambda=service_now_secret_rotation_handler,
-            automatically_after=Duration.days(30),
+            automatically_after=API_KEY_ROTATION_SCHEDULE_DURATION,
         )
 
         # Update suppressions for specific resources
@@ -608,13 +609,37 @@ class AwsSecurityIncidentResponseServiceNowIntegrationStack(Stack):
         # Create webhook resource and methods
         webhook_resource = service_now_api_gateway.root.add_resource("webhook")
         webhook_integration = aws_apigateway.LambdaIntegration(
-            service_now_notifications_handler
+            service_now_notifications_handler,
+            proxy=False,
+            integration_responses=[
+                aws_apigateway.IntegrationResponse(
+                    status_code="202",
+                    response_templates={
+                        "application/json": '{"message": "Request accepted for processing"}'
+                    }
+                )
+            ],
+            request_parameters={
+                "integration.request.header.X-Amz-Invocation-Type": "'Event'"
+            },
+            request_templates={
+                "application/json": '{"body": $input.json("$"), "headers": {#foreach($header in $input.params().header.keySet())"$header": "$util.escapeJavaScript($input.params().header.get($header))" #if($foreach.hasNext),#end#end}, "httpMethod": "$context.httpMethod", "isBase64Encoded": false}'
+            },
+            passthrough_behavior=aws_apigateway.PassthroughBehavior.NEVER
         )
 
         webhook_resource.add_method(
             "POST",
             webhook_integration,
             authorizer=service_now_api_gateway_token_authorizer,
+            method_responses=[
+                aws_apigateway.MethodResponse(
+                    status_code="202",
+                    response_models={
+                        "application/json": aws_apigateway.Model.EMPTY_MODEL
+                    }
+                )
+            ]
         )
         # OPTIONS method is automatically added by CORS configuration, no need to add it manually
 
