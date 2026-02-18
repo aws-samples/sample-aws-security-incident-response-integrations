@@ -123,7 +123,7 @@ class ServiceNowApiService:
         
         # Setup Jinja2 environment
         template_dir = os.path.join(os.path.dirname(__file__), 'js_resource_setup_templates')
-        self.jinja_env = Environment(loader=FileSystemLoader(template_dir))
+        self.jinja_env = Environment(loader=FileSystemLoader(template_dir), autoescape=True)
 
     def __render_template(self, template_name: str, **kwargs) -> str:
         """Render a Jinja2 template with provided variables.
