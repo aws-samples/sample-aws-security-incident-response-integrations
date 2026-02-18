@@ -291,6 +291,14 @@ Bootstrap is a prerequisite to deployment. You cannot deploy the solution which 
 
 The deployment script automatically will store your credential in secure storage using AWS Secrets Manager.
 
+### Customizing Lambda Configuration
+
+**Note:** Lambda configurations such as `API_KEY_ROTATION_SCHEDULE_DURATION`, `LAMBDA_MEMORY_SIZE`, and `LAMBDA_TIMEOUT_MINUTES` can be customized by modifying the `aws_security_incident_response_sample_integrations/constants.py` file before deployment. For example, to change the API key rotation schedule from the default 30 days to 60 days, update:
+
+```python
+API_KEY_ROTATION_SCHEDULE_DURATION = Duration.days(60)
+```
+
 ### Deploy
 
 Now that you have all the necessary data for deployment see [Deployment](#Deployment) section. You can confirm you all the

@@ -1,0 +1,32 @@
+(function executeRule(current, previous) {
+    try {
+        var event_type = 'IncidentUpdated';
+        var payload = {
+            "event_type": event_type,
+            "incident_number": current.number.toString(),
+            "short_description": current.short_description.toString(),
+        };
+        var gr = new GlideRecord('discovery_credentials');
+        if (gr.get('name', '{{ apigw_api_key_property_name }}')) {
+            var api_key = gr.getValue('password');
+            
+            var outbound_rest_message_name_str = "{{ outbound_rest_message_name }}";
+            var outbound_rest_message_request_function_name_str = "{{ outbound_rest_message_request_function_name }}";
+            var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
+            request.setRequestHeader('Authorization', api_key);
+            request.setRequestBody(JSON.stringify(payload));
+            
+            var response = request.execute();
+            gs.info('Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
+            var responseBody = response.getBody();
+            var httpStatus = response.getStatusCode();
+            gs.info("Incident Event Response: " + responseBody);
+            gs.info("Incident Event HTTP Status: " + httpStatus);
+        }
+        else {
+            gs.info("Could not find API Key: {{ apigw_api_key_property_name }}");
+        }
+    } catch (error) {
+        gs.error('Error sending incident event: ' + error.message);
+    }
+})(current, previous);

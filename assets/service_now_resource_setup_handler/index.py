@@ -11,6 +11,7 @@ from requests.auth import AuthBase
 import time
 import uuid
 import jwt
+from jinja2 import Environment, FileSystemLoader
 
 # ServiceNowJWTAuth is not used in this file, removing the import
 
@@ -119,6 +120,23 @@ class ServiceNowApiService:
         self.private_key_asset_key_param_name = kwargs.get('private_key_asset_key_param_name')
         self.secrets_manager_service = SecretsManagerService()
         self.s3_resource = boto3.resource('s3')
+        
+        # Setup Jinja2 environment
+        template_dir = os.path.join(os.path.dirname(__file__), 'js_resource_setup_templates')
+        self.jinja_env = Environment(loader=FileSystemLoader(template_dir))
+
+    def __render_template(self, template_name: str, **kwargs) -> str:
+        """Render a Jinja2 template with provided variables.
+        
+        Args:
+            template_name (str): Name of the template file
+            **kwargs: Variables to pass to the template
+            
+        Returns:
+            str: Rendered template content
+        """
+        template = self.jinja_env.get_template(template_name)
+        return template.render(**kwargs)
 
     def __get_parameter(self, param_name: str) -> Optional[str]:
         """
@@ -586,7 +604,7 @@ class ServiceNowApiService:
         resource_prefix,
         apigw_api_key_property_name,
     ):
-        """Create Business Rule to trigger Incident events for ITSM module.
+        """Create Business Rule to trigger Incident created events for ITSM module.
 
         Args:
             outbound_rest_message_name (str): Name of the outbound REST message
@@ -599,7 +617,7 @@ class ServiceNowApiService:
         """
         try:
             logger.info(
-                "Creating ITSM Business Rule in Service Now to publish Incident related events to AWS"
+                "Creating ITSM Business Rule in Service Now to publish incident-created related events to AWS"
             )
 
             # Get headers for ServiceNow API requests
@@ -609,53 +627,26 @@ class ServiceNowApiService:
             base_url = self.__get_request_base_url()
 
             # Business rule for incident events
+            script = self.__render_template(
+                'incident_created_itsm.js.j2',
+                apigw_api_key_property_name=apigw_api_key_property_name,
+                outbound_rest_message_name=outbound_rest_message_name,
+                outbound_rest_message_request_function_name=outbound_rest_message_request_function_name
+            )
+            
             rule_payload = {
-                "name": f"{resource_prefix}-business-rule",
+                "name": f"{resource_prefix}-incident-created-br",
                 "collection": "incident",
                 "when": "async",
                 "action_insert": True,
                 "active": True,
-                "script": f"""
-        (function executeRule(current, previous) {{
-            try {{
-                var event_type = 'IncidentCreated';
-                var payload = {{
-                    "event_type": event_type,
-                    "incident_number": current.number.toString(),
-                    "short_description": current.short_description.toString(),
-                }};
-                var gr = new GlideRecord('discovery_credentials');
-                if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                    // Read password directly from GlideRecord (works with basic_auth type)
-                    var api_key = gr.getValue('password');
-                    
-                    var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                    var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                    var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                    request.setRequestHeader('Authorization', api_key);
-                    request.setRequestBody(JSON.stringify(payload));
-                    
-                    var response = request.execute();
-                    gs.info('Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
-                    var responseBody = response.getBody();
-                    var httpStatus = response.getStatusCode();
-                    gs.info("Incident Event Response: " + responseBody);
-                    gs.info("Incident Event HTTP Status: " + httpStatus);
-                }}
-                else {{
-                    gs.info("Could not find API Key: {apigw_api_key_property_name}");
-                }}
-            }} catch (error) {{
-                gs.error('Error sending incident event: ' + error.message);
-            }}
-        }})(current, previous);
-        """,
+                "script": script,
             }
 
             # Check if business rule already exists
             check_response = requests.get(
                 f"{base_url}/api/now/table/sys_script",
-                params={"sysparm_query": f"name={resource_prefix}-business-rule", "sysparm_fields": "sys_id"},
+                params={"sysparm_query": f"name={resource_prefix}-incident-created-br", "sysparm_fields": "sys_id"},
                 headers=headers,
                 timeout=30,
             )
@@ -674,11 +665,11 @@ class ServiceNowApiService:
                 # Update script, when field, and reactivate
                 response = requests.patch(
                     f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"script": rule_payload["script"], "when": "after", "active": "true"},
+                    json={"script": script, "when": "async", "active": "true", "action_insert": True},
                     headers=headers,
                     timeout=30,
                 )
-                logger.info(f"ITSM Business Rule updated in Service Now: {br_sys_id}")
+                logger.info(f"ITSM Business Rule for incident-created related events updated in Service Now: {br_sys_id}")
             else:
                 # Create Business Rule resource in Service Now using REST API
                 response = requests.post(
@@ -688,13 +679,13 @@ class ServiceNowApiService:
                     timeout=30,
                 )
                 logger.info(
-                    f"ITSM Business Rule created in Service Now: {json.loads(response.text)}"
+                    f"ITSM Business Rule for incident-created related events created in Service Now: {json.loads(response.text)}"
                 )
 
             return response
         except Exception as e:
             logger.error(
-                f"Error while creating ITSM Business Rule in Service Now to publish Incident related events to AWS: {str(e)}"
+                f"Error while creating ITSM Business Rule for incident-created related events in Service Now: {str(e)}"
             )
             return None
 
@@ -705,7 +696,7 @@ class ServiceNowApiService:
         resource_prefix,
         apigw_api_key_property_name,
     ):
-        """Create Business Rule to trigger Incident events for ITSM module.
+        """Create Business Rule to trigger Incident updated events for ITSM module.
 
         Args:
             outbound_rest_message_name (str): Name of the outbound REST message
@@ -718,7 +709,7 @@ class ServiceNowApiService:
         """
         try:
             logger.info(
-                "Creating ITSM Business Rule in Service Now to publish Incident related events to AWS"
+                "Creating ITSM Business Rule in Service Now to publish Incident updated related events to AWS"
             )
 
             # Get headers for ServiceNow API requests
@@ -728,53 +719,26 @@ class ServiceNowApiService:
             base_url = self.__get_request_base_url()
 
             # Business rule for incident events
+            script = self.__render_template(
+                'incident_updated_itsm.js.j2',
+                apigw_api_key_property_name=apigw_api_key_property_name,
+                outbound_rest_message_name=outbound_rest_message_name,
+                outbound_rest_message_request_function_name=outbound_rest_message_request_function_name
+            )
+            
             rule_payload = {
-                "name": f"{resource_prefix}-business-rule",
+                "name": f"{resource_prefix}-incident-updated-br",
                 "collection": "incident",
                 "when": "async",
                 "action_update": True,
                 "active": True,
-                "script": f"""
-        (function executeRule(current, previous) {{
-            try {{
-                var event_type = 'IncidentUpdated';
-                var payload = {{
-                    "event_type": event_type,
-                    "incident_number": current.number.toString(),
-                    "short_description": current.short_description.toString(),
-                }};
-                var gr = new GlideRecord('discovery_credentials');
-                if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                    // Read password directly from GlideRecord (works with basic_auth type)
-                    var api_key = gr.getValue('password');
-                    
-                    var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                    var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                    var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                    request.setRequestHeader('Authorization', api_key);
-                    request.setRequestBody(JSON.stringify(payload));
-                    
-                    var response = request.execute();
-                    gs.info('Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
-                    var responseBody = response.getBody();
-                    var httpStatus = response.getStatusCode();
-                    gs.info("Incident Event Response: " + responseBody);
-                    gs.info("Incident Event HTTP Status: " + httpStatus);
-                }}
-                else {{
-                    gs.info("Could not find API Key: {apigw_api_key_property_name}");
-                }}
-            }} catch (error) {{
-                gs.error('Error sending incident event: ' + error.message);
-            }}
-        }})(current, previous);
-        """,
+                "script": script,
             }
 
             # Check if business rule already exists
             check_response = requests.get(
                 f"{base_url}/api/now/table/sys_script",
-                params={"sysparm_query": f"name={resource_prefix}-business-rule", "sysparm_fields": "sys_id"},
+                params={"sysparm_query": f"name={resource_prefix}-incident-updated-br", "sysparm_fields": "sys_id"},
                 headers=headers,
                 timeout=30,
             )
@@ -793,11 +757,11 @@ class ServiceNowApiService:
                 # Update script, when field, and reactivate
                 response = requests.patch(
                     f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"script": rule_payload["script"], "when": "after", "active": "true"},
+                    json={"script": script, "when": "async", "active": "true", "action_update": True},
                     headers=headers,
                     timeout=30,
                 )
-                logger.info(f"ITSM Business Rule updated in Service Now: {br_sys_id}")
+                logger.info(f"ITSM Business Rule for incident-updated related events updated in Service Now: {br_sys_id}")
             else:
                 # Create Business Rule resource in Service Now using REST API
                 response = requests.post(
@@ -807,13 +771,13 @@ class ServiceNowApiService:
                     timeout=30,
                 )
                 logger.info(
-                    f"ITSM Business Rule created in Service Now: {json.loads(response.text)}"
+                    f"ITSM Business Rule for incident-updated related events created in Service Now: {json.loads(response.text)}"
                 )
 
             return response
         except Exception as e:
             logger.error(
-                f"Error while creating ITSM Business Rule in Service Now to publish Incident related events to AWS: {str(e)}"
+                f"Error while creating ITSM Business Rule for incident-updated related events in Service Now: {str(e)}"
             )
             return None
 
@@ -824,7 +788,7 @@ class ServiceNowApiService:
         resource_prefix,
         apigw_api_key_property_name,
     ):
-        """Create Business Rule to trigger Incident events for IR module.
+        """Create Business Rule to trigger Incident created events for IR module.
 
         Args:
             outbound_rest_message_name (str): Name of the outbound REST message
@@ -837,7 +801,7 @@ class ServiceNowApiService:
         """
         try:
             logger.info(
-                "Creating IR Business Rule in Service Now to publish Security Incident related events to AWS"
+                "Creating IR Business Rule in Service Now to publish Security Incident created related events to AWS"
             )
 
             # Get headers for ServiceNow API requests
@@ -847,53 +811,26 @@ class ServiceNowApiService:
             base_url = self.__get_request_base_url()
 
             # Business rule for security incident events
+            script = self.__render_template(
+                'incident_created_ir.js.j2',
+                apigw_api_key_property_name=apigw_api_key_property_name,
+                outbound_rest_message_name=outbound_rest_message_name,
+                outbound_rest_message_request_function_name=outbound_rest_message_request_function_name
+            )
+            
             rule_payload = {
-                "name": f"{resource_prefix}-ir-business-rule",
+                "name": f"{resource_prefix}-ir-incident-created-br",
                 "collection": "sn_si_incident",
                 "when": "async",
                 "action_insert": True,
                 "active": True,
-                "script": f"""
-        (function executeRule(current, previous) {{
-            try {{
-                var event_type = 'IncidentCreated';
-                var payload = {{
-                    "event_type": event_type,
-                    "incident_number": current.number.toString(),
-                    "short_description": current.short_description.toString(),
-                }};
-                var gr = new GlideRecord('discovery_credentials');
-                if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                    // Read password directly from GlideRecord (works with basic_auth type)
-                    var api_key = gr.getValue('password');
-                    
-                    var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                    var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                    var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                    request.setRequestHeader('Authorization', api_key);
-                    request.setRequestBody(JSON.stringify(payload));
-                    
-                    var response = request.execute();
-                    gs.info('Security Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
-                    var responseBody = response.getBody();
-                    var httpStatus = response.getStatusCode();
-                    gs.info("Security Incident Event Response: " + responseBody);
-                    gs.info("Security Incident Event HTTP Status: " + httpStatus);
-                }}
-                else {{
-                    gs.info("Could not find API Key: {apigw_api_key_property_name}");
-                }}
-            }} catch (error) {{
-                gs.error('Error sending security incident event: ' + error.message);
-            }}
-        }})(current, previous);
-        """,
+                "script": script,
             }
 
             # Check if business rule already exists
             check_response = requests.get(
                 f"{base_url}/api/now/table/sys_script",
-                params={"sysparm_query": f"name={resource_prefix}-ir-business-rule", "sysparm_fields": "sys_id"},
+                params={"sysparm_query": f"name={resource_prefix}-ir-incident-created-br", "sysparm_fields": "sys_id"},
                 headers=headers,
                 timeout=30,
             )
@@ -912,11 +849,11 @@ class ServiceNowApiService:
                 # Update script, when field, and reactivate
                 response = requests.patch(
                     f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"script": rule_payload["script"], "when": "after", "active": "true"},
+                    json={"script": script, "when": "async", "active": "true", "action_insert": True,},
                     headers=headers,
                     timeout=30,
                 )
-                logger.info(f"IR Business Rule updated in Service Now: {br_sys_id}")
+                logger.info(f"IR Business Rule for incident-created related events updated in Service Now: {br_sys_id}")
             else:
                 # Create Business Rule resource in Service Now using REST API
                 response = requests.post(
@@ -927,13 +864,13 @@ class ServiceNowApiService:
             )
 
             logger.info(
-                f"IR Business Rule created in Service Now: {json.loads(response.text)}"
+                f"IR Business Rule for incident-created related events created in Service Now: {json.loads(response.text)}"
             )
 
             return response
         except Exception as e:
             logger.error(
-                f"Error while creating IR Business Rule in Service Now to publish Security Incident related events to AWS: {str(e)}"
+                f"Error while creating IR Business Rule for incident-created related events in Service Now: {str(e)}"
             )
             return None
 
@@ -944,7 +881,7 @@ class ServiceNowApiService:
         resource_prefix,
         apigw_api_key_property_name,
     ):
-        """Create Business Rule to trigger Incident events for IR module.
+        """Create Business Rule to trigger Incident updated events for IR module.
 
         Args:
             outbound_rest_message_name (str): Name of the outbound REST message
@@ -957,7 +894,7 @@ class ServiceNowApiService:
         """
         try:
             logger.info(
-                "Creating IR Business Rule in Service Now to publish Security Incident related events to AWS"
+                "Creating IR Business Rule in Service Now to publish Security Incident updated related events to AWS"
             )
 
             # Get headers for ServiceNow API requests
@@ -967,53 +904,26 @@ class ServiceNowApiService:
             base_url = self.__get_request_base_url()
 
             # Business rule for security incident events
+            script = self.__render_template(
+                'incident_updated_ir.js.j2',
+                apigw_api_key_property_name=apigw_api_key_property_name,
+                outbound_rest_message_name=outbound_rest_message_name,
+                outbound_rest_message_request_function_name=outbound_rest_message_request_function_name
+            )
+            
             rule_payload = {
-                "name": f"{resource_prefix}-ir-business-rule",
+                "name": f"{resource_prefix}-ir-incident-updated-br",
                 "collection": "sn_si_incident",
                 "when": "async",
                 "action_update": True,
                 "active": True,
-                "script": f"""
-        (function executeRule(current, previous) {{
-            try {{
-                var event_type = 'IncidentUpdated';
-                var payload = {{
-                    "event_type": event_type,
-                    "incident_number": current.number.toString(),
-                    "short_description": current.short_description.toString(),
-                }};
-                var gr = new GlideRecord('discovery_credentials');
-                if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                    // Read password directly from GlideRecord (works with basic_auth type)
-                    var api_key = gr.getValue('password');
-                    
-                    var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                    var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                    var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                    request.setRequestHeader('Authorization', api_key);
-                    request.setRequestBody(JSON.stringify(payload));
-                    
-                    var response = request.execute();
-                    gs.info('Security Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
-                    var responseBody = response.getBody();
-                    var httpStatus = response.getStatusCode();
-                    gs.info("Security Incident Event Response: " + responseBody);
-                    gs.info("Security Incident Event HTTP Status: " + httpStatus);
-                }}
-                else {{
-                    gs.info("Could not find API Key: {apigw_api_key_property_name}");
-                }}
-            }} catch (error) {{
-                gs.error('Error sending security incident event: ' + error.message);
-            }}
-        }})(current, previous);
-        """,
+                "script": script,
             }
 
             # Check if business rule already exists
             check_response = requests.get(
                 f"{base_url}/api/now/table/sys_script",
-                params={"sysparm_query": f"name={resource_prefix}-ir-business-rule", "sysparm_fields": "sys_id"},
+                params={"sysparm_query": f"name={resource_prefix}-ir-incident-updated-br", "sysparm_fields": "sys_id"},
                 headers=headers,
                 timeout=30,
             )
@@ -1032,11 +942,11 @@ class ServiceNowApiService:
                 # Update script, when field, and reactivate
                 response = requests.patch(
                     f"{base_url}/api/now/table/sys_script/{br_sys_id}",
-                    json={"script": rule_payload["script"], "when": "after", "active": "true"},
+                    json={"script": script, "when": "async", "active": "true", "action_update": True},
                     headers=headers,
                     timeout=30,
                 )
-                logger.info(f"IR Business Rule updated in Service Now: {br_sys_id}")
+                logger.info(f"IR Business Rule for incident-updated related events updated in Service Now: {br_sys_id}")
             else:
                 # Create Business Rule resource in Service Now using REST API
                 response = requests.post(
@@ -1046,13 +956,13 @@ class ServiceNowApiService:
                 timeout=30,
             )
                 logger.info(
-                    f"IR Business Rule created in Service Now: {json.loads(response.text)}"
+                    f"IR Business Rule for incident-updated related events created in Service Now: {json.loads(response.text)}"
                 )
 
             return response
         except Exception as e:
             logger.error(
-                f"Error while creating IR Business Rule in Service Now to publish Security Incident related events to AWS: {str(e)}"
+                f"Error while creating IR Business Rule for incident-updated related events in Service Now: {str(e)}"
             )
             return None
 
@@ -1086,64 +996,20 @@ class ServiceNowApiService:
             base_url = self.__get_request_base_url()
 
             # Business rule for attachment events on incident table
+            script = self.__render_template(
+                'attachment_itsm.js.j2',
+                apigw_api_key_property_name=apigw_api_key_property_name,
+                outbound_rest_message_name=outbound_rest_message_name,
+                outbound_rest_message_request_function_name=outbound_rest_message_request_function_name
+            )
+            
             rule_payload = {
-                "name": f"{resource_prefix}-attachment-business-rule",
+                "name": f"{resource_prefix}-attachment-br",
                 "collection": "sys_attachment",
                 "when": "async",
                 "action_insert": True,
                 "active": True,
-                "script": f"""
-        (function executeRule(current, previous) {{
-            try {{
-                // Only process attachments for incident table
-                gs.info('The current table name is:' + current.table_name);
-                if (current.table_name != 'incident') {{
-                    return;
-                }}
-                
-                var event_type = 'IncidentUpdated';
-                var incident_sys_id = current.table_sys_id.getDisplayValue().toString();
-				gs.info('The incident sys_id: ' + incident_sys_id);
-                
-                // Get incident record to fetch incident number
-                var incident = new GlideRecord('incident');
-                if (incident.get(incident_sys_id)) {{
-                    var payload = {{
-                        "event_type": event_type,
-                        "incident_number": incident.number.toString(),
-                        "short_description": incident.short_description.toString(),
-                    }};
-                    
-                    var gr = new GlideRecord('discovery_credentials');
-                    if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                        // Read password directly from GlideRecord (works with basic_auth type)
-                        var api_key = gr.getValue('password');
-
-                        var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                        var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                        var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                        request.setRequestHeader('Authorization', api_key);
-                        request.setRequestBody(JSON.stringify(payload));
-                        
-                        var response = request.execute();
-                        gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
-                        var responseBody = response.getBody();
-                        var httpStatus = response.getStatusCode();
-                        gs.info("Attachment Event Response: " + responseBody);
-                        gs.info("Attachment Event HTTP Status: " + httpStatus);
-                    }}
-                    else {{
-                        gs.info("Could not find API Key: {apigw_api_key_property_name}");
-                    }}
-                }} else {{
-                    gs.warn('Could not find incident with sys_id: ' + incident_sys_id);
-                }}
-                
-            }} catch (error) {{
-                gs.error('Error sending incident attachment event: ' + error.message);
-            }}
-        }})(current, previous);
-        """,
+                "script": script,
             }
 
             # Create Business Rule resource in Service Now using REST API
@@ -1195,64 +1061,20 @@ class ServiceNowApiService:
             base_url = self.__get_request_base_url()
 
             # Business rule for attachment events on incident table
+            script = self.__render_template(
+                'attachment_ir.js.j2',
+                apigw_api_key_property_name=apigw_api_key_property_name,
+                outbound_rest_message_name=outbound_rest_message_name,
+                outbound_rest_message_request_function_name=outbound_rest_message_request_function_name
+            )
+            
             rule_payload = {
-                "name": f"{resource_prefix}-attachment-business-rule",
+                "name": f"{resource_prefix}-ir-attachment-br",
                 "collection": "sys_attachment",
                 "when": "async",
                 "action_insert": True,
                 "active": True,
-                "script": f"""
-        (function executeRule(current, previous) {{
-            try {{
-                // Only process attachments for incident table
-                gs.info('The current table name is:' + current.table_name);
-                if (current.table_name != 'sn_si_incident') {{
-                    return;
-                }}
-                
-                var event_type = 'IncidentUpdated';
-                var incident_sys_id = current.table_sys_id.getDisplayValue().toString();
-				gs.info('The incident sys_id: ' + incident_sys_id);
-                
-                // Get incident record to fetch incident number
-                var incident = new GlideRecord('sn_si_incident');
-                if (incident.get(incident_sys_id)) {{
-                    var payload = {{
-                        "event_type": event_type,
-                        "incident_number": incident.number.toString(),
-                        "short_description": incident.short_description.toString(),
-                    }};
-                    
-                    var gr = new GlideRecord('discovery_credentials');
-                    if (gr.get('name', '{apigw_api_key_property_name}')) {{
-                        // Read password directly from GlideRecord (works with basic_auth type)
-                        var api_key = gr.getValue('password');
-                    
-                        var outbound_rest_message_name_str = "{outbound_rest_message_name}";
-                        var outbound_rest_message_request_function_name_str = "{outbound_rest_message_request_function_name}";
-                        var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);
-                        request.setRequestHeader('Authorization', api_key);
-                        request.setRequestBody(JSON.stringify(payload));
-                        
-                        var response = request.execute();
-                        gs.info('Incident attachment event published to AWS Security Incident Response API Gateway: ' + event_type);
-                        var responseBody = response.getBody();
-                        var httpStatus = response.getStatusCode();
-                        gs.info("Attachment Event Response: " + responseBody);
-                        gs.info("Attachment Event HTTP Status: " + httpStatus);
-                    }}
-                    else {{
-                        gs.info("Could not find API Key: {apigw_api_key_property_name}");
-                    }}
-                }} else {{
-                    gs.warn('Could not find incident with sys_id: ' + incident_sys_id);
-                }}
-                
-            }} catch (error) {{
-                gs.error('Error sending incident attachment event: ' + error.message);
-            }}
-        }})(current, previous);
-        """,
+                "script": script,
             }
 
             # Create Business Rule resource in Service Now using REST API
