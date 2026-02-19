@@ -973,7 +973,7 @@ class ServiceNowOAuthSetup:
         )
         
         if response.status_code != 201:
-            print(f"oauth_jwt creation failed: {response.status_code} - {response.text}")
+            print(f"oauth_jwt creation failed with status code: {response.status_code}")
             response.raise_for_status()
         
         oauth_jwt_sys_id = response.json()["result"]["sys_id"]
