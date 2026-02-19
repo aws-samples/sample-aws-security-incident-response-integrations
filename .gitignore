@@ -56,3 +56,4 @@ venv.bak/
 tests/assets/service_now_client/test_service_now_client.py
 cdk.out/*
 .kiro/specs
+.vscode/settings.json
