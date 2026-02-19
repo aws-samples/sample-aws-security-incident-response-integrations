@@ -1491,7 +1491,8 @@ class CDKDeployer:
                 print("Error: ApiAuthSecret not found in stack resources")
                 return None
             
-            print(f"Using API auth secret: {secret_arn}")
+            # Do not log the secret ARN to avoid exposing sensitive information
+            print("Using API auth secret from stack resources")
             secrets = boto3.client('secretsmanager')
             secret_response = secrets.get_secret_value(SecretId=secret_arn)
             secret_dict = json.loads(secret_response['SecretString'])
