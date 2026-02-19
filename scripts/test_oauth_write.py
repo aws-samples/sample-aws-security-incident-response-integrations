@@ -65,7 +65,7 @@ def main():
         sys.exit(1)
 
     oauth_token = response.json()['access_token']
-    print(f"Got OAuth token: {oauth_token[:20]}...")
+    print("Got OAuth token successfully.")
 
     # Try to create an incident
     headers = {
