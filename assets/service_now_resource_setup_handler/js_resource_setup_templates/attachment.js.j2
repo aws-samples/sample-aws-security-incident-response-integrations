@@ -1,7 +1,7 @@
 (function executeRule(current, previous) {
     try {
         gs.info('The current table name is:' + current.table_name);
-        if (current.table_name != 'sn_si_incident') {
+        if (current.table_name != '{{ table_name }}') {
             return;
         }
         
@@ -9,7 +9,7 @@
         var incident_sys_id = current.table_sys_id.getDisplayValue().toString();
         gs.info('The incident sys_id: ' + incident_sys_id);
         
-        var incident = new GlideRecord('sn_si_incident');
+        var incident = new GlideRecord('{{ table_name }}');
         if (incident.get(incident_sys_id)) {
             var payload = {
                 "event_type": event_type,
@@ -20,7 +20,7 @@
             var gr = new GlideRecord('discovery_credentials');
             if (gr.get('name', '{{ apigw_api_key_property_name }}')) {
                 var api_key = gr.getValue('password');
-            
+
                 var outbound_rest_message_name_str = "{{ outbound_rest_message_name }}";
                 var outbound_rest_message_request_function_name_str = "{{ outbound_rest_message_request_function_name }}";
                 var request = new sn_ws.RESTMessageV2(outbound_rest_message_name_str, outbound_rest_message_request_function_name_str);

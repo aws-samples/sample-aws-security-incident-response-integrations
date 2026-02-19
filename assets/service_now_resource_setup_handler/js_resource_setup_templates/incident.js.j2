@@ -1,6 +1,6 @@
 (function executeRule(current, previous) {
     try {
-        var event_type = 'IncidentCreated';
+        var event_type = '{{ event_type }}';
         var payload = {
             "event_type": event_type,
             "incident_number": current.number.toString(),
@@ -17,16 +17,16 @@
             request.setRequestBody(JSON.stringify(payload));
             
             var response = request.execute();
-            gs.info('Security Incident event published to AWS Security Incident Response API Gateway: ' + event_type);
+            gs.info('{{ log_prefix }} event published to AWS Security Incident Response API Gateway: ' + event_type);
             var responseBody = response.getBody();
             var httpStatus = response.getStatusCode();
-            gs.info("Security Incident Event Response: " + responseBody);
-            gs.info("Security Incident Event HTTP Status: " + httpStatus);
+            gs.info("{{ log_prefix }} Event Response: " + responseBody);
+            gs.info("{{ log_prefix }} Event HTTP Status: " + httpStatus);
         }
         else {
             gs.info("Could not find API Key: {{ apigw_api_key_property_name }}");
         }
     } catch (error) {
-        gs.error('Error sending security incident event: ' + error.message);
+        gs.error('Error sending {{ log_prefix_lower }} event: ' + error.message);
     }
 })(current, previous);
