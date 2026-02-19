@@ -978,7 +978,7 @@ class ServiceNowOAuthSetup:
         
         oauth_jwt_sys_id = response.json()["result"]["sys_id"]
         self.created_resources.append(("oauth_jwt", oauth_jwt_sys_id))
-        print(f"Created oauth_jwt with sys_id: {oauth_jwt_sys_id}, client_id: {client_id}")
+        print("Created oauth_jwt record successfully.")
         
         # Step 2: Create jwt_verifier_map to link oauth_jwt to certificate
         print('Creating jwt_verifier_map...')
