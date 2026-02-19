@@ -1051,7 +1051,7 @@ class ServiceNowOAuthSetup:
             try:
                 endpoint = f"{self.url}/api/now/table/{table}/{sys_id}"
                 requests.delete(endpoint, auth=self.auth, headers=self.headers)
-                print(f"Deleted record from {table}")
+                print("Deleted ServiceNow resource during cleanup.")
             except Exception:
                 print("Warning: Failed to delete a ServiceNow resource during cleanup.")
 
