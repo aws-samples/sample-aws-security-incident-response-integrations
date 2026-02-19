@@ -819,7 +819,7 @@ class ServiceNowOAuthSetup:
         
         profiles = response.json().get("result", [])
         if not profiles:
-            print(f"  No oauth_entity_profile found for oauth_entity {oauth_entity_sys_id}")
+            print("  No oauth_entity_profile found for specified oauth_entity")
             # Profile should be auto-created, but if not, we can create one
             print(f"  Creating oauth_entity_profile...")
             response = requests.post(
