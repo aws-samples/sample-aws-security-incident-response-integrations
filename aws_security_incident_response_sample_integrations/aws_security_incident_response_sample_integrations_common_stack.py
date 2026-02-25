@@ -12,8 +12,7 @@ from aws_cdk import (
     aws_lambda_python_alpha as py_lambda,
     aws_dynamodb as dynamodb,
     aws_events as events,
-    aws_logs, Tags,
-    custom_resources as cr
+    aws_logs,
 )
 from .event_bus_logger_construct import EventBusLoggerConstruct
 from cdk_nag import NagSuppressions
@@ -155,14 +154,6 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             )
         )
 
-        poller_logs = aws_logs.LogGroup(
-            self,
-            "SecurityIncidentResponsePollerLogGroup",
-            retention=aws_logs.RetentionDays.ONE_WEEK,
-            removal_policy=RemovalPolicy.DESTROY,
-        )
-        Tags.of(poller_logs).add('purpose', 'security-ir-poller-logs')
-
         self.poller = py_lambda.PythonFunction(
             self,
             "SecurityIncidentResponsePoller",
@@ -177,10 +168,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 "LOG_LEVEL": self.log_level_param.value_as_string,
             },
             role=poller_role,
-            log_group=poller_logs,
         )
-        poller_logs.grant_write(self.poller.role)
-        Tags.of(self.poller).add('purpose', 'security-ir-poller')
 
         self.poller_rule = aws_events.Rule(
             self,
@@ -189,27 +177,6 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             targets=[aws_events_targets.LambdaFunction(self.poller)],
             enabled=False,  # Start disabled
         )
-        # There's a bug in CDK where Tags.of(...) doesn't work for EB Rules https://github.com/aws/aws-cdk/issues/4907
-        tag_cr = cr.AwsCustomResource(self, 'TagPollerRule',
-                                      on_create={
-                                          "service": "EventBridge",
-                                          "action": "tagResource",
-                                          "parameters": {
-                                              "ResourceARN": self.poller_rule.rule_arn,
-                                              "Tags": [
-                                                  {
-                                                      "Key": "purpose",
-                                                      "Value": "security-ir-poller-rule"
-                                                  }
-                                              ]
-                                          },
-                                          "physical_resource_id": cr.PhysicalResourceId.of("TagPollerRule")
-                                      },
-                                      policy=cr.AwsCustomResourcePolicy.from_sdk_calls(
-                                          resources=[self.poller_rule.rule_arn]
-                                      )
-                                      )
-        tag_cr.node.add_dependency(self.poller_rule)
 
         self.poller.add_to_role_policy(
             aws_iam.PolicyStatement(
@@ -277,7 +244,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                     ],
                     "SERVICE_NOW_CLIENT_ID": service_now_params.get("client_id_param_name", ""),
                     "SERVICE_NOW_CLIENT_SECRET_ARN": "/SecurityIncidentResponse/serviceNowClientSecretArn",  # SSM param containing secret ARN
-                    "SERVICE_NOW_USER_ID": service_now_params.get("user_sys_id_param_name", ""),
+                    "SERVICE_NOW_USER_ID": service_now_params.get("user_id_param_name", ""),
                     "PRIVATE_KEY_ASSET_BUCKET": service_now_params.get("private_key_asset_bucket_param_name", ""),
                     "PRIVATE_KEY_ASSET_KEY": service_now_params.get("private_key_asset_key_param_name", ""),
                 }
@@ -347,7 +314,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
             ssm_resources = [f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params['instance_id_param_name']}"]
             
             # Add OAuth parameters if they exist (excluding client_secret which is now in Secrets Manager)
-            for param_key in ['client_id_param_name', 'user_sys_id_param_name', 'private_key_asset_bucket_param_name', 'private_key_asset_key_param_name']:
+            for param_key in ['client_id_param_name', 'user_id_param_name', 'private_key_asset_bucket_param_name', 'private_key_asset_key_param_name']:
                 if param_key in service_now_params and service_now_params[param_key]:
                     ssm_resources.append(f"arn:aws:ssm:{self.region}:{self.account}:parameter{service_now_params[param_key]}")
             
@@ -517,7 +484,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                 service_now_params.get("client_secret_arn", ""),
             )
             self.security_ir_client.add_environment(
-                "SERVICE_NOW_USER_ID", service_now_params.get("user_sys_id_param_name", "")
+                "SERVICE_NOW_USER_ID", service_now_params.get("user_id_param_name", "")
             )
             self.security_ir_client.add_environment(
                 "PRIVATE_KEY_ASSET_BUCKET", service_now_params.get("private_key_asset_bucket_param_name", "")

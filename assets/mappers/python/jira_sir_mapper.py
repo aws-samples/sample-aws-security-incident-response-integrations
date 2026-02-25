@@ -8,6 +8,24 @@ and JIRA fields, statuses, watchers, and closure codes.
 import logging
 from typing import Dict, List, Tuple, Any, Optional
 
+
+class JiraFieldMapping:
+    """Encapsulates mapped JIRA fields with separate handling for comments."""
+
+    def __init__(self, fields: Dict[str, Any], comments: List[str]):
+        self._fields = fields
+        self._comments = comments
+
+    @property
+    def fields(self) -> Dict[str, Any]:
+        """Get JIRA fields (excluding comments)."""
+        return self._fields
+
+    @property
+    def comments(self) -> List[str]:
+        """Get all comments to be added."""
+        return self._comments
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -71,16 +89,18 @@ def map_case_status(sir_case_status: str) -> Tuple[str, Optional[str]]:
     return jira_status, None
 
 
-def map_fields_to_jira(sir_case: Dict[str, Any]) -> Dict[str, Any]:
+def map_fields_to_jira(sir_case: Dict[str, Any], include_additional_info_comment: bool = True) -> JiraFieldMapping:
     """Map AWS Security Incident Response case fields to JIRA fields.
 
     Args:
         sir_case (Dict[str, Any]): Dictionary containing AWS Security Incident Response case data
+        include_additional_info_comment (bool): Whether to include the additional information comment (default: True)
 
     Returns:
-        Dict[str, Any]: Dictionary with mapped fields for JIRA, including comment field for unmapped data
+        JiraFieldMapping: Object containing fields and comments separately
     """
     jira_fields = {}
+    comments = []
     unmapped_fields = {}
 
     # Map fields according to configuration
@@ -99,8 +119,8 @@ def map_fields_to_jira(sir_case: Dict[str, Any]) -> Dict[str, Any]:
                 ):
                     unmapped_fields[key] = value
 
-    # Handle special case for unmapped fields - create comment
-    if unmapped_fields:
+    # Handle special case for unmapped fields - create comment only if requested
+    if unmapped_fields and include_additional_info_comment:
         additional_info = (
             "[AWS Security Incident Response Update] Additional Information: \n"
         )
@@ -139,15 +159,14 @@ def map_fields_to_jira(sir_case: Dict[str, Any]) -> Dict[str, Any]:
             display_name = field_display_names.get(key, key.capitalize())
             additional_info += f"\n{display_name}: {value}"
 
-        # Store as comment instead of appending to description
-        jira_fields["comment"] = additional_info
+        comments.append(additional_info)
 
     # Handle closure code if present
     if "closureCode" in sir_case and sir_case.get("caseStatus") == "Closed":
         closure_code = map_closure_code(sir_case["closureCode"])
         jira_fields[CLOSURE_CODE_FIELD] = closure_code
 
-    return jira_fields
+    return JiraFieldMapping(jira_fields, comments)
 
 
 def map_fields_to_sir(jira_issue: Dict[str, Any]) -> Dict[str, Any]:

@@ -74,7 +74,3 @@ SLACK_COMMAND_SUMMARY = "summary"
 # Lambda configuration constants
 LAMBDA_MEMORY_SIZE = 1024
 LAMBDA_TIMEOUT_MINUTES = 15
-
-# Secrets Manager rotation constants
-from aws_cdk import Duration
-API_KEY_ROTATION_SCHEDULE_DURATION = Duration.days(30)
