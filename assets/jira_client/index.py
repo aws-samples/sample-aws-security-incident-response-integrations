@@ -287,6 +287,7 @@ class CommentService:
             for jira_comment in jira_comment_bodies:
                 if str(jira_comment).strip() == str(sir_comment).strip():
                     add_comment = False
+                    break
 
             if add_comment is True:
                 logger.info(
@@ -337,6 +338,7 @@ class IncidentService:
         ir_case_id: str,
         jira_project_key: str,
         jira_issue_type: str,
+        is_creation: bool = True,
     ) -> Dict[str, Any]:
         """Prepare Jira fields from IR case details.
 
@@ -345,12 +347,13 @@ class IncidentService:
             ir_case_id (str): IR case ID
             jira_project_key (str): Jira project key
             jira_issue_type (str): Jira issue type
+            is_creation (bool): Whether this is for issue creation (default: True)
 
         Returns:
             Dict[str, Any]: Dictionary of Jira fields
         """
-        # Map fields from SIR to JIRA
-        jira_fields = map_fields_to_jira(ir_case_detail)
+        # Map fields from SIR to JIRA, only include additional info comment on creation
+        jira_fields = map_fields_to_jira(ir_case_detail, include_additional_info_comment=is_creation)
 
         # Ensure base fields are set
         jira_fields["summary"] = (
@@ -412,6 +415,13 @@ class IncidentService:
         if jira_issue:
             self.db_service.update_issue_details(ir_case_id, jira_issue_id, jira_issue)
 
+        # Sync existing comments from IR case
+        case_from_ddb = self.db_service.get_case(ir_case_id)
+        if case_from_ddb and "Item" in case_from_ddb and jira_issue:
+            self.process_incident_details(
+                jira_issue, jira_issue_id, case_from_ddb, ir_case_id, ir_case_detail
+            )
+
         logger.info(f"Created Jira issue {jira_issue_id} for new IR case {ir_case_id}")
         return jira_issue_id
 
@@ -467,7 +477,7 @@ class IncidentService:
         if jira_status:
             self.jira_client.update_status(jira_issue_id, jira_status, status_comment)
 
-        # Get Jira issue details
+        # Get Jira issue details (refresh to include any comments we just added)
         jira_issue = self.jira_client.get_issue(jira_issue_id)
         if not jira_issue:
             return jira_issue_id
@@ -556,7 +566,7 @@ class IncidentService:
 
             # Prepare Jira fields
             jira_fields = self.map_sir_fields_to_jira_(
-                ir_case_detail, ir_case_id, jira_project_key, jira_issue_type
+                ir_case_detail, ir_case_id, jira_project_key, jira_issue_type, is_creation=(ir_event_type == "CaseCreated")
             )
 
             # Get status mapping

@@ -71,11 +71,12 @@ def map_case_status(sir_case_status: str) -> Tuple[str, Optional[str]]:
     return jira_status, None
 
 
-def map_fields_to_jira(sir_case: Dict[str, Any]) -> Dict[str, Any]:
+def map_fields_to_jira(sir_case: Dict[str, Any], include_additional_info_comment: bool = True) -> Dict[str, Any]:
     """Map AWS Security Incident Response case fields to JIRA fields.
 
     Args:
         sir_case (Dict[str, Any]): Dictionary containing AWS Security Incident Response case data
+        include_additional_info_comment (bool): Whether to include the additional information comment (default: True)
 
     Returns:
         Dict[str, Any]: Dictionary with mapped fields for JIRA, including comment field for unmapped data
@@ -99,8 +100,8 @@ def map_fields_to_jira(sir_case: Dict[str, Any]) -> Dict[str, Any]:
                 ):
                     unmapped_fields[key] = value
 
-    # Handle special case for unmapped fields - create comment
-    if unmapped_fields:
+    # Handle special case for unmapped fields - create comment only if requested
+    if unmapped_fields and include_additional_info_comment:
         additional_info = (
             "[AWS Security Incident Response Update] Additional Information: \n"
         )
