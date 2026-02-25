@@ -350,19 +350,19 @@ class IncidentService:
             is_creation (bool): Whether this is for issue creation (default: True)
 
         Returns:
-            Dict[str, Any]: Dictionary of Jira fields
+            Dict[str, Any]: Dictionary of Jira fields with comments list
         """
         # Map fields from SIR to JIRA, only include additional info comment on creation
-        jira_fields = map_fields_to_jira(ir_case_detail, include_additional_info_comment=is_creation)
+        mapping = map_fields_to_jira(ir_case_detail, include_additional_info_comment=is_creation)
 
-        # Ensure base fields are set
-        jira_fields["summary"] = (
-            # f"{ir_case_detail.get('title', 'Security IR Case')} - AWS Security Incident Response Case#{ir_case_id}"
-            f"{ir_case_detail.get('title', 'Security IR Case')}"
-        )
+        # Get fields and add base fields
+        jira_fields = mapping.fields
+        jira_fields["summary"] = f"{ir_case_detail.get('title', 'Security IR Case')}"
+        jira_fields["project"] = {"key": jira_project_key}
+        jira_fields["issuetype"] = {"name": jira_issue_type}
 
-        jira_fields["project"] = {"key": jira_project_key}  # Set project key
-        jira_fields["issuetype"] = {"name": jira_issue_type}  # Set issue type
+        # Store comments separately for later processing
+        jira_fields["_comments"] = mapping.comments
 
         return jira_fields
 
@@ -386,8 +386,8 @@ class IncidentService:
         Returns:
             Optional[str]: Jira issue ID or None if creation fails
         """
-        # Extract comment field if present (Jira doesn't support comment during creation)
-        initial_comment = jira_fields.pop("comment", None)
+        # Extract comments from fields
+        comments = jira_fields.pop("_comments", [])
 
         # Create new issue
         jira_issue = self.jira_client.create_issue(jira_fields)
@@ -396,9 +396,9 @@ class IncidentService:
 
         jira_issue_id = jira_issue.key
 
-        # Add initial comment if present
-        if initial_comment:
-            self.jira_client.add_comment(jira_issue_id, initial_comment)
+        # Add all comments
+        for comment in comments:
+            self.jira_client.add_comment(jira_issue_id, comment)
 
         # Update status as needed
         if jira_status:
@@ -463,15 +463,15 @@ class IncidentService:
                 ir_case_detail, ir_case_id, jira_fields, jira_status, status_comment
             )
 
-        # Extract comment field if present (add as comment, not update field)
-        update_comment = jira_fields.pop("comment", None)
+        # Extract comments from fields
+        comments = jira_fields.pop("_comments", [])
 
         # Update existing issue
         self.jira_client.update_issue(jira_issue_id, jira_fields)
 
-        # Add comment if present
-        if update_comment:
-            self.jira_client.add_comment(jira_issue_id, update_comment)
+        # Add all comments
+        for comment in comments:
+            self.jira_client.add_comment(jira_issue_id, comment)
 
         # Update status if needed
         if jira_status:
