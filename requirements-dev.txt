@@ -1,4 +1,18 @@
 -r requirements.txt
+-r assets/jira_client/requirements.txt
+-r assets/jira_notifications_handler/requirements.txt
+-r assets/security_ir_client/requirements.txt
+-r assets/security_ir_poller/requirements.txt
+-r assets/service_now_api_gateway_authorizer/requirements.txt
+-r assets/service_now_client/requirements.txt
+-r assets/service_now_notifications_handler/requirements.txt
+-r assets/service_now_resource_setup_handler/requirements.txt
+-r assets/service_now_secret_rotation_handler/requirements.txt
+-r assets/slack_api_gateway_authorizer/requirements.txt
+-r assets/slack_bolt_layer/requirements.txt
+-r assets/slack_client/requirements.txt
+-r assets/slack_command_handler/requirements.txt
+-r assets/slack_events_bolt_handler/requirements.txt
 pytest>=7.0.0
 pytest-cov
 pytest-xdist
@@ -8,7 +22,10 @@ isort
 mypy
 types-boto3
 types-requests
+boto3-stubs
+boto3-stubs-full
 moto
 bandit
 semgrep
 detect-secrets
+Jinja2>=3.1.0
