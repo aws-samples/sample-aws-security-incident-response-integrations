@@ -347,20 +347,23 @@ class DatabaseService:
             return False
 
     def __get_incident_by_id(
-        self, service_now_incident_id: str
+        self, service_now_incident_id: str, skip_retry: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        Scan DynamoDB table for ServiceNow incident ID with retry logic
+        Scan DynamoDB table for ServiceNow incident ID with optional retry logic
 
         Args:
             service_now_incident_id: The ServiceNow incident ID
+            skip_retry: If True, perform a single lookup without retries (for IncidentCreated events)
 
         Returns:
-            List of matching items
+            List of matching items or None if not found
         """
-        max_retries = 5
-        wait_time = 30
-        time.sleep(wait_time)
+        max_retries = 1 if skip_retry else 5
+        wait_time = 0 if skip_retry else 30
+        
+        if wait_time > 0:
+            time.sleep(wait_time)
 
         for attempt in range(max_retries):
             try:
@@ -383,6 +386,11 @@ class DatabaseService:
                     items.extend(response.get("Items", []))
 
                 if not items:
+                    if skip_retry:
+                        logger.info(
+                            f"ServiceNow incident for {service_now_incident_id} not found in database (new incident)"
+                        )
+                        return None
                     logger.info(
                         f"ServiceNow incident for {service_now_incident_id} not found in database on attempt {attempt + 1}"
                     )
@@ -399,7 +407,12 @@ class DatabaseService:
                         )
                         return item["serviceNowIncidentDetails"]
 
-                # If no item has serviceNowIncidentDetails, retry
+                # If no item has serviceNowIncidentDetails, retry (unless skip_retry)
+                if skip_retry:
+                    logger.info(
+                        f"ServiceNow incident for {service_now_incident_id} exists but missing serviceNowIncidentDetails (new incident)"
+                    )
+                    return None
                 logger.info(
                     f"ServiceNow incident for {service_now_incident_id} missing serviceNowIncidentDetails key in database on attempt {attempt + 1}"
                 )
@@ -411,30 +424,38 @@ class DatabaseService:
                 logger.info(
                     f"ServiceNow incident for {service_now_incident_id} not found in database on attempt {attempt + 1}. Error encountered: str{e}"
                 )
+                if skip_retry:
+                    return None
                 if not self.__should_retry(attempt, max_retries, wait_time):
                     return []
                 wait_time = max(5, wait_time - 5)  # Decrease by 5s, minimum 5s
                 continue
         return None
 
-    def _get_incident_details(self, service_now_incident_id: str) -> Optional[str]:
+    def _get_incident_details(self, service_now_incident_id: str, skip_retry: bool = False) -> Optional[str]:
         """
         Get ServiceNow incident details from the database
 
         Args:
             service_now_incident_id: The ServiceNow incident ID
+            skip_retry: If True, perform a single lookup without retries
 
         Returns:
             ServiceNow incident details or None if not found
         """
         try:
             service_now_incident_details = self.__get_incident_by_id(
-                service_now_incident_id
+                service_now_incident_id, skip_retry=skip_retry
             )
             if not service_now_incident_details:
-                logger.info(
-                    f"All retries completed. Incident details for {service_now_incident_id} not found in database."
-                )
+                if skip_retry:
+                    logger.info(
+                        f"Incident details for {service_now_incident_id} not found in database (quick check)."
+                    )
+                else:
+                    logger.info(
+                        f"All retries completed. Incident details for {service_now_incident_id} not found in database."
+                    )
                 return None
 
             logger.info(
@@ -543,13 +564,18 @@ class ServiceNowService:
         self.service_now_client = ServiceNowClient(instance_id, **kwargs)
 
     def _get_incident_details(
-        self, service_now_incident_id: str
+        self, service_now_incident_id: str, max_retries: int = 5, initial_delay: float = 2.0
     ) -> Optional[Dict[str, Any]]:
         """
-        Get incident details from ServiceNow
+        Get incident details from ServiceNow with retry logic.
+        
+        Retries are needed because the business rule fires during the insert transaction,
+        and the incident may not be committed yet when the webhook is received.
 
         Args:
             service_now_incident_id: The ServiceNow incident ID
+            max_retries: Maximum number of retry attempts (default: 5)
+            initial_delay: Initial delay in seconds between retries (default: 2.0)
 
         Returns:
             Dictionary of incident details or None if retrieval fails
@@ -563,13 +589,35 @@ class ServiceNowService:
             if not self.service_now_client:
                 logger.info("Service Now Client failed to initialize")
             
-            service_now_incident = self.service_now_client.get_incident_with_display_values(
-                service_now_incident_id, integration_module
-            )
+            # Add initial delay to allow transaction to commit
+            logger.info(f"Waiting {initial_delay}s before first query to allow transaction commit")
+            time.sleep(initial_delay)
+            
+            # Retry logic to handle race condition where business rule fires before transaction commits
+            service_now_incident = None
+            delay = initial_delay
+            
+            for attempt in range(max_retries):
+                service_now_incident = self.service_now_client.get_incident_with_display_values(
+                    service_now_incident_id, integration_module
+                )
+                
+                if service_now_incident:
+                    if attempt > 0:
+                        logger.info(f"Successfully retrieved incident {service_now_incident_id} on attempt {attempt + 1}")
+                    break
+                    
+                if attempt < max_retries - 1:
+                    logger.info(
+                        f"Incident {service_now_incident_id} not found on attempt {attempt + 1}, "
+                        f"retrying in {delay}s (transaction may not be committed yet)"
+                    )
+                    time.sleep(delay)
+                    delay = min(delay * 1.5, 5.0)  # Exponential backoff, max 5 seconds
             
             if not service_now_incident:
                 logger.error(
-                    f"Failed to get incident {service_now_incident_id} from ServiceNow"
+                    f"Failed to get incident {service_now_incident_id} from ServiceNow after {max_retries} attempts"
                 )
                 return None
 
@@ -781,7 +829,6 @@ class ServiceNowMessageProcessorService:
             True if processing was successful, False otherwise
         """
         try:
-            # TODO: instead of searching for Incident in DDB using scan to see if the Incident was created or updated, simply use the Event type
             logger.info("Get incident details from SNOW")
             # Get ServiceNow incident details
             service_now_incident_details = self.service_now_service._get_incident_details(
@@ -793,9 +840,14 @@ class ServiceNowMessageProcessorService:
                 )
                 return False
 
+            # For IncidentCreated events, do a quick check without retries
+            # This handles the case where ServiceNow creates the incident first (not from AWS SIR)
+            # For IncidentUpdated events, use retries to wait for the record to be populated
+            skip_retry = (event_type == "IncidentCreated")
+            
             # Get existing incident details from database
             service_now_incident_details_ddb = self.db_service._get_incident_details(
-                incident_number
+                incident_number, skip_retry=skip_retry
             )
 
             # Skip processing if event_type is IncidentCreated and incident already exists in DDB
@@ -988,7 +1040,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
             instance_id_param = os.environ.get("SERVICE_NOW_INSTANCE_ID")
             client_id_param_name = os.environ.get("SERVICE_NOW_CLIENT_ID")
             client_secret_arn = os.environ.get("SERVICE_NOW_CLIENT_SECRET_ARN")
-            user_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
+            user_sys_id_param_name = os.environ.get("SERVICE_NOW_USER_ID")
             private_key_asset_bucket_param_name = os.environ.get("PRIVATE_KEY_ASSET_BUCKET")
             private_key_asset_key_param_name = os.environ.get("PRIVATE_KEY_ASSET_KEY")
 
@@ -998,7 +1050,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
 
             instance_id = parameter_service._get_parameter(instance_id_param)
 
-            if not all([instance_id, client_id_param_name, client_secret_arn, user_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
+            if not all([instance_id, client_id_param_name, client_secret_arn, user_sys_id_param_name, private_key_asset_bucket_param_name, private_key_asset_key_param_name]):
                 logger.error("Failed to retrieve ServiceNow credentials from SSM")
                 return ResponseBuilderService._build_error_response(
                     "Failed to retrieve ServiceNow credentials"
@@ -1016,7 +1068,7 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
                 event_bus_name,
                 client_id_param_name=client_id_param_name,
                 client_secret_arn=client_secret_arn,
-                user_id_param_name=user_id_param_name,
+                user_sys_id_param_name=user_sys_id_param_name,
                 private_key_asset_bucket_param_name=private_key_asset_bucket_param_name,
                 private_key_asset_key_param_name=private_key_asset_key_param_name
             )

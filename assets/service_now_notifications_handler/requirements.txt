@@ -2,4 +2,4 @@ boto3>=1.37.7
 pysnc
 aws-lambda-powertools>=2.30.0
 PyJWT==2.11.0
-cryptography==46.0.4
+cryptography==46.0.5
