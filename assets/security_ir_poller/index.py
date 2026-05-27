@@ -347,9 +347,86 @@ def update_polling_schedule_rate(rule_name: str, schedule_rate: str) -> Dict[str
         raise
 
 
+def get_incident_response_team_members() -> List[Dict[str, str]]:
+    """
+    Fetch the incident response team members from the active AWS Security IR membership.
+
+    Returns:
+        List[Dict[str, str]]: List of team member dicts with email, name, and jobTitle fields.
+            Returns an empty list if no membership is found or an error occurs.
+    """
+    try:
+        # Get membership ID from environment or discover it
+        membership_id = os.environ.get("MEMBERSHIP_ID")
+
+        if not membership_id:
+            # Auto-discover the active membership
+            memberships_response = security_ir_client.list_memberships(maxResults=1)
+            items = memberships_response.get("items", [])
+            if not items:
+                logger.info("No Security IR memberships found")
+                return []
+            membership_id = items[0]["membershipId"]
+            logger.debug(f"Discovered membership ID: {membership_id}")
+
+        membership = security_ir_client.get_membership(membershipId=membership_id)
+        team_members = membership.get("incidentResponseTeam", [])
+        logger.info(f"Retrieved {len(team_members)} incident response team members from membership {membership_id}")
+
+        return team_members
+
+    except Exception as e:
+        logger.error(f"Error fetching membership team members: {str(e)}")
+        return []
+
+
+def merge_team_into_watchers(
+    watchers: List[Dict[str, str]], team_members: List[Dict[str, str]]
+) -> List[Dict[str, str]]:
+    """
+    Merge incident response team members into the case watchers list,
+    avoiding duplicates based on email address.
+
+    Args:
+        watchers (List[Dict[str, str]]): Existing case watchers
+        team_members (List[Dict[str, str]]): Incident response team members from membership
+
+    Returns:
+        List[Dict[str, str]]: Combined list of watchers with team members added
+    """
+    if not team_members:
+        return watchers
+
+    # Build a set of existing watcher emails for dedup (case-insensitive)
+    existing_emails = set()
+    for w in watchers:
+        email = w.get("email", "") if isinstance(w, dict) else w
+        if email:
+            existing_emails.add(email.lower())
+
+    merged = list(watchers)
+    for member in team_members:
+        member_email = member.get("email", "")
+        if member_email and member_email.lower() not in existing_emails:
+            merged.append({
+                "email": member_email,
+                "name": member.get("name", ""),
+                "jobTitle": member.get("jobTitle", ""),
+            })
+            existing_emails.add(member_email.lower())
+
+    if len(merged) > len(watchers):
+        logger.info(
+            f"Added {len(merged) - len(watchers)} incident response team members as watchers"
+        )
+
+    return merged
+
+
 def get_incident_details(case_id: str) -> Dict[str, Any]:
     """
-    Get detailed information for a specific incident.
+    Get detailed information for a specific incident, including incident response
+    team members merged into the watchers list.
 
     Args:
         case_id (str): ID of the case to retrieve
@@ -360,6 +437,11 @@ def get_incident_details(case_id: str) -> Dict[str, Any]:
     incident_request_kwargs = {"caseId": case_id}
     case_details = security_ir_client.get_case(**incident_request_kwargs)
     case_comments = security_ir_client.list_comments(**incident_request_kwargs)
+
+    # Merge incident response team members into watchers
+    case_watchers = case_details.get("watchers", [])
+    team_members = get_incident_response_team_members()
+    case_details["watchers"] = merge_team_into_watchers(case_watchers, team_members)
 
     return {**case_details, "caseComments": case_comments.get("items", [])}
 
