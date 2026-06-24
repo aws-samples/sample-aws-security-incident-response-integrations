@@ -112,7 +112,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.domain_layer = aws_lambda.LayerVersion(
             self,
             "DomainLayer",
-            layer_name="security-incident-response-domain-layer",
+            layer_version_name="security-incident-response-domain-layer",
             code=aws_lambda.Code.from_asset(
                 path.join(path.dirname(__file__), "..", "assets/domain"),
             ),
@@ -123,7 +123,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.mappers_layer = aws_lambda.LayerVersion(
             self,
             "MappersLayer",
-            layer_name="security-incident-response-mappers-layer",
+            layer_version_name="security-incident-response-mappers-layer",
             code=aws_lambda.Code.from_asset(
                 path.join(path.dirname(__file__), "..", "assets/mappers"),
             ),
@@ -134,7 +134,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.wrappers_layer = aws_lambda.LayerVersion(
             self,
             "WrappersLayer",
-            layer_name="security-incident-response-wrappers-layer",
+            layer_version_name="security-incident-response-wrappers-layer",
             code=aws_lambda.Code.from_asset(
                 path.join(path.dirname(__file__), "..", "assets/wrappers"),
             ),

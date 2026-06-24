@@ -119,7 +119,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_bolt_layer = aws_lambda.LayerVersion(
             self,
             "SlackBoltLayer",
-            layer_name="security-incident-response-slack-bolt-layer",
+            layer_version_name="security-incident-response-slack-bolt-layer",
             code=aws_lambda.Code.from_asset(
                 path.join(path.dirname(__file__), "..", "assets/slack_bolt_layer"),
             ),
