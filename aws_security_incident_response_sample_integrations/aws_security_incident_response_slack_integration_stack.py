@@ -119,6 +119,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_bolt_layer = aws_lambda.LayerVersion(
             self,
             "SlackBoltLayer",
+            layer_version_name="security-incident-response-slack-bolt-layer",
             code=aws_lambda.Code.from_asset(
                 path.join(path.dirname(__file__), "..", "assets/slack_bolt_layer"),
             ),
@@ -133,6 +134,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_client_role = aws_iam.Role(
             self,
             "SecurityIncidentResponseSlackClientRole",
+            role_name="security-incident-response-slack-client-role",
             assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
             description="Custom role for Security Incident Response Slack Client Lambda function",
         )
@@ -156,6 +158,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_client = py_lambda.PythonFunction(
             self,
             "SecurityIncidentResponseSlackClient",
+            function_name="security-incident-response-slack-client",
             entry=path.join(path.dirname(__file__), "..", "assets/slack_client"),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
             timeout=Duration.minutes(15),
@@ -174,6 +177,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_client_rule = aws_events.Rule(
             self,
             "slack-client-rule",
+            rule_name="security-incident-response-slack-client-rule",
             description="Rule to send all events to Slack Lambda function",
             event_pattern=aws_events.EventPattern(source=[SECURITY_IR_EVENT_SOURCE]),
             event_bus=event_bus,
@@ -232,6 +236,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         api_gateway_logging_role = aws_iam.Role(
             self,
             "ApiGatewayLoggingRole",
+            role_name="security-incident-response-apigw-logging-role",
             assumed_by=aws_iam.ServicePrincipal("apigateway.amazonaws.com"),
             description="Role for API Gateway to write logs to CloudWatch",
             managed_policies=[
@@ -285,7 +290,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
                     aws_logs.LogGroup(
                         self,
                         "SlackApiGatewayLogs",
-                        log_group_name=f"/aws/apigateway/SlackWebhookApi-{self.node.addr}",
+                        log_group_name="/aws/apigateway/security-incident-response-slack-webhook",
                         retention=aws_logs.RetentionDays.ONE_WEEK,
                         removal_policy=RemovalPolicy.DESTROY,
                     )
@@ -334,6 +339,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_events_bolt_handler_role = aws_iam.Role(
             self,
             "SlackEventsBoltHandlerRole",
+            role_name="security-incident-response-slack-events-handler-role",
             assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
             description="Custom role for Slack Events Bolt Handler Lambda function",
         )
@@ -400,6 +406,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_events_bolt_handler = py_lambda.PythonFunction(
             self,
             "SlackEventsBoltHandler",
+            function_name="security-incident-response-slack-events-handler",
             entry=path.join(
                 path.dirname(__file__), "..", "assets/slack_events_bolt_handler"
             ),
@@ -421,6 +428,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_notifications_rule = aws_events.Rule(
             self,
             "SlackNotificationsRule",
+            rule_name="security-incident-response-slack-notifications-rule",
             description="Rule to capture events from Slack events handler",
             event_pattern=aws_events.EventPattern(source=[SLACK_EVENT_SOURCE]),
             event_bus=event_bus,
@@ -457,6 +465,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_command_handler_role = aws_iam.Role(
             self,
             "SlackCommandHandlerRole",
+            role_name="security-incident-response-slack-command-handler-role",
             assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
             description="Custom role for Slack Command Handler Lambda function",
         )
@@ -522,6 +531,7 @@ class AwsSecurityIncidentResponseSlackIntegrationStack(Stack):
         slack_command_handler = py_lambda.PythonFunction(
             self,
             "SlackCommandHandler",
+            function_name="security-incident-response-slack-command-handler",
             entry=path.join(
                 path.dirname(__file__), "..", "assets/slack_command_handler"
             ),
