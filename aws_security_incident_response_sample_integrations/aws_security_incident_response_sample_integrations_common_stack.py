@@ -220,6 +220,8 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                     "security-ir:ListCases",
                     "security-ir:CreateCase",
                     "security-ir:ListComments",
+                    "security-ir:GetMembership",
+                    "security-ir:ListMemberships",
                     "events:PutEvents",
                     "events:DescribeRule",
                     "events:ListRules",
