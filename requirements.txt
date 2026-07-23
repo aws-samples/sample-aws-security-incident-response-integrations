@@ -1,7 +1,7 @@
 # Top Line Requirements
 aws-cdk-lib>=2.180.0
 aws_cdk.aws_lambda_python_alpha>=2.180.0a0
-constructs>=10.6.0,<11.0.0
+constructs>=10.7.1,<11.0.0
 cdk-nag>=2.38.1
 boto3
 botocore
