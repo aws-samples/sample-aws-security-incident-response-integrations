@@ -1,6 +1,6 @@
 requests==2.32.5
+PyJWT==2.12.1
 boto3>=1.42.93
-PyJWT==2.11.0
 pysnc
 aws-lambda-powertools>=2.30.0
 Jinja2>=3.1.6
