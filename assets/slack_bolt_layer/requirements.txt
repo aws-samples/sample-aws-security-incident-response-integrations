@@ -1,2 +1,2 @@
-slack-bolt>=1.28.0
+slack-bolt>=1.30.0
 slack-sdk>=3.39.0
