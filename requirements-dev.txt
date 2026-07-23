@@ -26,6 +26,5 @@ boto3-stubs
 boto3-stubs-full
 moto
 bandit
-semgrep
 detect-secrets
-Jinja2>=3.1.0
+Jinja2>=3.1.6
