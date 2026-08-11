@@ -13,7 +13,7 @@
 -r assets/slack_client/requirements.txt
 -r assets/slack_command_handler/requirements.txt
 -r assets/slack_events_bolt_handler/requirements.txt
-pytest>=7.0.0
+pytest>=9.1.1
 pytest-cov
 pytest-xdist
 pytest-mock
