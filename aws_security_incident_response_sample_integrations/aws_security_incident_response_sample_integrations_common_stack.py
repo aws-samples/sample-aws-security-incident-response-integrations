@@ -76,6 +76,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.table = dynamodb.Table(
             self,
             "IncidentsTable",
+            table_name="security-incident-response-incidents-table",
             partition_key=dynamodb.Attribute(
                 name="PK", type=dynamodb.AttributeType.STRING
             ),
@@ -111,6 +112,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.domain_layer = aws_lambda.LayerVersion(
             self,
             "DomainLayer",
+            layer_version_name="security-incident-response-domain-layer",
             code=aws_lambda.Code.from_asset(
                 path.join(path.dirname(__file__), "..", "assets/domain"),
             ),
@@ -121,6 +123,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.mappers_layer = aws_lambda.LayerVersion(
             self,
             "MappersLayer",
+            layer_version_name="security-incident-response-mappers-layer",
             code=aws_lambda.Code.from_asset(
                 path.join(path.dirname(__file__), "..", "assets/mappers"),
             ),
@@ -131,6 +134,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.wrappers_layer = aws_lambda.LayerVersion(
             self,
             "WrappersLayer",
+            layer_version_name="security-incident-response-wrappers-layer",
             code=aws_lambda.Code.from_asset(
                 path.join(path.dirname(__file__), "..", "assets/wrappers"),
             ),
@@ -145,6 +149,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         poller_role = aws_iam.Role(
             self,
             "SecurityIncidentResponsePollerRole",
+            role_name="security-incident-response-poller-role",
             assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
             description="Custom role for Security Incident Response Poller Lambda function",
         )
@@ -158,6 +163,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         poller_logs = aws_logs.LogGroup(
             self,
             "SecurityIncidentResponsePollerLogGroup",
+            log_group_name="/aws/lambda/security-incident-response-poller",
             retention=aws_logs.RetentionDays.ONE_WEEK,
             removal_policy=RemovalPolicy.DESTROY,
         )
@@ -166,6 +172,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.poller = py_lambda.PythonFunction(
             self,
             "SecurityIncidentResponsePoller",
+            function_name="security-incident-response-poller-function",
             entry=path.join(path.dirname(__file__), "..", "assets/security_ir_poller"),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
             timeout=Duration.minutes(15),
@@ -185,6 +192,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.poller_rule = aws_events.Rule(
             self,
             "SecurityIncidentResponsePollerRule",
+            rule_name="security-incident-response-poller-schedule",
             schedule=aws_events.Schedule.rate(duration=Duration.minutes(1)),
             targets=[aws_events_targets.LambdaFunction(self.poller)],
             enabled=False,  # Start disabled
@@ -250,6 +258,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         security_ir_client_role = aws_iam.Role(
             self,
             "SecurityIncidentResponseClientRole",
+            role_name="security-incident-response-client-role",
             assumed_by=aws_iam.ServicePrincipal("lambda.amazonaws.com"),
             description="Custom role for Security Incident Response Client Lambda function",
         )
@@ -288,6 +297,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         self.security_ir_client = py_lambda.PythonFunction(
             self,
             "SecurityIncidentResponseClient",
+            function_name="security-incident-response-client-function",
             entry=path.join(path.dirname(__file__), "..", "assets/security_ir_client"),
             runtime=aws_lambda.Runtime.PYTHON_3_13,
             timeout=Duration.minutes(15),
@@ -303,6 +313,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
         security_ir_client_rule = aws_events.Rule(
             self,
             "security-ir-client-rule",
+            rule_name="security-incident-response-client-rule",
             description="Rule to send all events to Security Incident Response Client lambda function",
             event_pattern=aws_events.EventPattern(
                 source=[JIRA_EVENT_SOURCE, SERVICE_NOW_EVENT_SOURCE, SLACK_EVENT_SOURCE]

@@ -367,10 +367,10 @@ def get_incident_response_team_members() -> List[Dict[str, str]]:
         logger.debug(f"Discovered active membership ID: {membership_id}")
 
         membership = security_ir_client.get_membership(membershipId=membership_id)
-        team_members = membership.get("incidentResponseTeam", [])
-        logger.info(f"Retrieved {len(team_members)} incident response team members from membership {membership_id}")
+        ir_team_members = membership.get("incidentResponseTeam", [])
+        logger.info(f"Retrieved {len(ir_team_members)} incident response team members from membership {membership_id}")
 
-        return team_members
+        return ir_team_members
 
     except Exception as e:
         logger.error(f"Error fetching membership team members: {str(e)}")
