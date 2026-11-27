@@ -31,7 +31,6 @@ logger.setLevel(logging.INFO)  # Set to INFO first
 
 # Get log level from environment variable
 log_level = os.environ.get("LOG_LEVEL", "info").lower()
-print(f"LOG_LEVEL environment variable: {log_level}")  # Debug print
 if log_level == "debug":
     logger.setLevel(logging.DEBUG)
 elif log_level == "info":
@@ -39,8 +38,6 @@ elif log_level == "info":
 else:
     # Default to ERROR level
     logger.setLevel(logging.ERROR)
-
-print(f"Logger level set to: {logger.level}")  # Debug print
 
 # Initialize AWS clients
 events_client = boto3.client("events")
