@@ -278,7 +278,7 @@ class AwsSecurityIncidentResponseSampleIntegrationsCommonStack(Stack):
                         "instance_id_param_name"
                     ],
                     "SERVICE_NOW_CLIENT_ID": service_now_params.get("client_id_param_name", ""),
-                    "SERVICE_NOW_CLIENT_SECRET_ARN": "/SecurityIncidentResponse/serviceNowClientSecretArn",  # SSM param containing secret ARN
+                    "SERVICE_NOW_CLIENT_SECRET_ARN": "/SecurityIncidentResponse/serviceNowClientSecretArn",  # nosec B105 - SSM parameter name, not a secret
                     "SERVICE_NOW_USER_ID": service_now_params.get("user_sys_id_param_name", ""),
                     "PRIVATE_KEY_ASSET_BUCKET": service_now_params.get("private_key_asset_bucket_param_name", ""),
                     "PRIVATE_KEY_ASSET_KEY": service_now_params.get("private_key_asset_key_param_name", ""),
